@@ -40,6 +40,7 @@ size_t get_datatype_size(DataType type);
 enum KNOperatorType {
   KN_UNKOWN = 1000,
   KN_INPUT_OP = 1001,
+  KN_OUTPUT_OP = 1002,
   KN_MATMUL_OP = 1003,
   // ElementUnary
   KN_EXP_OP = 1100,
@@ -64,10 +65,12 @@ NLOHMANN_JSON_SERIALIZE_ENUM(KNOperatorType,
                              {
                                  {KN_UNKOWN, "kn_unkown"},
                                  {KN_INPUT_OP, "kn_input_op"},
+                                 {KN_OUTPUT_OP, "kn_output_op"},
                                  {KN_MATMUL_OP, "kn_matmul_op"},
                                  {KN_REDUCTION_0_OP, "kn_reduction_0_op"},
                                  {KN_REDUCTION_1_OP, "kn_reduction_1_op"},
                                  {KN_REDUCTION_2_OP, "kn_reduction_2_op"},
+                                 {KN_RMS_NORM_OP, "kn_rms_norm_op"},
                                  {KN_EXP_OP, "kn_exp_op"},
                                  {KN_SQUARE_OP, "kn_square_op"},
                                  {KN_SQRT_OP, "kn_sqrt_op"},
@@ -144,6 +147,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
         {TB_REDUCTION_0_TO_DIMX_OP, "tb_reduction_0_to_dimx_op"},
         {TB_REDUCTION_1_TO_DIMX_OP, "tb_reduction_1_to_dimx_op"},
         {TB_REDUCTION_2_TO_DIMX_OP, "tb_reduction_2_to_dimx_op"},
+        {TB_RMS_NORM_OP, "tb_rms_norm_op"},
         {TB_CONCAT_0_OP, "tb_concat_0_op"},
         {TB_CONCAT_1_OP, "tb_concat_1_op"},
         {TB_CONCAT_2_OP, "tb_concat_2_op"},

@@ -85,7 +85,7 @@ PyMODINIT_FUNC PyInit___mirage_launcher(void) {
 def gen_empty_tensor(alloc_size, shape, stride, device, dtype=torch.float16):
     return torch.empty(alloc_size, dtype=dtype, device=device).as_strided(shape, stride)
 
-class KNGraph:  
+class KNGraph:
     def __init__(self, graph):  
         self.cygraph = graph
         
@@ -93,9 +93,20 @@ class KNGraph:
         self.run = None
         self._cached_results = None
     
-    def new_input(self, dims: tuple, dtype: dtype = float16) -> DTensor:
-        return self.cygraph.new_input(dims, dtype)
+    def new_input(self, dims: tuple, strides: tuple = None, dtype: dtype = float16) -> DTensor:
+        # use the default strided layout if strides = None
+        if strides is None:
+            total_elements = 1
+            strides = []
+            for d in reversed(dims):
+                strides.append(total_elements)
+                total_elements *= d
+            strides = reversed(strides)
+        return self.cygraph.new_input(dims, tuple(strides), dtype)
     
+    def mark_output(self, A: DTensor, strides: tuple = None):
+        return self.cygraph.mark_output(A, strides)
+
     def matmul(self, A: DTensor, B: DTensor) -> DTensor:
         return self.cygraph.matmul(A, B)
     
@@ -116,7 +127,10 @@ class KNGraph:
       
     def div(self, A: DTensor, B: DTensor):
         return self.cygraph.div(A, B)
-    
+
+    def rms_norm(self, A: DTensor, normalized_shape: tuple):
+        return self.cygraph.rms_norm(A, normalized_shape)
+
     def customized(self, inputs: list[DTensor], bgraph: TBGraph) -> list[DTensor]:
         return self.cygraph.customized(inputs, bgraph.cygraph)
 
@@ -149,13 +163,17 @@ class KNGraph:
         
         input_tensors = kwargs.get("inputs", [])
         input_strides = [tensor.stride() for tensor in input_tensors]
+        # Check that the input_strides match uGraph's specification
+        dtensors = self.cygraph.get_input_dtensors()
+        assert len(dtensors) == len(input_tensors), "Given number of inputs do not match the uGraph's inputs"
+        for i in range(len(dtensors)):
+            assert input_strides[i] == self.cygraph.get_input_dtensor_layout(dtensors[i]), "Input tensor's strides do not match the uGraph's input tensor stride"
         target_cc = kwargs.get("target_cc", torch.cuda.get_device_properties(0).major * 10 
                                + torch.cuda.get_device_properties(0).minor)
         
         result = generate_cuda_program(self.cygraph, 
                                        target_cc=target_cc, 
-                                       input_strides=input_strides, 
-                                       output_tensors=kwargs.get("outputs", []))
+                                       input_strides=input_strides)
         # print(result)
         
         MIRAGE_ROOT = os.environ.get('MIRAGE_ROOT', 
@@ -210,21 +228,21 @@ class KNGraph:
         self._cached_results = result
         return self._cached_results
 
-    def superoptimize(self, imaps : list = None, omaps : list = None, griddims : list = None, blockdims : list = None, fmaps : list = None, franges : list = None, config : str = None):
-        cygraphs = search(self.cygraph, imaps=imaps, omaps=omaps, griddims=griddims, blockdims=blockdims, fmaps=fmaps, franges=franges, default_config=config)
+    def superoptimize(self, imaps : list = None, omaps : list = None, griddims : list = None, blockdims : list = None, fmaps : list = None, franges : list = None, verbose : bool = False, config : str = None):
+        cygraphs = search(self.cygraph, imaps=imaps, omaps=omaps, griddims=griddims, blockdims=blockdims, fmaps=fmaps, franges=franges, verbose=verbose, default_config=config)
         all_graphs = [KNGraph(g) for g in cygraphs]
 
         # profile and use the best graph
         best_graph, best_perf = None, float('inf')
-        for g in all_graphs:
+        for idx, g in enumerate(all_graphs):
             dtensors = g.cygraph.get_input_dtensors()
             input_tensors = list()
             for t in dtensors:
                 dims = [t.dim(i) for i in range(t.num_dims)]
-                print("dims", dims)
                 input_tensors.append(torch.randn(dims, dtype=torch.float16, device='cuda:0'))
             starter = torch.cuda.Event(enable_timing=True)
             ender = torch.cuda.Event(enable_timing=True)
+            print("Transpiling muGraph {}...".format(idx))
             for _ in range(16):
                 g(inputs=input_tensors)
             torch.cuda.synchronize()
@@ -234,8 +252,7 @@ class KNGraph:
             ender.record()
             torch.cuda.synchronize()
             perf = starter.elapsed_time(ender) / 1000
-            print("perf = ", perf)
-            print(g)
+            print("Profiling muGraph {} performance (ms) = {}".format(idx, perf))
             if perf < best_perf:
                 best_graph, best_perf = g, perf
 

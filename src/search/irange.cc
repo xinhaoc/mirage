@@ -42,6 +42,10 @@ bool IKNRange::is_empty() const {
   return range_set.is_empty();
 }
 
+bool IKNRange::is_valid() const {
+  return range_set.is_valid();
+}
+
 IKNRange IKNRange::point_range(std::vector<int> const &point) {
   std::vector<KNRange> ranges{KNRange::point_range(point)};
   std::vector<PropagationPath<size_t>> paths{PropagationPath<size_t>()};
@@ -55,13 +59,16 @@ TBRange propagate_from_dtensor_to_stensor(KNRange const &range,
                                           int3 dim_map,
                                           int forloop_dim,
                                           int forloop_range) {
+  if (!range.is_valid()) {
+    return TBRange(Range::invalid_range(), Range::invalid_range(), Range::invalid_range());
+  }
   if (range.is_empty()) {
     return TBRange();
   }
 
   std::vector<int> lower(range.lower), upper(range.upper);
   std::vector<int> blower(3, 0), bupper(3, 0);
-  int flower = 0, fupper = 0;
+  int flower = 0, fupper = forloop_range;
 
   bool forloop_processed = false;
   for (int d = 0; d < 3; ++d) {
@@ -69,12 +76,10 @@ TBRange propagate_from_dtensor_to_stensor(KNRange const &range,
     if (d == 0) {
       dim_idx = dim_map.x;
       dim_deg = grid_dim.x;
-    }
-    if (d == 1) {
+    } else if (d == 1) {
       dim_idx = dim_map.y;
       dim_deg = grid_dim.y;
-    }
-    if (d == 2) {
+    } else if (d == 2) {
       dim_idx = dim_map.z;
       dim_deg = grid_dim.z;
     }
@@ -167,6 +172,9 @@ KNRange propagate_from_stensor_to_dtensor(TBRange const &range,
                                           int3 dim_map,
                                           int forloop_dim,
                                           int forloop_range) {
+  if (!range.is_valid()) {
+    return KNRange::invalid_range();
+  }
   if (range.is_empty()) {
     return KNRange();
   }
@@ -220,8 +228,7 @@ KNRange propagate_from_stensor_to_dtensor(TBRange const &range,
                 range.forloop_range.lower[0] * stensor.dim[dim_idx] +
                 range.tensor_range.upper[dim_idx];
           } else {
-            return KNRange();
-            // assert(false && "TBD");
+            return KNRange::invalid_range();
           }
         } else {
           lower[dim_idx] =
@@ -232,8 +239,7 @@ KNRange propagate_from_stensor_to_dtensor(TBRange const &range,
               range.tensor_range.upper[dim_idx];
         }
       } else {
-        return KNRange();
-        // assert(false && "TBD");
+        return KNRange::invalid_range();
       }
     }
   }
@@ -253,8 +259,7 @@ KNRange propagate_from_stensor_to_dtensor(TBRange const &range,
           range.forloop_range.lower[0] * stensor.dim[forloop_dim] +
           range.tensor_range.upper[forloop_dim];
     } else {
-      return KNRange();
-      // assert(false && "TBD");
+      return KNRange::invalid_range();
     }
   }
 
@@ -434,7 +439,7 @@ IKNRange multiplicative_interact(IKNRange const &knrange,
     case type::KNOperatorType::KN_MATMUL_OP: {
       if (opd_idx_from != opd_idx_to) {
         int num_dims = op.input_tensors[opd_idx_to].num_dims;
-        int dim_to_extend = opd_idx_to == 0 ? num_dims - 1 : num_dims - 2;
+        int dim_to_extend = opd_idx_to == 0 ? num_dims - 2 : num_dims - 1;
         ret = IKNRange(knrange.range_set.transpose(num_dims - 2, num_dims - 1)
                            .extend_dim(dim_to_extend)
                            .truncate(op.input_tensors[opd_idx_to]));
@@ -574,6 +579,10 @@ bool ITBRange::is_empty() const {
   return range_set.is_empty();
 }
 
+bool ITBRange::is_valid() const {
+  return range_set.is_valid();
+}
+
 ITBRange forward_propagate(ITBRange const &tbrange,
                            threadblock::TBOperator const &op,
                            size_t opd_idx) {
@@ -617,6 +626,11 @@ ITBRange forward_propagate(ITBRange const &tbrange,
       int dim_to_extend = opd_idx == 0 ? op.output_tensors[0].num_dims - 1
                                        : op.output_tensors[0].num_dims - 2;
       ret = ITBRange(tbrange.range_set.extend_dim(dim_to_extend)
+                         .truncate(op.output_tensors[0]));
+      break;
+    }
+    case type::TB_RMS_NORM_OP: {
+      ret = ITBRange(tbrange.range_set.extend_dim(op.output_tensors[0].num_dims - 1)
                          .truncate(op.output_tensors[0]));
       break;
     }
@@ -665,6 +679,12 @@ ITBRange backward_propagate(ITBRange const &tbrange,
     case type::TBOperatorType::TB_EXP_OP:
     case type::TBOperatorType::TB_SILU_OP: {
       ret = EXP_AS_IDENTITY ? tbrange : ITBRange();
+      break;
+    }
+    case type::TBOperatorType::TB_RMS_NORM_OP: {
+      ret = ITBRange(
+          tbrange.range_set.extend_dim(op.input_tensors[opd_idx].num_dims - 1)
+              .truncate(op.input_tensors[opd_idx]));
       break;
     }
     case type::TBOperatorType::TB_ADD_OP:
@@ -750,7 +770,7 @@ ITBRange multiplicative_interact(ITBRange const &range,
     case type::TBOperatorType::TB_MATMUL_OP: {
       if (opd_idx_from != opd_idx_to) {
         int num_dims = op.input_tensors[opd_idx_to].num_dims;
-        int dim_to_extend = opd_idx_to == 0 ? num_dims - 1 : num_dims - 2;
+        int dim_to_extend = opd_idx_to == 0 ? num_dims - 2 : num_dims - 1;
         ret = ITBRange(range.range_set.transpose(num_dims - 2, num_dims - 1)
                            .extend_dim(dim_to_extend)
                            .truncate(op.input_tensors[opd_idx_to]));
@@ -1062,7 +1082,7 @@ std::vector<std::pair<size_t, IKNRange>>
       for (int i = 0; i < dtensor.num_dims; ++i) {
         random_point.push_back(rand() % dtensor.dim[i]);
       }
-      points.push_back(random_point);
+      // points.push_back(random_point);
     }
     return points;
   };

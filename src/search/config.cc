@@ -18,6 +18,7 @@ GeneratorConfig GeneratorConfig::get_default_config() {
           type::KN_ADD_OP,
           type::KN_MUL_OP,
           type::KN_DIV_OP,
+          type::KN_REDUCTION_2_OP,
           type::KN_CUSTOMIZED_OP,
       } /* knop_to_explore */,
       {
@@ -27,6 +28,7 @@ GeneratorConfig GeneratorConfig::get_default_config() {
           type::TB_ADD_OP,
           type::TB_MUL_OP,
           type::TB_DIV_OP,
+          type::TB_RMS_NORM_OP,
           type::TB_FORLOOP_ACCUM_NO_RED_OP,
           type::TB_FORLOOP_ACCUM_RED_LD_SUM_OP,
           type::TB_FORLOOP_ACCUM_RED_LD_MEAN_OP,
@@ -53,7 +55,7 @@ GeneratorConfig GeneratorConfig::get_default_config() {
 
 void GeneratorConfig::enable_attention_specific_optimization() {
   _enable_attention_specific_optimization = true;
-  max_num_threadblock_graphs = 2;
+  max_num_kernel_graph_op = 7;
 }
 
 void GeneratorConfig::enable_concat_matmul_transformation() {
@@ -62,6 +64,12 @@ void GeneratorConfig::enable_concat_matmul_transformation() {
 
 void GeneratorConfig::show() const {
   printf("========== Search Configuration ==========\n");
+  printf("  max num threadblock graph op: %zu\n", max_num_threadblock_graph_op);
+  printf("  max num kernel_graph op: %zu\n", max_num_kernel_graph_op);
+  printf("  max num threadblock graphs: %zu\n", max_num_threadblock_graphs);
+  printf("  max num threadblock graph inputs: %zu\n", max_num_threadblock_graph_inputs);
+  printf("  max num threadblock graph outputs: %zu\n", max_num_threadblock_graph_outputs);
+  printf("  search_thread: %zu\n", search_thread);
   printf("  imaps to explore:\n");
   for (auto const &imap : imap_to_explore) {
     printf("    (%d, %d, %d)\n", imap.x, imap.y, imap.z);
