@@ -39,6 +39,7 @@ public:
   Graph(Graph const &) = delete;
   Graph &operator=(Graph const &) = delete;
   // input operator
+
   STensor new_input(mirage::kernel::DTensor const &dtensor,
                     int3 input_map,
                     int forloop_dim,
@@ -73,6 +74,8 @@ public:
   STensor *exp(STensor const *A);
   STensor silu(STensor const &A);
   STensor *silu(STensor const *A);
+  STensor gelu(STensor const &A);
+  STensor *gelu(STensor const *A);
   STensor square(STensor const &A);
   STensor *square(STensor const *A);
   STensor sqrt(STensor const &A);
