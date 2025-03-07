@@ -83,7 +83,7 @@ public:
 
   KNOperator *create_elementunary_op(DTensor const &input,
                                      mirage::type::KNOperatorType _type);
-  
+
   DTensor elementunary_clamp(DTensor const &input,
                              float const &min_val,
                              float const &max_val);
@@ -94,7 +94,7 @@ public:
   KNOperator *create_elementunary_clamp_op(DTensor const &input,
                                            float const &min_val,
                                            float const &max_val);
-  
+
   // elementunary operator
   DTensor add(DTensor const &input1, DTensor const &input2);
   DTensor mul(DTensor const &input1, DTensor const &input2);
@@ -135,6 +135,11 @@ public:
   DTensor all_reduce(DTensor const &input, bool inplace = true);
   DTensor *all_reduce(DTensor const *input, bool inplace = true);
   KNOperator *create_all_reduce_op(DTensor const &input, bool inplace);
+  // chunk operator
+  std::vector<DTensor> chunk(DTensor const &input, int chunk_size, int dim);
+  int chunk(DTensor const *input, int chunk_size, int dim);
+  KNOperator *create_chunk_op(DTensor const &input, int chunk_size, int dim);
+  // customized operator
   std::vector<DTensor> customized(std::vector<DTensor> const &inputs,
                                   mirage::threadblock::Graph const &_graph);
   int customized(std::vector<DTensor const *> inputs,
