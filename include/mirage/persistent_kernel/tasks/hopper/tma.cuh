@@ -13,8 +13,11 @@
  * limitations under the License.
  */
 #include <cuda.h>
+namespace kernel {
+namespace tma{
 
- ///home/xinhaoc/cutlass/include/cute/atom/copy_traits_sm90_tma.hpp
+
+ //cutlass/include/cute/atom/copy_traits_sm90_tma.hpp
 
 __host__ static inline void create_tma_desc(){
     using dtype = typename ST::dtype;
@@ -145,3 +148,27 @@ __host__ static inline void create_tma_desc(){
         std::cerr << "Error in tile TMA descriptor creation: " << error_string << std::endl;
     }
 }
+
+
+__device__ static inline void tma_cp_async(void const* desc_ptr, uint64_t* mbar_ptr, uint64_t cache_hint,
+     void      * smem_ptr,
+     int32_t const& crd0, int32_t const& crd1, int32_t const& crd2, int32_t const& crd3, int32_t const& crd4)
+{
+#if defined(CUTE_ARCH_TMA_SM90_ENABLED)
+  uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(desc_ptr);
+  uint32_t smem_int_mbar = cast_smem_ptr_to_uint(mbar_ptr);
+  uint32_t smem_int_ptr  = cast_smem_ptr_to_uint(smem_ptr);
+  cutlass::arch::synclog_emit_tma_load(__LINE__, gmem_int_desc, smem_int_mbar, smem_int_ptr);
+  asm volatile (
+    "cp.async.bulk.tensor.5d.shared::cluster.global.mbarrier::complete_tx::bytes.L2::cache_hint"
+    " [%0], [%1, {%3, %4, %5, %6, %7}], [%2], %8;"
+    :
+    : "r"(smem_int_ptr), "l"(gmem_int_desc), "r"(smem_int_mbar),
+      "r"(crd0), "r"(crd1), "r"(crd2), "r"(crd3), "r"(crd4), "l"(cache_hint)
+    : "memory");
+#else
+  CUTE_INVALID_CONTROL_PATH("Trying to use tma without CUTE_ARCH_TMA_SM90_ENABLED.");
+#endif
+}
+
+}}
