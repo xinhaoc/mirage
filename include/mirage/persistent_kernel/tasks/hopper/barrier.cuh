@@ -13,64 +13,73 @@
  * limitations under the License.
  */
 
-
 #pragma once
 
+namespace kernel {
 struct Barrier {
-    private:
-    uint64_t value;
+private:
+  uint64_t value;
 };
 
- /*
- mbarrier related functions
-  */
- __device__ static inline void initialize_barrier(Barrier& smem_barrier,                 // 64 bits user-manged barrier in smem
-                   int thread_count = 1)                   // Thread count expected to arrive/wait on this barrier
+/*
+mbarrier related functions
+ */
+__device__ static inline void initialize_barrier(
+    Barrier &smem_barrier, // 64 bits user-manged barrier in smem
+    int thread_count =
+        1) // Thread count expected to arrive/wait on this barrier
 {
 #if defined(MIRAGE_GRACE_HOPPER)
-uint32_t smem_int_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(smem_barrier));
-//   uint32_t smem_int_ptr = cast_smem_ptr_to_uint(&smem_barrier);
-  asm volatile ("mbarrier.init.shared::cta.b64 [%0], %1;\n"
-    :: "r"(smem_int_ptr),
-       "r"(thread_count));
+  void const *const barrier_ptr = &smem_barrier;
+  uint32_t smem_int_ptr =
+      static_cast<uint32_t>(__cvta_generic_to_shared(barrier_ptr));
+  asm volatile("mbarrier.init.shared::cta.b64 [%0], %1;\n" ::"r"(smem_int_ptr),
+               "r"(thread_count));
 #elif defined(__CUDA_ARCH__)
-       asm volatile ("brkpt;\n" ::);
+  asm volatile("brkpt;\n" ::);
 #endif
 }
 
-__device__ static inline void set_barrier_transaction_bytes(Barrier& smem_barrier,      // 64 bits user-manged barrier in smem
-                              uint32_t bytes)              // Number of bytes transfered by per TMA transaction
+__device__ static inline void set_barrier_transaction_bytes(
+    Barrier &smem_barrier, // 64 bits user-manged barrier in smem
+    uint32_t bytes)        // Number of bytes transfered by per TMA transaction
 {
 #if defined(MIRAGE_GRACE_HOPPER)
-  uint32_t smem_int_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(smem_barrier));
-//   cast_smem_ptr_to_uint(&smem_barrier);
-  asm volatile ("mbarrier.arrive.expect_tx.shared::cta.b64 _, [%0], %1;\n"
-    :: "r"(smem_int_ptr),
-       "r"(bytes));
+  uint32_t smem_int_ptr =
+      static_cast<uint32_t>(__cvta_generic_to_shared(&smem_barrier));
+  //   cast_smem_ptr_to_uint(&smem_barrier);
+  asm volatile("mbarrier.arrive.expect_tx.shared::cta.b64 _, [%0], %1;\n" ::"r"(
+                   smem_int_ptr),
+               "r"(bytes));
 #elif defined(__CUDA_ARCH__)
-       asm volatile ("brkpt;\n" ::);
+  asm volatile("brkpt;\n" ::);
 #endif
 }
 
-
-__device__ static inline bool try_wait(Barrier& const smem_barrier, uint32_t phase) {
+__device__ static inline void wait(Barrier &smem_barrier, uint32_t phase) {
 #if defined(MIRAGE_GRACE_HOPPER)
-    // uint32_t smem_addr = cute::cast_smem_ptr_to_uint(smem_ptr);
-    uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(smem_barrier));
-    cutlass::arch::synclog_emit_cluster_barrier_try_wait(__LINE__, smem_addr, phase);
-    uint32_t waitComplete;
-    asm volatile(
-        "{\n\t"
-        ".reg .pred P1; \n\t"
-        "mbarrier.try_wait.parity.shared::cta.b64 P1, [%1], %2; \n\t"
-        "selp.b32 %0, 1, 0, P1; \n\t"
-        "}"
-        : "=r"(waitComplete)
-        : "r"(smem_addr), "r"(phase));
-
-    return static_cast<bool>(waitComplete);
+  void const *const ptr = &smem_barrier;
+  uint32_t mbar_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(ptr));
+  asm volatile(
+      "{\n"
+      ".reg .pred                P1;\n"
+      "LAB_WAIT:\n"
+      "mbarrier.try_wait.parity.acquire.cluster.shared::cta.b64 P1, [%0], %1;\n"
+      "@P1                       bra.uni DONE;\n"
+      "bra.uni                   LAB_WAIT;\n"
+      "DONE:\n"
+      "}\n" ::"r"(mbar_ptr),
+      "r"(phase));
 #elif defined(__CUDA_ARCH__)
-    asm volatile ("brkpt;\n" ::);
+  asm volatile("brkpt;\n" ::);
 #endif
-    return 0;
-  }
+}
+
+__device__ static inline void arrive(Barrier &sem, uint32_t count) {
+  uint32_t mbar_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(&sem));
+  asm volatile("mbarrier.arrive.release.cta.shared::cta.b64 _, [%0], %1;\n"
+               :
+               : "r"(mbar_ptr), "r"(count)
+               : "memory");
+}
+} // namespace kernel

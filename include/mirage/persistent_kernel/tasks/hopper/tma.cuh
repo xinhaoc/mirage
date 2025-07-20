@@ -12,163 +12,202 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "../common.h"
+#include "barrier.cuh"
 #include <cuda.h>
 namespace kernel {
-namespace tma{
+namespace tma {
 
+// __device__ static inline void tma_store_async(void const *desc_ptr,
+//                                               void const *smem_ptr,
+//                                               int32_t const &crd0,
+//                                               int32_t const &crd1,
+//                                               int32_t const &crd2,
+//                                               int32_t const &crd3,
+//                                               int32_t const &crd4) {
+// #ifdef MIRAGE_GRACE_HOPPER
+//   uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(desc_ptr);
+//   uint32_t smem_int_ptr =
+//   static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
+//   // cutlass::arch::synclog_emit_tma_store(__LINE__, gmem_int_desc,
+//   smem_int_ptr); asm
+//   volatile("cp.async.bulk.tensor.5d.global.shared::cta.bulk_group [%0, "
+//                "{%2, %3, %4, %5, %6}], [%1];"
+//                :
+//                : "l"(gmem_int_desc),
+//                  "r"(smem_int_ptr),
+//                  "r"(crd0),
+//                  "r"(crd1),
+//                  "r"(crd2),
+//                  "r"(crd3),
+//                  "r"(crd4)
+//                : "memory");
+// #elif defined(__CUDA_ARCH__)
+//   asm volatile("brkpt;\n" ::);
+// #endif
+// }
 
- //cutlass/include/cute/atom/copy_traits_sm90_tma.hpp
+template <typename T,
+          int B,
+          int M,
+          int S,
+          size_t ROW,
+          size_t COL,
+          size_t DST_ROW,
+          size_t DST_COL,
+          bool ROW_MAJOR = true>
+struct tma {
 
-__host__ static inline void create_tma_desc(){
-    using dtype = typename ST::dtype;
-    static_assert(axis==0 || axis==1 || axis==2, "axis must be 0, 1, or 2");
-    
-    constexpr uint32_t  tma_dim = 5; // Always use all 5D
-    void *global_addr = (void*)(src);
+  CUtensorMap desc{};
+  __host__ inline tma(void *src) {
+    create_tma_desc(desc, src);
+  }
 
-    constexpr CUtensorMapDataType     tma_format      = (
-        std::is_same_v<dtype, bf16>  ? CU_TENSOR_MAP_DATA_TYPE_BFLOAT16 :
-        std::is_same_v<dtype, half>  ? CU_TENSOR_MAP_DATA_TYPE_FLOAT16 :
-        std::is_same_v<dtype, float> ? CU_TENSOR_MAP_DATA_TYPE_FLOAT32 :
-        std::is_same_v<dtype, fp8e4m3> ? CU_TENSOR_MAP_DATA_TYPE_UINT8 :
-        std::is_same_v<dtype, fp8e5m2> ? CU_TENSOR_MAP_DATA_TYPE_UINT8 :
-        CUtensorMapDataType(-1)
-    );
-    constexpr CUtensorMapInterleave   tma_interleave  = CU_TENSOR_MAP_INTERLEAVE_NONE;
-    constexpr CUtensorMapL2promotion  tma_l2Promotion = CU_TENSOR_MAP_L2_PROMOTION_NONE;
-    constexpr CUtensorMapFloatOOBfill tma_oobFill     = CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE;
-    constexpr CUtensorMapSwizzle      tma_swizzle     = (
-        ST::swizzle_bytes == 32  ? CU_TENSOR_MAP_SWIZZLE_32B  :
-        ST::swizzle_bytes == 64  ? CU_TENSOR_MAP_SWIZZLE_64B  :
-        ST::swizzle_bytes == 128 ? CU_TENSOR_MAP_SWIZZLE_128B : 
-        CU_TENSOR_MAP_SWIZZLE_NONE
-    );
+public:
+  __device__ inline void tma_cp_async(Barrier &mbar,
+                                      void *smem_ptr,
+                                      int2 const &tma_coords) const {
+#ifdef MIRAGE_GRACE_HOPPER
+    uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(&desc);
+    uint32_t smem_int_mbar =
+        static_cast<uint32_t>(__cvta_generic_to_shared(&mbar));
+    uint32_t smem_int_ptr =
+        static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
+    // not sure what this line means
+    //  cutlass::arch::synclog_emit_tma_load(
+    //      __LINE__, gmem_int_desc, smem_int_mbar, smem_int_ptr);
+    asm volatile("cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier:"
+                 ":complete_tx::bytes"
+                 " [%0], [%1, {%3, %4, %5, %6, %7}], [%2];"
+                 :
+                 : "r"(smem_int_ptr),
+                   "l"(gmem_int_desc),
+                   "r"(smem_int_mbar),
+                   "n"(0),
+                   "r"(tma_coords.x),
+                   "r"(tma_coords.y),
+                   "r"(1),
+                   "r"(1)
+                 : "memory");
+#elif defined(__CUDA_ARCH__)
+    asm volatile("brkpt;\n" ::);
+#endif
+  }
 
-    uint64_t gmem_shape [5] = {0, 0, 0, 0, 0};
-    uint64_t gmem_stride[4] = {0, 0, 0, 0};
-    uint32_t smem_shape [5] = {0, 0, 0, 0, 0};
-    uint32_t smem_stride[5] = {1, 1, 1, 1, 1};
+private:
+  __host__ static inline void create_tma_desc(CUtensorMap &tma_desc,
+                                              void *src) {
+    static_assert(ROW_MAJOR == true);
+    constexpr uint32_t tma_dim = 5; // Always use all 5D
+    void *global_addr = src;
 
-    constexpr uint64_t shared_tile_height = ST::rows; 
-    constexpr uint64_t shared_tile_width  = ST::cols;
+    constexpr CUtensorMapDataType tma_format =
+        (std::is_same_v<T, type::bfloat16_t> ? CU_TENSOR_MAP_DATA_TYPE_BFLOAT16
+                                             : CUtensorMapDataType(-1));
+    constexpr CUtensorMapInterleave tma_interleave =
+        CU_TENSOR_MAP_INTERLEAVE_NONE;
+    constexpr CUtensorMapL2promotion tma_l2Promotion =
+        CU_TENSOR_MAP_L2_PROMOTION_L2_128B;
+    constexpr CUtensorMapFloatOOBfill tma_oobFill =
+        CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE;
+    constexpr CUtensorMapSwizzle tma_swizzle =
+        (B == 32    ? CU_TENSOR_MAP_SWIZZLE_32B
+         : B == 64  ? CU_TENSOR_MAP_SWIZZLE_64B
+         : B == 128 ? CU_TENSOR_MAP_SWIZZLE_128B
+                    : CU_TENSOR_MAP_SWIZZLE_NONE);
 
-    constexpr int swizzle_elements = ST::swizzle_bytes / sizeof(dtype);
+    uint64_t gmem_shape[5] = {0, 0, 0, 0, 0};
+    uint64_t gmem_prob_stride[5] = {0, 0, 0, 0, 0};
+    uint32_t smem_box_shape[5] = {0, 0, 0, 0, 0};
+    uint32_t smem_box_stride[5] = {1, 1, 1, 1, 1};
 
-    if constexpr (axis == 2) {
-        gmem_shape[0] = swizzle_elements;
-        gmem_shape[1] = (uint64_t)rows;
-        gmem_shape[2] = (uint64_t)(cols+swizzle_elements-1) / swizzle_elements; // round up, note this can potentially screw up out of bounds access handling :/
-        gmem_shape[3] = (uint64_t)depth;
-        gmem_shape[4] = (uint64_t)batch;
+    // todo fix this part based on MN/K major
+    gmem_shape[0] = ROW;
+    gmem_shape[1] = COL;
 
-        gmem_stride[0] = (uint64_t)cols * sizeof(dtype);
-        gmem_stride[1] = ST::swizzle_bytes;
-        gmem_stride[2] = (uint64_t)rows * cols * sizeof(dtype);
-        gmem_stride[3] = (uint64_t)depth * rows * cols * sizeof(dtype);
-    }
-    else if constexpr (axis == 1) {
-        gmem_shape[0] = swizzle_elements;
-        gmem_shape[1] = (uint64_t)depth;
-        gmem_shape[2] = (uint64_t)(cols+swizzle_elements-1) / swizzle_elements; // round up, note this can potentially screw up out of bounds access handling :/
-        gmem_shape[3] = (uint64_t)rows;
-        gmem_shape[4] = (uint64_t)batch;
+    gmem_prob_stride[0] = COL;
+    gmem_prob_stride[1] = 1;
 
-        gmem_stride[0] = (uint64_t)rows * cols * sizeof(dtype);
-        gmem_stride[1] = ST::swizzle_bytes;
-        gmem_stride[2] = (uint64_t)cols * sizeof(dtype);
-        gmem_stride[3] = (uint64_t)depth * rows * cols * sizeof(dtype);
+    smem_box_shape[0] = DST_ROW;
+    smem_box_shape[1] = DST_COL;
+    smem_box_shape[2] = 1;
+    smem_box_shape[3] = 1;
+    smem_box_shape[4] = 1;
 
-    }
-    else {
-        gmem_shape[0] = swizzle_elements;
-        gmem_shape[1] = (uint64_t)batch;
-        gmem_shape[2] = (uint64_t)(cols+swizzle_elements-1) / swizzle_elements; // round up, note this can potentially screw up out of bounds access handling :/
-        gmem_shape[3] = (uint64_t)rows;
-        gmem_shape[4] = (uint64_t)depth;
-
-        gmem_stride[0] = (uint64_t)depth * rows * cols * sizeof(dtype);
-        gmem_stride[1] = ST::swizzle_bytes;
-        gmem_stride[2] = (uint64_t)cols * sizeof(dtype);
-        gmem_stride[3] = (uint64_t)rows * cols * sizeof(dtype);
-    }
-    smem_shape[0] = swizzle_elements;
-    smem_shape[1] = shared_tile_height;
-    smem_shape[2] = shared_tile_width / swizzle_elements;
-    smem_shape[3] = 1;
-    smem_shape[4] = 1;
-
-    // ensure that the global address is always 16-byte aligned 
+    // ensure that the global address is always 16-byte aligned
     assert((reinterpret_cast<uint64_t>(global_addr) & 0b1111) == 0);
 
-    assert(gmem_stride[0] % 16 == 0); // gmem_stride[0] elements must be a multiple of 16B
-    assert(gmem_stride[1] % 16 == 0); // gmem_stride[1] elements must be a multiple of 16B
-    assert(gmem_stride[2] % 16 == 0); // gmem_stride[2] elements must be a multiple of 16B
-    assert(gmem_stride[3] % 16 == 0); // gmem_stride[2] elements must be a multiple of 16B
+    assert((gmem_prob_stride[1]) <
+           (uint64_t(1) << 40)); // Stride must be max 2^40
+    assert((gmem_prob_stride[1] & 0b1111) ==
+           0); // Stride must be multiple of 16B (128b)
+    assert((gmem_prob_stride[2]) <
+           (uint64_t(1) << 40)); // Stride must be max 2^40
+    assert((gmem_prob_stride[2] & 0b1111) ==
+           0); // Stride must be multiple of 16B (128b)
+    assert((gmem_prob_stride[3]) <
+           (uint64_t(1) << 40)); // Stride must be max 2^40
+    assert((gmem_prob_stride[3] & 0b1111) ==
+           0); // Stride must be multiple of 16B (128b)
+    assert((gmem_prob_stride[4]) <
+           (uint64_t(1) << 40)); // Stride must be max 2^40
+    assert((gmem_prob_stride[4] & 0b1111) ==
+           0); // Stride must be multiple of 16B (128b)
 
-    assert(smem_shape[0] <= 256); // smem_shape[0] elements must be <= 256
-    assert(smem_shape[1] <= 256); // smem_shape[1] elements must be <= 256
-    assert(smem_shape[2] <= 256); // smem_shape[2] elements must be <= 256
+    assert(smem_box_shape[0] >= (uint32_t(1))); // Size must be min 1
+    assert(smem_box_shape[0] <=
+           (uint32_t(1) << 8));                 // Size must be max 2^8 = 256
+    assert(smem_box_shape[1] >= (uint32_t(1))); // Size must be min 1
+    assert(smem_box_shape[1] <=
+           (uint32_t(1) << 8));                 // Size must be max 2^8 = 256
+    assert(smem_box_shape[2] >= (uint32_t(1))); // Size must be min 1
+    assert(smem_box_shape[2] <=
+           (uint32_t(1) << 8));                 // Size must be max 2^8 = 256
+    assert(smem_box_shape[3] >= (uint32_t(1))); // Size must be min 1
+    assert(smem_box_shape[3] <=
+           (uint32_t(1) << 8));                 // Size must be max 2^8 = 256
+    assert(smem_box_shape[4] >= (uint32_t(1))); // Size must be min 1
+    assert(smem_box_shape[4] <=
+           (uint32_t(1) << 8)); // Size must be max 2^8 = 256
 
-    assert((smem_shape[0]*sizeof(dtype)) % 16 == 0); // if wgmma_interleave is none, then smem_shape[0] * sizeof(dtype) must be a multiple of 16B
+    assert(smem_box_stride[0] >= (uint32_t(1))); // Stride must be min 1
+    assert(smem_box_stride[0] <= (uint32_t(8))); // Stride must be max 2^3 = 8
+    assert(smem_box_stride[1] >= (uint32_t(1))); // Stride must be min 1
+    assert(smem_box_stride[1] <= (uint32_t(8))); // Stride must be max 2^3 = 8
+    assert(smem_box_stride[2] >= (uint32_t(1))); // Stride must be min 1
+    assert(smem_box_stride[2] <= (uint32_t(8))); // Stride must be max 2^3 = 8
+    assert(smem_box_stride[3] >= (uint32_t(1))); // Stride must be min 1
+    assert(smem_box_stride[3] <= (uint32_t(8))); // Stride must be max 2^3 = 8
+    assert(smem_box_stride[4] >= (uint32_t(1))); // Stride must be min 1
+    assert(smem_box_stride[4] <= (uint32_t(8))); // Stride must be max 2^3 = 8
 
-    assert(smem_stride[0] <= 8); // smem_stride[0] must be less <= 8
-    assert(smem_stride[1] <= 8); // smem_stride[1] must be less <= 8
-    assert(smem_stride[2] <= 8); // smem_stride[2] must be less <= 8
-    assert(smem_stride[3] <= 8); // smem_stride[3] must be less <= 8
-    assert(smem_stride[4] <= 8); // smem_stride[3] must be less <= 8
+    uint64_t const *gmem_shape_ptr = &gmem_shape[0];
+    uint64_t const *gmem_stride_ptr = &gmem_prob_stride[0];
+    uint32_t const *smem_box_shape_ptr = &smem_box_shape[0];
+    uint32_t const *smem_box_stride_ptr = &smem_box_stride[0];
 
-    assert(smem_stride[0] == 1); // smem_stride[0] is ignored when wgmma_interleave is none
+    CUresult result = cuTensorMapEncodeTiled(&tma_desc,
+                                             tma_format,
+                                             tma_dim,
+                                             global_addr,
+                                             gmem_shape_ptr,
+                                             gmem_stride_ptr,
+                                             smem_box_shape_ptr,
+                                             smem_box_stride_ptr,
+                                             tma_interleave,
+                                             tma_swizzle,
+                                             tma_l2Promotion,
+                                             tma_oobFill);
 
-    if constexpr (tma_interleave == CU_TENSOR_MAP_INTERLEAVE_NONE && tma_swizzle != CU_TENSOR_MAP_SWIZZLE_NONE) {
-        assert(smem_shape[0] * sizeof(dtype) <= ST::swizzle_bytes);
-    }
-
-    const uint64_t *gmem_shape_ptr = &gmem_shape[0];
-    const uint64_t *gmem_stride_ptr = &gmem_stride[0]; 
-    const uint32_t *smem_shape_ptr = &smem_shape[0];
-    const uint32_t *smem_stride_ptr = &smem_stride[0];
-
-    CUresult result = cuTensorMapEncodeTiled(
-        tma_map,
-        tma_format,
-        tma_dim,
-        global_addr,
-        gmem_shape_ptr,
-        gmem_stride_ptr, 
-        smem_shape_ptr,
-        smem_stride_ptr,
-        tma_interleave,
-        tma_swizzle,
-        tma_l2Promotion,
-        tma_oobFill);
-
-    const char *error_string;
+    char const *error_string;
     CUresult res = cuGetErrorString(result, &error_string);
     if (result != CUDA_SUCCESS) {
-        std::cerr << "Error in tile TMA descriptor creation: " << error_string << std::endl;
+      std::cerr << "Error in tile TMA descriptor creation: " << error_string
+                << std::endl;
     }
-}
+  }
+};
+// cutlass/include/cute/atom/copy_traits_sm90_tma.hpp
+}; // namespace tma
 
-
-__device__ static inline void tma_cp_async(void const* desc_ptr, uint64_t* mbar_ptr, uint64_t cache_hint,
-     void      * smem_ptr,
-     int32_t const& crd0, int32_t const& crd1, int32_t const& crd2, int32_t const& crd3, int32_t const& crd4)
-{
-#if defined(CUTE_ARCH_TMA_SM90_ENABLED)
-  uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(desc_ptr);
-  uint32_t smem_int_mbar = cast_smem_ptr_to_uint(mbar_ptr);
-  uint32_t smem_int_ptr  = cast_smem_ptr_to_uint(smem_ptr);
-  cutlass::arch::synclog_emit_tma_load(__LINE__, gmem_int_desc, smem_int_mbar, smem_int_ptr);
-  asm volatile (
-    "cp.async.bulk.tensor.5d.shared::cluster.global.mbarrier::complete_tx::bytes.L2::cache_hint"
-    " [%0], [%1, {%3, %4, %5, %6, %7}], [%2], %8;"
-    :
-    : "r"(smem_int_ptr), "l"(gmem_int_desc), "r"(smem_int_mbar),
-      "r"(crd0), "r"(crd1), "r"(crd2), "r"(crd3), "r"(crd4), "l"(cache_hint)
-    : "memory");
-#else
-  CUTE_INVALID_CONTROL_PATH("Trying to use tma without CUTE_ARCH_TMA_SM90_ENABLED.");
-#endif
-}
-
-}}
+} // namespace kernel
