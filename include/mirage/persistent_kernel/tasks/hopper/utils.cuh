@@ -23,6 +23,16 @@ static __device__ __forceinline__ void wg_decrease_regs() {
 #endif
 }
 
+// sync inside a warp group
+template <int GROUP_THREADS>
+static __device__ __forceinline__ void wg_sync(uint32_t barrier_id) {
+#ifdef MIRAGE_GRACE_HOPPER
+  asm volatile("bar.sync %0, %1;\n" ::"r"(barrier_id), "n"(GROUP_THREADS));
+#elif defined(__CUDA_ARCH__)
+  asm volatile("brkpt;\n" ::);
+#endif
+}
+
 // increase register files in a wg
 template <uint32_t RegCount>
 static __device__ __forceinline__ void wg_increase_regs() {

@@ -24,7 +24,7 @@ __device__ static inline uint64_t matrix_descriptor_encode(uint64_t x) {
   return (((x)&0x3FFFF) >> 0x4);
 }
 // from  kitten include/ops/group/wgmma/base/base.cuh
-template <typename SMEM, bool MNmajor=true>
+template <typename SMEM, bool MNmajor = true>
 struct mma_descriptor {
   uint64_t base_desc;
 
@@ -169,8 +169,7 @@ template <typename T,
           typename B_DESC,
           bool tnspA,
           bool tnspB>
-__device__ static inline void mma(
-    float *frag, A_DESC a_desc, B_DESC b_desc) {
+__device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
   static_assert(SMEM_A::ROW == M);
   static_assert(SMEM_B::ROW == N);
   if constexpr (M == 64 && N == 64 && K == 16 &&
@@ -178,39 +177,39 @@ __device__ static inline void mma(
                 tnspB == true) {
     for (int k = 0; k < (SMEM_A::COL / K); k++) {
       wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(0),
-                                                  b_desc.at(0),
-                                                  frag[0],
-                                                  frag[1],
-                                                  frag[2],
-                                                  frag[3],
-                                                  frag[4],
-                                                  frag[5],
-                                                  frag[6],
-                                                  frag[7],
-                                                  frag[8],
-                                                  frag[9],
-                                                  frag[10],
-                                                  frag[11],
-                                                  frag[12],
-                                                  frag[13],
-                                                  frag[14],
-                                                  frag[15],
-                                                  frag[16],
-                                                  frag[17],
-                                                  frag[18],
-                                                  frag[19],
-                                                  frag[20],
-                                                  frag[21],
-                                                  frag[22],
-                                                  frag[23],
-                                                  frag[24],
-                                                  frag[25],
-                                                  frag[26],
-                                                  frag[27],
-                                                  frag[28],
-                                                  frag[29],
-                                                  frag[30],
-                                                  frag[31]);
+                                                 b_desc.at(0),
+                                                 frag[0],
+                                                 frag[1],
+                                                 frag[2],
+                                                 frag[3],
+                                                 frag[4],
+                                                 frag[5],
+                                                 frag[6],
+                                                 frag[7],
+                                                 frag[8],
+                                                 frag[9],
+                                                 frag[10],
+                                                 frag[11],
+                                                 frag[12],
+                                                 frag[13],
+                                                 frag[14],
+                                                 frag[15],
+                                                 frag[16],
+                                                 frag[17],
+                                                 frag[18],
+                                                 frag[19],
+                                                 frag[20],
+                                                 frag[21],
+                                                 frag[22],
+                                                 frag[23],
+                                                 frag[24],
+                                                 frag[25],
+                                                 frag[26],
+                                                 frag[27],
+                                                 frag[28],
+                                                 frag[29],
+                                                 frag[30],
+                                                 frag[31]);
     }
   } else {
     assert(false);

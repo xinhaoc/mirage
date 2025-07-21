@@ -18,34 +18,15 @@
 namespace kernel {
 namespace tma {
 
-// __device__ static inline void tma_store_async(void const *desc_ptr,
-//                                               void const *smem_ptr,
-//                                               int32_t const &crd0,
-//                                               int32_t const &crd1,
-//                                               int32_t const &crd2,
-//                                               int32_t const &crd3,
-//                                               int32_t const &crd4) {
-// #ifdef MIRAGE_GRACE_HOPPER
-//   uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(desc_ptr);
-//   uint32_t smem_int_ptr =
-//   static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
-//   // cutlass::arch::synclog_emit_tma_store(__LINE__, gmem_int_desc,
-//   smem_int_ptr); asm
-//   volatile("cp.async.bulk.tensor.5d.global.shared::cta.bulk_group [%0, "
-//                "{%2, %3, %4, %5, %6}], [%1];"
-//                :
-//                : "l"(gmem_int_desc),
-//                  "r"(smem_int_ptr),
-//                  "r"(crd0),
-//                  "r"(crd1),
-//                  "r"(crd2),
-//                  "r"(crd3),
-//                  "r"(crd4)
-//                : "memory");
-// #elif defined(__CUDA_ARCH__)
-//   asm volatile("brkpt;\n" ::);
-// #endif
-// }
+__device__ static inline void store_commit_group() {
+  asm volatile("cp.async.bulk.commit_group;");
+}
+
+template <int N = 0>
+__device__ static inline void store_async_wait() {
+  asm volatile("fence.proxy.async.shared::cta;");
+  asm volatile("cp.async.bulk.wait_group %0;" : : "n"(N) : "memory");
+}
 
 template <typename T,
           int B,
@@ -94,6 +75,29 @@ public:
 #endif
   }
 
+  __device__ inline void tma_store_async(void *smem_ptr,
+                                         int2 const &tma_coords) const {
+#ifdef MIRAGE_GRACE_HOPPER
+    uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(&desc);
+    uint32_t smem_int_ptr =
+        static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
+    // not sure what this line means
+    //  cutlass::arch::synclog_emit_tma_load(
+    asm volatile("cp.async.bulk.tensor.5d.global.shared::cta.bulk_group [%0, "
+                 "{%2, %3, %4, %5, %6}], [%1];"
+                 :
+                 : "l"(gmem_int_desc),
+                   "r"(smem_int_ptr),
+                   "r"(tma_coords.x),
+                   "r"(tma_coords.y),
+                   "r"(1),
+                   "r"(1) "r"(1)
+                 : "memory");
+#elif defined(__CUDA_ARCH__)
+    asm volatile("brkpt;\n" ::);
+#endif
+  }
+
 private:
   __host__ static inline void create_tma_desc(CUtensorMap &tma_desc,
                                               void *src) {
@@ -125,8 +129,8 @@ private:
     gmem_shape[0] = ROW;
     gmem_shape[1] = COL;
 
-    gmem_prob_stride[0] = COL;
-    gmem_prob_stride[1] = 1;
+    gmem_prob_stride[0] = 1;
+    gmem_prob_stride[1] = COL;
 
     smem_box_shape[0] = DST_ROW;
     smem_box_shape[1] = DST_COL;
