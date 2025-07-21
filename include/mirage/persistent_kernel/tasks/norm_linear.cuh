@@ -27,6 +27,30 @@ namespace kernel {
 
 using bfloat16 = type::bfloat16_t;
 
+// Vectorized zero initialization struct
+template<typename T, int N>
+struct vec_zero_t {
+    static __device__ __forceinline__ void fill_zero(T* ptr) {
+        if constexpr (sizeof(T) * N == 16) {
+            // For 16-byte buffers (e.g., 8 bfloat16 elements or 4 float elements)
+            float4 zero_val = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+            *((float4*)ptr) = zero_val;
+        } else if constexpr (sizeof(T) * N == 32) {
+            // For 32-byte buffers (e.g., 8 float elements)
+            float4 zero_val = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+            *((float4*)ptr) = zero_val;
+            *((float4*)ptr + 1) = zero_val;
+        } else {
+            // Fallback for other sizes
+            #pragma unroll
+            for (int i = 0; i < (sizeof(T) * N) / 16; ++i) {
+                float4 zero_val = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+                *((float4*)ptr + i) = zero_val;
+            }
+        }
+    }
+};
+
 template <typename T,
           int BATCH_SIZE,
           int OUTPUT_SIZE,
@@ -145,9 +169,9 @@ __device__ __forceinline__ void
   constexpr size_t SHARED_OUTPUT_OFFSET = MM_INTERMEDIATE_OFFSET;
   // reuse mm_intermediate
 
-  // zero buffer
+  // zero buffer - improved initialization using float4 struct
   T *zero_buf = (T *)(smem + ZERO_BUFFER_OFFSET);
-  *((__uint128_t *)zero_buf) = 0ul;
+  vec_zero_t<T, 8>::fill_zero(zero_buf);
 
   // copy
   T *shared_input_buffer = (T *)(smem + SHARED_INPUT_BUFFER_OFFSET);
