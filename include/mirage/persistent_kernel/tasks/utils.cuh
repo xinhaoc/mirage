@@ -95,4 +95,30 @@ static __device__ __forceinline__ void clear_8_floats(float *buffer) {
   *((__uint128_t *)(buffer + 4)) = 0ul;
 }
 
+// Vectorized zero initialization struct
+template<typename T, int N>
+struct vec_zero_t {
+    static __device__ __forceinline__ void fill_zero(T* ptr) {
+        // Ensure sizeof(T) * N is a multiple of 16 bytes
+        static_assert((sizeof(T) * N) % 16 == 0, "sizeof(T) * N must be a multiple of 16 bytes for proper vectorized operations");
+        if constexpr (sizeof(T) * N == 16) {
+            // For 16-byte buffers (e.g., 8 bfloat16 elements or 4 float elements)
+            float4 zero_val = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+            *((float4*)ptr) = zero_val;
+        } else if constexpr (sizeof(T) * N == 32) {
+            // For 32-byte buffers (e.g., 8 float elements)
+            float4 zero_val = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+            *((float4*)ptr) = zero_val;
+            *((float4*)ptr + 1) = zero_val;
+        } else {
+            // Fallback for other sizes
+            float4 zero_val = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+            #pragma unroll
+            for (int i = 0; i < (sizeof(T) * N) / 16; ++i) {
+                *((float4*)ptr + i) = zero_val;
+            }
+        }
+    }
+};
+
 } // namespace kernel
