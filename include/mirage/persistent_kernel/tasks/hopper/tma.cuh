@@ -39,24 +39,30 @@ template <typename T,
           bool ROW_MAJOR = true>
 struct tma {
 
-  CUtensorMap desc{};
+  CUtensorMap *desc_ptr;
+
   __host__ inline tma(void *src) {
-    create_tma_desc(desc, src);
+    CUtensorMap host_desc;
+    create_tma_desc(&host_desc, src); // host-only function
+    cudaMalloc(&desc_ptr, sizeof(CUtensorMap));
+    cudaMemcpy(
+        desc_ptr, &host_desc, sizeof(CUtensorMap), cudaMemcpyHostToDevice);
+
+    cudaPointerAttributes attr;
+    cudaPointerGetAttributes(&attr, desc_ptr);
+    std::cout << "Memory type: " << attr.type << std::endl;
   }
 
 public:
-  __device__ inline void tma_cp_async(Barrier &mbar,
-                                      void *smem_ptr,
-                                      int2 const &tma_coords) const {
+  __device__ inline void
+      tma_cp_async(Barrier &mbar, T *smem_ptr, int4 const &tma_coords) const {
 #ifdef MIRAGE_GRACE_HOPPER
-    uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(&desc);
+    uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(desc_ptr);
     uint32_t smem_int_mbar =
         static_cast<uint32_t>(__cvta_generic_to_shared(&mbar));
     uint32_t smem_int_ptr =
         static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
-    // not sure what this line means
-    //  cutlass::arch::synclog_emit_tma_load(
-    //      __LINE__, gmem_int_desc, smem_int_mbar, smem_int_ptr);
+
     asm volatile("cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier:"
                  ":complete_tx::bytes"
                  " [%0], [%1, {%3, %4, %5, %6, %7}], [%2];"
@@ -67,8 +73,8 @@ public:
                    "n"(0),
                    "r"(tma_coords.x),
                    "r"(tma_coords.y),
-                   "r"(1),
-                   "r"(1)
+                   "r"(tma_coords.z),
+                   "r"(tma_coords.w)
                  : "memory");
 #elif defined(__CUDA_ARCH__)
     asm volatile("brkpt;\n" ::);
@@ -78,7 +84,7 @@ public:
   __device__ inline void tma_store_async(void *smem_ptr,
                                          int2 const &tma_coords) const {
 #ifdef MIRAGE_GRACE_HOPPER
-    uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(&desc);
+    uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(desc_ptr);
     uint32_t smem_int_ptr =
         static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
     // not sure what this line means
@@ -99,41 +105,80 @@ public:
   }
 
 private:
-  __host__ static inline void create_tma_desc(CUtensorMap &tma_desc,
+  __host__ static inline void create_tma_desc(CUtensorMap *tma_desc,
                                               void *src) {
     static_assert(ROW_MAJOR == true);
-    constexpr uint32_t tma_dim = 5; // Always use all 5D
+    constexpr uint32_t tma_dim = 5;
     void *global_addr = src;
 
-    constexpr CUtensorMapDataType tma_format =
-        (std::is_same_v<T, type::bfloat16_t> ? CU_TENSOR_MAP_DATA_TYPE_BFLOAT16
-                                             : CUtensorMapDataType(-1));
+    constexpr CUtensorMapDataType tma_format = CU_TENSOR_MAP_DATA_TYPE_BFLOAT16;
+    //  (std::is_same_v<T, type::bfloat16_t> ? CU_TENSOR_MAP_DATA_TYPE_BFLOAT16
+    //                                       : CUtensorMapDataType(-1));
     constexpr CUtensorMapInterleave tma_interleave =
         CU_TENSOR_MAP_INTERLEAVE_NONE;
     constexpr CUtensorMapL2promotion tma_l2Promotion =
         CU_TENSOR_MAP_L2_PROMOTION_L2_128B;
     constexpr CUtensorMapFloatOOBfill tma_oobFill =
         CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE;
-    constexpr CUtensorMapSwizzle tma_swizzle =
-        (B == 32    ? CU_TENSOR_MAP_SWIZZLE_32B
-         : B == 64  ? CU_TENSOR_MAP_SWIZZLE_64B
-         : B == 128 ? CU_TENSOR_MAP_SWIZZLE_128B
-                    : CU_TENSOR_MAP_SWIZZLE_NONE);
+    constexpr CUtensorMapSwizzle tma_swizzle = CU_TENSOR_MAP_SWIZZLE_NONE;
+    // (B == 1    ? CU_TENSOR_MAP_SWIZZLE_32B
+    //  : B == 2  ? CU_TENSOR_MAP_SWIZZLE_64B
+    //  : B == 3 ? CU_TENSOR_MAP_SWIZZLE_128B
+    //             : CU_TENSOR_MAP_SWIZZLE_NONE);
+    //  constexpr CUtensorMapSwizzle tma_swizzle = CU_TENSOR_MAP_SWIZZLE_NONE;
 
-    uint64_t gmem_shape[5] = {0, 0, 0, 0, 0};
-    uint64_t gmem_prob_stride[5] = {0, 0, 0, 0, 0};
-    uint32_t smem_box_shape[5] = {0, 0, 0, 0, 0};
+    uint64_t gmem_shape[5] = {ROW, ROW, 1, 1, 1};
+    uint64_t gmem_prob_stride[4] = {ROW * sizeof(T), 0, 0, 0};
+    uint32_t smem_box_shape[5] = {ROW, ROW, 1, 1, 1};
     uint32_t smem_box_stride[5] = {1, 1, 1, 1, 1};
 
+    uint64_t const *gmem_shape_ptr = &gmem_shape[0];
+    uint64_t const *gmem_stride_ptr = &gmem_prob_stride[0];
+    uint32_t const *smem_box_shape_ptr = &smem_box_shape[0];
+    uint32_t const *smem_box_stride_ptr = &smem_box_stride[0];
+
+    CUresult result = cuTensorMapEncodeTiled(tma_desc,
+                                             tma_format,
+                                             tma_dim,
+                                             global_addr,
+                                             gmem_shape_ptr,
+                                             gmem_stride_ptr,
+                                             smem_box_shape_ptr,
+                                             smem_box_stride_ptr,
+                                             CU_TENSOR_MAP_INTERLEAVE_NONE,
+                                             tma_swizzle,
+                                             CU_TENSOR_MAP_L2_PROMOTION_NONE,
+                                             CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);
+
+    char const *error_string;
+    CUresult res = cuGetErrorString(result, &error_string);
+    if (result != CUDA_SUCCESS) {
+      std::cerr << "TMA Desc Addr:   " << &tma_desc << "\nformat         "
+                << tma_format << "\ndim            " << tma_dim
+                << "\ngmem_address   " << global_addr << "\nglobalDim      "
+                << gmem_shape << "\nglobalStrides  " << gmem_prob_stride
+                << "\nboxDim         " << smem_box_shape << "\nelementStrides "
+                << smem_box_stride << "\ninterleave     " << tma_interleave
+                << "\nswizzle        " << tma_swizzle << "\nl2Promotion    "
+                << tma_l2Promotion << "\noobFill        " << tma_oobFill
+                << std::endl;
+      std::cerr << "Error in tile TMA descriptor creation: " << error_string
+                << std::endl;
+      assert(false);
+    }
+
     // todo fix this part based on MN/K major
-    gmem_shape[0] = ROW;
-    gmem_shape[1] = COL;
+    gmem_shape[0] = 64;
+    gmem_shape[1] = 64;
+    gmem_shape[2] = 1;
+    gmem_shape[3] = 1;
+    gmem_shape[4] = 1;
 
-    gmem_prob_stride[0] = 1;
-    gmem_prob_stride[1] = COL;
+    gmem_prob_stride[0] = 2;
+    gmem_prob_stride[1] = 128;
 
-    smem_box_shape[0] = DST_ROW;
-    smem_box_shape[1] = DST_COL;
+    smem_box_shape[0] = 64;
+    smem_box_shape[1] = 64;
     smem_box_shape[2] = 1;
     smem_box_shape[3] = 1;
     smem_box_shape[4] = 1;
@@ -184,31 +229,6 @@ private:
     assert(smem_box_stride[3] <= (uint32_t(8))); // Stride must be max 2^3 = 8
     assert(smem_box_stride[4] >= (uint32_t(1))); // Stride must be min 1
     assert(smem_box_stride[4] <= (uint32_t(8))); // Stride must be max 2^3 = 8
-
-    uint64_t const *gmem_shape_ptr = &gmem_shape[0];
-    uint64_t const *gmem_stride_ptr = &gmem_prob_stride[0];
-    uint32_t const *smem_box_shape_ptr = &smem_box_shape[0];
-    uint32_t const *smem_box_stride_ptr = &smem_box_stride[0];
-
-    CUresult result = cuTensorMapEncodeTiled(&tma_desc,
-                                             tma_format,
-                                             tma_dim,
-                                             global_addr,
-                                             gmem_shape_ptr,
-                                             gmem_stride_ptr,
-                                             smem_box_shape_ptr,
-                                             smem_box_stride_ptr,
-                                             tma_interleave,
-                                             tma_swizzle,
-                                             tma_l2Promotion,
-                                             tma_oobFill);
-
-    char const *error_string;
-    CUresult res = cuGetErrorString(result, &error_string);
-    if (result != CUDA_SUCCESS) {
-      std::cerr << "Error in tile TMA descriptor creation: " << error_string
-                << std::endl;
-    }
   }
 };
 // cutlass/include/cute/atom/copy_traits_sm90_tma.hpp

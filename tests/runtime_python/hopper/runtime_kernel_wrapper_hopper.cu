@@ -12,10 +12,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <cuda_runtime.h>
-#include <torch/extension.h>
 #include "bfloat16.h"
 #include "hopper/matmul_demo_hopper.cuh"
+#include <cuda_runtime.h>
+#include <torch/extension.h>
 // create tma
 using kernel::linear_kernel_hopper;
 using bfloat16 = type::bfloat16_t;
@@ -42,36 +42,32 @@ __global__ void
 }
 
 void linear_kernel(torch::Tensor input,
-    torch::Tensor weight,
-    torch::Tensor output) {
-  
+                   torch::Tensor weight,
+                   torch::Tensor output) {
 
-  void  *input_ptr = input.data_ptr();
+  void *input_ptr = input.data_ptr();
   void *weight_ptr = weight.data_ptr();
   void *output_ptr = output.data_ptr();
 
+  using TMA_A = kernel::tma::tma<bfloat16, 0, 0, 0, 64, 64, 64, 64, true>;
+  using TMA_B = kernel::tma::tma<bfloat16, 0, 0, 0, 64, 64, 64, 64, true>;
 
-  using TMA_A = kernel::tma::tma<bfloat16, 3, 4, 3, 64, 4096, 64, 64, true>;
-  using TMA_B = kernel::tma::tma<bfloat16, 3, 4, 3, 4096, 64, 64, 64, true>;
+  using TMA_OUT = kernel::tma::tma<bfloat16, 0, 0, 0, 64, 64, 64, 64, true>;
 
-  using TMA_OUT = kernel::tma::tma<bfloat16, 3, 4, 3, 64, 64, 64, 64, true>;
+  TMA_A tma_a(input_ptr);
+  TMA_B tma_b(weight_ptr);
+  TMA_OUT tma_out(output_ptr);
 
   dim3 grid_dim(1, 1, 1);
   dim3 block_dim(256, 1, 1);
   size_t smem_size = 88888;
-  cudaFuncSetAttribute(linear_kernel_hopper_wrapper<bfloat16,
-                                                    64,
-                                                    4096,
-                                                    2,
-                                                    TMA_A,
-                                                    TMA_B,
-                                                    TMA_OUT>,
-                       cudaFuncAttributeMaxDynamicSharedMemorySize,
-                       smem_size);
+  cudaFuncSetAttribute(
+      linear_kernel_hopper_wrapper<bfloat16, 64, 64, 2, TMA_A, TMA_B, TMA_OUT>,
+      cudaFuncAttributeMaxDynamicSharedMemorySize,
+      smem_size);
 
-  linear_kernel_hopper_wrapper<bfloat16, 64, 4096, 2, TMA_A, TMA_B, TMA_OUT>
-      <<<grid_dim, block_dim>>>(
-          output_ptr, TMA_A(input_ptr), TMA_B(weight_ptr), TMA_OUT(output_ptr));
+  linear_kernel_hopper_wrapper<bfloat16, 64, 64, 2, TMA_A, TMA_B, TMA_OUT>
+      <<<grid_dim, block_dim, smem_size>>>(output_ptr, tma_a, tma_b, tma_out);
 
   cudaError_t err = cudaDeviceSynchronize();
   if (err != cudaSuccess) {

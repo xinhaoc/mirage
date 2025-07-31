@@ -45,7 +45,9 @@ struct mma_descriptor {
         base_desc |= matrix_descriptor_encode((uint64_t)256) << 32;
         base_desc |= 3llu << 62; // set wgmma_swizzle mode
       } else {
-        assert(false);
+        base_desc |= matrix_descriptor_encode((uint64_t)16) << 16;
+        base_desc |= matrix_descriptor_encode((uint64_t)128) << 32;
+        base_desc |= 0llu << 62; // set wgmma_swizzle mode
       }
     } else {
       assert(false);

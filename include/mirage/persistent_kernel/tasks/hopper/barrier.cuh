@@ -19,6 +19,11 @@ namespace kernel {
 struct Barrier {
 private:
   uint64_t value;
+
+public:
+  __device__ inline uint64_t get_value() {
+    return value;
+  }
 };
 
 /*
@@ -45,12 +50,15 @@ __device__ static inline void set_barrier_transaction_bytes(
     uint32_t bytes)        // Number of bytes transfered by per TMA transaction
 {
 #if defined(MIRAGE_GRACE_HOPPER)
-  uint32_t smem_int_ptr =
-      static_cast<uint32_t>(__cvta_generic_to_shared(&smem_barrier));
-  //   cast_smem_ptr_to_uint(&smem_barrier);
-  asm volatile("mbarrier.arrive.expect_tx.shared::cta.b64 _, [%0], %1;\n" ::"r"(
-                   smem_int_ptr),
-               "r"(bytes));
+  if (lane_id() == 0) {
+    void const *const barrier_ptr = &smem_barrier;
+    uint32_t smem_int_ptr =
+        static_cast<uint32_t>(__cvta_generic_to_shared(barrier_ptr));
+    asm volatile(
+        "mbarrier.arrive.expect_tx.shared::cta.b64 _, [%0], %1;\n" ::"r"(
+            smem_int_ptr),
+        "r"(bytes));
+  }
 #elif defined(__CUDA_ARCH__)
   asm volatile("brkpt;\n" ::);
 #endif
@@ -60,24 +68,27 @@ __device__ static inline void wait(Barrier &smem_barrier, uint32_t phase) {
 #if defined(MIRAGE_GRACE_HOPPER)
   void const *const ptr = &smem_barrier;
   uint32_t mbar_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(ptr));
-  asm volatile(
-      "{\n"
-      ".reg .pred                P1;\n"
-      "LAB_WAIT:\n"
-      "mbarrier.try_wait.parity.acquire.cluster.shared::cta.b64 P1, [%0], %1;\n"
-      "@P1                       bra.uni DONE;\n"
-      "bra.uni                   LAB_WAIT;\n"
-      "DONE:\n"
-      "}\n" ::"r"(mbar_ptr),
-      "r"(phase));
+  asm volatile("{\n"
+               ".reg .pred                P1;\n"
+               "LAB_WAIT:\n"
+               "mbarrier.try_wait.parity.shared::cta.b64 P1, [%0], %1;\n"
+               "@P1                       bra.uni DONE;\n"
+               "bra.uni                   LAB_WAIT;\n"
+               "DONE:\n"
+               "}\n" ::"r"(mbar_ptr),
+               "r"(phase));
+
 #elif defined(__CUDA_ARCH__)
   asm volatile("brkpt;\n" ::);
 #endif
 }
 
-__device__ static inline void arrive(Barrier &sem, uint32_t count) {
-  uint32_t mbar_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(&sem));
-  asm volatile("mbarrier.arrive.release.cta.shared::cta.b64 _, [%0], %1;\n"
+__device__ static inline void arrive(Barrier &smem_barrier,
+                                     uint32_t count = 1) {
+  void const *const barrier_ptr = &smem_barrier;
+  uint32_t mbar_ptr =
+      static_cast<uint32_t>(__cvta_generic_to_shared(barrier_ptr));
+  asm volatile("mbarrier.arrive.shared::cta.b64 _, [%0], %1;\n"
                :
                : "r"(mbar_ptr), "r"(count)
                : "memory");
