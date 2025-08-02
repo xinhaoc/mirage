@@ -181,19 +181,20 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
       mm_output_smem.at(row, col + 1) = bfloat16(s_frag[i * 2 + 1]);
     }
 
+    // make sure generic proxy's modification to smem is visible to tma store async proxy
+    // this is intra-thread sync
+    async_proxy_fence();
+
+    // this is inter-thread sync
     wg_sync<NUM_THREADS * CONSUMER_WARPGROUPS>(8);
+
     // copy back to dmem
-    if (warp_idx % 4 == 0) {
+    if (warp_idx % 4 == 0 && lane_id() == 0) {
       tma_out.tma_store_async(mm_output_smem(0, 0), {0, 0});
-      if (lane_id == 0) {
-        store_commit_group();
-        __syncwarp();
-      }
+      store_commit_group();
     }
-    if (lane_id == 0) {
-      store_async_wait();
-      __syncwarp();
-    }
+    store_async_wait<0>();
+    wg_sync<NUM_THREADS * CONSUMER_WARPGROUPS>(8);
   }
 }
 
