@@ -33,12 +33,13 @@ using bfloat16 = type::bfloat16_t;
 // a 64X64X4K kernel for reference
 template <typename T,
           int BATCH_SIZE,
-          int HIDDEN_SIZE,
+          int OUTPUT_SIZE,
+          int REDUCTION_SIZE,
           int Kstages,
           typename TMA_A,
           typename TMA_B,
           typename TMA_OUT,
-          int OUTPUT_STRIDE = 64>
+          int OUTPUT_STRIDE = OUTPUT_SIZE>
 __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
                                                      const TMA_A &tma_a,
                                                      const TMA_B &tma_b,
@@ -51,9 +52,9 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
   constexpr int NUM_WARPGROUPS = CONSUMER_WARPGROUPS + PRODUCER_WARPGROUPS;
 
   // using SM90_64x64x16_F16F16F16F32
-  constexpr int num_n = HIDDEN_SIZE / 64;
+  constexpr int num_n = OUTPUT_SIZE / 64;
   constexpr int num_m = BATCH_SIZE / 64;
-  constexpr int num_k = HIDDEN_SIZE / 64;
+  constexpr int num_k = REDUCTION_SIZE / 64;
   int warp_idx = warp_id();
   int idx_in_warp = threadIdx.x % 32;
   int warpgroup_id = warp_idx / WARPGROUP_WARPS;

@@ -22,11 +22,12 @@ using bfloat16 = type::bfloat16_t;
 
 template <typename T,
           int BATCH_SIZE,
-          int HIDDEN_SIZE,
-          int Kstages,
+          int OUTPUT_SIZE,
+          int REDUCTION_SIZE,
           typename TMA_A,
           typename TMA_B,
-          typename TMA_OUT>
+          typename TMA_OUT,
+          int Kstages = 2>
 __global__ void
     linear_kernel_hopper_wrapper(void *output_ptr,
                                  const __grid_constant__ TMA_A tma_a,
@@ -34,25 +35,25 @@ __global__ void
                                  const __grid_constant__ TMA_OUT tma_out) {
   linear_kernel_hopper<T,
                        BATCH_SIZE,
-                       HIDDEN_SIZE,
+                       OUTPUT_SIZE,
+                       REDUCTION_SIZE,
                        Kstages,
                        TMA_A,
                        TMA_B,
                        TMA_OUT>(output_ptr, tma_a, tma_b, tma_out);
 }
 
-void linear_kernel(torch::Tensor input,
-                   torch::Tensor weight,
-                   torch::Tensor output) {
 
-  void *input_ptr = input.data_ptr();
-  void *weight_ptr = weight.data_ptr();
-  void *output_ptr = output.data_ptr();
+template <typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE>
+void launch_linear_hopper(
+  void *input_ptr,
+  void *weight_ptr,
+  void *output_ptr) {
 
-  using TMA_A = kernel::tma::tma<bfloat16, 0, 0, 0, 64, 64, 64, 64, true>;
-  using TMA_B = kernel::tma::tma<bfloat16, 0, 0, 0, 64, 64, 64, 64, true>;
+  using TMA_A = kernel::tma::tma<bfloat16, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, BATCH_SIZE, OUTPUT_SIZE, true>;
+  using TMA_B = kernel::tma::tma<bfloat16, 0, 0, 0, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, true>;
 
-  using TMA_OUT = kernel::tma::tma<bfloat16, 0, 0, 0, 64, 64, 64, 64, true>;
+  using TMA_OUT = kernel::tma::tma<bfloat16, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, BATCH_SIZE, OUTPUT_SIZE, true>;
 
   TMA_A tma_a(input_ptr);
   TMA_B tma_b(weight_ptr);
@@ -62,12 +63,69 @@ void linear_kernel(torch::Tensor input,
   dim3 block_dim(256, 1, 1);
   size_t smem_size = 88888;
   cudaFuncSetAttribute(
-      linear_kernel_hopper_wrapper<bfloat16, 64, 64, 2, TMA_A, TMA_B, TMA_OUT>,
+      linear_kernel_hopper_wrapper<T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, TMA_OUT>,
       cudaFuncAttributeMaxDynamicSharedMemorySize,
       smem_size);
 
-  linear_kernel_hopper_wrapper<bfloat16, 64, 64, 2, TMA_A, TMA_B, TMA_OUT>
-      <<<grid_dim, block_dim, smem_size>>>(output_ptr, tma_a, tma_b, tma_out);
+
+  linear_kernel_hopper_wrapper<T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, TMA_OUT>
+      <<<grid_dim, block_dim, smem_size>>>(
+          output_ptr, tma_a, tma_b, tma_out);
+}
+
+#define DISPATCH_LINEAR_HOPPER_REDUCTION_SIZE_CASE(BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE) \
+  case REDUCTION_SIZE: \
+    launch_linear_hopper<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE>(input_ptr, weight_ptr, output_ptr); \
+    break;
+
+#define DISPATCH_LINEAR_HOPPER_REDUCTION_SIZE(BATCH_SIZE, OUTPUT_SIZE) \
+  switch (input.size(1)) { \
+    DISPATCH_LINEAR_HOPPER_REDUCTION_SIZE_CASE(BATCH_SIZE, OUTPUT_SIZE, 4096) \
+    default: \
+      printf("Unsupported reduction size in test: %zu\n", input.size(1)); \
+      break; \
+  }
+
+#define DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE_CASE(BATCH_SIZE, OUTPUT_SIZE) \
+  case OUTPUT_SIZE: \
+    DISPATCH_LINEAR_HOPPER_REDUCTION_SIZE(BATCH_SIZE, OUTPUT_SIZE) \
+    break;
+
+
+#define DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE(BATCH_SIZE) \
+  switch (output.size(1)) { \
+    DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE_CASE(BATCH_SIZE, 16) \
+    DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE_CASE(BATCH_SIZE, 32) \
+    DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE_CASE(BATCH_SIZE, 64) \
+    default: \
+      printf("Unsupported output size in test: %zu\n", output.size(1)); \
+      break; \
+  }
+
+#define DISPATCH_LINEAR_HOPPER_BATCH_SIZE_CASE(BATCH_SIZE) \
+  case BATCH_SIZE: \
+    DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE(BATCH_SIZE) \
+    break;
+
+
+void linear_kernel(torch::Tensor input,
+                   torch::Tensor weight,
+                   torch::Tensor output) {
+
+  void *input_ptr = input.data_ptr();
+  void *weight_ptr = weight.data_ptr();
+  void *output_ptr = output.data_ptr();
+
+  switch (input.size(0)) {
+    DISPATCH_LINEAR_HOPPER_BATCH_SIZE_CASE(1)
+    DISPATCH_LINEAR_HOPPER_BATCH_SIZE_CASE(16)
+    DISPATCH_LINEAR_HOPPER_BATCH_SIZE_CASE(32)
+    DISPATCH_LINEAR_HOPPER_BATCH_SIZE_CASE(64)
+    default:
+      printf("Unsupported output size in test: %zu\n", output.size(0));
+      break;
+  }
+  
 
   cudaError_t err = cudaDeviceSynchronize();
   if (err != cudaSuccess) {
