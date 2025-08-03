@@ -18,13 +18,16 @@
 namespace kernel {
 namespace tma {
 
+__device__ static inline void async_proxy_fence() {
+  asm volatile("fence.proxy.async.shared::cta;");
+}
+
 __device__ static inline void store_commit_group() {
   asm volatile("cp.async.bulk.commit_group;");
 }
 
 template <int N = 0>
 __device__ static inline void store_async_wait() {
-  asm volatile("fence.proxy.async.shared::cta;");
   asm volatile("cp.async.bulk.wait_group %0;" : : "n"(N) : "memory");
 }
 
@@ -96,8 +99,8 @@ public:
                    "r"(smem_int_ptr),
                    "r"(tma_coords.x),
                    "r"(tma_coords.y),
-                   "r"(1),
-                   "r"(1) "r"(1)
+                   "r"(0),
+                   "r"(0) "r"(0)
                  : "memory");
 #elif defined(__CUDA_ARCH__)
     asm volatile("brkpt;\n" ::);
