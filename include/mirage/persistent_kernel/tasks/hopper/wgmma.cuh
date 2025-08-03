@@ -177,7 +177,7 @@ __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
   if constexpr (M == 64 && N == 64 && K == 16 &&
                 std::is_same<T, bfloat16>::value && tnspA == false &&
                 tnspB == true) {
-    // for (int k = 0; k < (SMEM_A::COL / K); k++) {
+    for (int k = 0; k < (SMEM_A::COL / K); k++) {
       wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(0),
                                                  b_desc.at(0),
                                                  frag[0],
@@ -212,7 +212,7 @@ __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
                                                  frag[29],
                                                  frag[30],
                                                  frag[31]);
-    // }
+    }
   } else {
     assert(false);
   }
