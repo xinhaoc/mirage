@@ -50,14 +50,17 @@ void launch_linear_hopper(
   void *weight_ptr,
   void *output_ptr) {
 
-  using TMA_A = kernel::tma::tma<bfloat16, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, BATCH_SIZE, OUTPUT_SIZE, true>;
-  using TMA_B = kernel::tma::tma<bfloat16, 0, 0, 0, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, true>;
+  using TMA_A = kernel::tma::tma<bfloat16, 0, 0, 0, BATCH_SIZE, REDUCTION_SIZE, BATCH_SIZE, 64, true>;
+  using TMA_B = kernel::tma::tma<bfloat16, 0, 0, 0, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE, 64, true>;
 
-  using TMA_OUT = kernel::tma::tma<bfloat16, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, BATCH_SIZE, OUTPUT_SIZE, true>;
+  using TMA_OUT = kernel::tma::tma<bfloat16, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, BATCH_SIZE, 64, true>;
 
   TMA_A tma_a(input_ptr);
   TMA_B tma_b(weight_ptr);
   TMA_OUT tma_out(output_ptr);
+
+  printf("2\n");
+  printf("TMA_A: %zu, TMA_B: %zu, TMA_OUT: %zu\n", sizeof(TMA_A), sizeof(TMA_B), sizeof(TMA_OUT));
 
   dim3 grid_dim(1, 1, 1);
   dim3 block_dim(256, 1, 1);
@@ -93,7 +96,7 @@ void launch_linear_hopper(
 
 
 #define DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE(BATCH_SIZE) \
-  switch (output.size(1)) { \
+  switch (output.size(0)) { \
     DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE_CASE(BATCH_SIZE, 16) \
     DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE_CASE(BATCH_SIZE, 32) \
     DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE_CASE(BATCH_SIZE, 64) \
@@ -116,10 +119,9 @@ void linear_kernel(torch::Tensor input,
   void *weight_ptr = weight.data_ptr();
   void *output_ptr = output.data_ptr();
 
+  printf("1\n");
+
   switch (input.size(0)) {
-    DISPATCH_LINEAR_HOPPER_BATCH_SIZE_CASE(1)
-    DISPATCH_LINEAR_HOPPER_BATCH_SIZE_CASE(16)
-    DISPATCH_LINEAR_HOPPER_BATCH_SIZE_CASE(32)
     DISPATCH_LINEAR_HOPPER_BATCH_SIZE_CASE(64)
     default:
       printf("Unsupported output size in test: %zu\n", output.size(0));

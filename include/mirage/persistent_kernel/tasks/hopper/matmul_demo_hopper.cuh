@@ -50,6 +50,10 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
   constexpr int CONSUMER_WARPGROUPS = 1;
   constexpr int PRODUCER_WARPGROUPS = 1;
   constexpr int NUM_WARPGROUPS = CONSUMER_WARPGROUPS + PRODUCER_WARPGROUPS;
+  
+  constexpr int TMA_TRANS_BYTES_A = sizeof(T) * BATCH_SIZE * TILE_SIZE;
+  constexpr int TMA_TRANS_BYTES_B = sizeof(T) * TILE_SIZE * TILE_SIZE;
+  constexpr int TMA_TRANS_BYTES_OUT = sizeof(T) * BATCH_SIZE * TILE_SIZE;
 
   // using SM90_64x64x16_F16F16F16F32
   constexpr int num_n = OUTPUT_SIZE / 64;
@@ -123,8 +127,8 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
     // launch the first group of copy
     for (int i = 0; i < Kstages - 1; i++) {
       // int4 tma_coords = {0, 0, 0, 0};
-      int4 tma_coords_A = {0, i, 0, 0};
-      int4 tma_coords_B = {0, i, 0, 0};
+      int2 tma_coords_A = {0, i};
+      int2 tma_coords_B = {0, i};
       // sizeof(T) * TILE_SIZE * TILE_SIZE = 8192
       set_barrier_transaction_bytes(input_barrier[i], 8192);
       tma_a.tma_cp_async(
@@ -148,7 +152,7 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
     if (lane_id() == 0 && warp_idx == (NUM_WARPGROUPS * WARPGROUP_WARPS - 4)) {
       for (int i = Kstages - 2; i < num_k - 1; i++) {
         // get cord, copy
-        int4 tma_coords = {0, 0, 0, 0};
+        int2 tma_coords = {0, 0};
         set_barrier_transaction_bytes(input_barrier[(i + 1) % Kstages], 8192);
         tma_a.tma_cp_async(input_barrier[(i + 1) % Kstages],
                            input_smem_buffer(0, 0),

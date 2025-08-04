@@ -35,10 +35,10 @@ template <typename T,
           int B,
           int M,
           int S,
-          size_t ROW,
-          size_t COL,
-          size_t DST_ROW,
-          size_t DST_COL,
+          size_t GMEM_ROW, // 64
+          size_t GMEM_COL, // 4096
+          size_t SMEM_ROW, // 64
+          size_t SMEM_COL, // 64
           bool ROW_MAJOR = true>
 struct tma {
 
@@ -58,7 +58,7 @@ struct tma {
 
 public:
   __device__ inline void
-      tma_cp_async(Barrier &mbar, T *smem_ptr, int4 const &tma_coords) const {
+      tma_cp_async(Barrier &mbar, T *smem_ptr, int2 const &tma_coords) const {
 #ifdef MIRAGE_GRACE_HOPPER
     uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(desc_ptr);
     uint32_t smem_int_mbar =
@@ -73,11 +73,11 @@ public:
                  : "r"(smem_int_ptr),
                    "l"(gmem_int_desc),
                    "r"(smem_int_mbar),
-                   "n"(0),
                    "r"(tma_coords.x),
                    "r"(tma_coords.y),
-                   "r"(tma_coords.z),
-                   "r"(tma_coords.w)
+                   "r"(0),
+                   "r"(0),
+                   "r"(0)
                  : "memory");
 #elif defined(__CUDA_ARCH__)
     asm volatile("brkpt;\n" ::);
@@ -130,9 +130,9 @@ private:
     //             : CU_TENSOR_MAP_SWIZZLE_NONE);
     //  constexpr CUtensorMapSwizzle tma_swizzle = CU_TENSOR_MAP_SWIZZLE_NONE;
 
-    uint64_t gmem_shape[5] = {ROW, ROW, 1, 1, 1};
-    uint64_t gmem_prob_stride[4] = {ROW * sizeof(T), 0, 0, 0};
-    uint32_t smem_box_shape[5] = {ROW, ROW, 1, 1, 1};
+    uint64_t gmem_shape[5] = {GMEM_ROW, GMEM_COL, 1, 1, 1};
+    uint64_t gmem_prob_stride[4] = {GMEM_COL * sizeof(T), 0, 0, 0};
+    uint32_t smem_box_shape[5] = {SMEM_ROW, SMEM_COL, 1, 1, 1};
     uint32_t smem_box_stride[5] = {1, 1, 1, 1, 1};
 
     uint64_t const *gmem_shape_ptr = &gmem_shape[0];
@@ -171,20 +171,28 @@ private:
     }
 
     // todo fix this part based on MN/K major
-    gmem_shape[0] = 64;
-    gmem_shape[1] = 64;
+    printf("GMEM_ROW: %zu, GMEM_COL: %zu\n", GMEM_ROW, GMEM_COL);
+    printf("SMEM_ROW: %zu, SMEM_COL: %zu\n", SMEM_ROW, SMEM_COL);
+    gmem_shape[0] = GMEM_ROW;
+    gmem_shape[1] = GMEM_COL;
     gmem_shape[2] = 1;
     gmem_shape[3] = 1;
     gmem_shape[4] = 1;
 
-    gmem_prob_stride[0] = 2;
-    gmem_prob_stride[1] = 128;
+    gmem_prob_stride[0] = sizeof(T);
+    gmem_prob_stride[1] = GMEM_COL * sizeof(T);
 
-    smem_box_shape[0] = 64;
-    smem_box_shape[1] = 64;
+    smem_box_shape[0] = SMEM_ROW;
+    smem_box_shape[1] = SMEM_COL;
     smem_box_shape[2] = 1;
     smem_box_shape[3] = 1;
     smem_box_shape[4] = 1;
+
+    smem_box_stride[0] = 1;
+    smem_box_stride[1] = 1;
+    smem_box_stride[2] = 1;
+    smem_box_stride[3] = 1;
+    smem_box_stride[4] = 1;
 
     // ensure that the global address is always 16-byte aligned
     assert((reinterpret_cast<uint64_t>(global_addr) & 0b1111) == 0);
