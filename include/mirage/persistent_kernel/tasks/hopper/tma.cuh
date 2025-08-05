@@ -66,6 +66,10 @@ public:
     uint32_t smem_int_ptr =
         static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
 
+    if (threadIdx.x == 128 && threadIdx.y == 0 && threadIdx.z == 0) {
+      printf("tma_cp_async: crd0: %d, crd1: %d", tma_coords.x, tma_coords.y);
+    }
+
     asm volatile("cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier:"
                  ":complete_tx::bytes"
                  " [%0], [%1, {%3, %4, %5, %6, %7}], [%2];"

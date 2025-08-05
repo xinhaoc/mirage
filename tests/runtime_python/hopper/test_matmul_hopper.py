@@ -5,7 +5,7 @@ torch.set_printoptions(sci_mode=False)
 
 # reduction_size = 4096
 # output_sizes = [16, 32, 64]
-reduction_size = 4096
+reduction_size = 128
 output_sizes = [64]
 
 for output_size in output_sizes:
@@ -14,7 +14,13 @@ for output_size in output_sizes:
     w = torch.ones((output_size, reduction_size), device="cuda", dtype=torch.bfloat16)
     output = torch.empty(64, output_size, device="cuda", dtype=torch.bfloat16)
 
-    x[0, 0] = 0
+    for i in range(64):
+        for j in range(reduction_size):
+            x[i, j] = 1 + (i * reduction_size + j) * 1
+    
+    for i in range(output_size):
+        for j in range(reduction_size):
+            w[i, j] = 1 + (i * reduction_size + j) * 1
 
     runtime_kernel_hopper.linear(x, w, output)
     torch_out = torch.matmul(x, torch.transpose(w, 0, 1))
@@ -23,6 +29,11 @@ for output_size in output_sizes:
     print(torch_out)
     print("output.shape", output.shape)
     print(output)
+
+    # print all of x
+    print("x.shape", x.shape)
+    print(x)
+
 
     print("Ratio (kernel / torch):")
     print(output / torch_out)

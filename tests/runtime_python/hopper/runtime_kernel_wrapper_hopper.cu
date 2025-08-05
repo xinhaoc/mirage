@@ -59,8 +59,8 @@ void launch_linear_hopper(
   TMA_B tma_b(weight_ptr);
   TMA_OUT tma_out(output_ptr);
 
-  printf("2\n");
-  printf("TMA_A: %zu, TMA_B: %zu, TMA_OUT: %zu\n", sizeof(TMA_A), sizeof(TMA_B), sizeof(TMA_OUT));
+  // printf("1\n");
+  // printf("input_ptr: %p, weight_ptr: %p, output_ptr: %p\n", input_ptr, weight_ptr, output_ptr);
 
   dim3 grid_dim(1, 1, 1);
   dim3 block_dim(256, 1, 1);
@@ -83,7 +83,7 @@ void launch_linear_hopper(
 
 #define DISPATCH_LINEAR_HOPPER_REDUCTION_SIZE(BATCH_SIZE, OUTPUT_SIZE) \
   switch (input.size(1)) { \
-    DISPATCH_LINEAR_HOPPER_REDUCTION_SIZE_CASE(BATCH_SIZE, OUTPUT_SIZE, 4096) \
+    DISPATCH_LINEAR_HOPPER_REDUCTION_SIZE_CASE(BATCH_SIZE, OUTPUT_SIZE, 128) \
     default: \
       printf("Unsupported reduction size in test: %zu\n", input.size(1)); \
       break; \

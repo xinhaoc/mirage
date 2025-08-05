@@ -152,23 +152,24 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
     if (lane_id() == 0 && warp_idx == (NUM_WARPGROUPS * WARPGROUP_WARPS - 4)) {
       for (int i = 0; i < num_k; i++) {
         // get cord, copy
-        int2 tma_coords = {0, i};
+        int2 tma_coords_A = {i*TILE_SIZE, 0};
+        int2 tma_coords_B = {i*TILE_SIZE, 0};
         set_barrier_transaction_bytes(input_barrier[(i) % Kstages], 8192);
         tma_a.tma_cp_async(input_barrier[(i) % Kstages],
                            input_smem_buffer(0, 0),
-                           tma_coords);
+                           tma_coords_A);
         set_barrier_transaction_bytes(weight_barrier[(i) % Kstages], 8192);
 
         tma_b.tma_cp_async(weight_barrier[(i) % Kstages],
                            input_weight_smem_buffer(0, 0),
-                           tma_coords);
+                           tma_coords_B);
 
         wait(compute_done[(i+1) % Kstages], ((i+1+Kstages) / Kstages) % Kstages);
 
         input_smem_buffer.set_ptr(shared_input +
-                                  ((i+1) % Kstages) * 8192);
+                                  ((i+1) % Kstages) * 8192 / 2);
         input_weight_smem_buffer.set_ptr(shared_weight +
-                                         ((i+1) % Kstages) * 8192);
+                                         ((i+1) % Kstages) * 8192 / 2);
       }
     }
   } else {
@@ -176,13 +177,13 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
     // wg_increase_regs<160>();
     for (int i = 0; i < num_k; i++) {
       // wait input, weight
-      wait(input_barrier[i % Kstages], ((i / Kstages) % Kstages));
+      // wait(input_barrier[i % Kstages], ((i / Kstages) % Kstages));
       wait(weight_barrier[i % Kstages], ((i / Kstages) % Kstages));
 
       input_smem.set_ptr(shared_input +
-                          ((i) % Kstages) * 8192);
+                          ((i) % Kstages) * 8192 / 2);
       input_weight_smem.set_ptr(shared_weight +
-                                        ((i) % Kstages) * 8192);
+                                        ((i) % Kstages) * 8192 / 2);
 
       if (threadIdx.x == 0) {
         printf("i: %d\n", i);
