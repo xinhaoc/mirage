@@ -92,7 +92,7 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
   InputSmem input_smem(shared_input);
   InputSmem input_smem_buffer(shared_input);
 
-  using WeightSmem = smem_row<T, 0, 0, 0, 64, 64, 64>;
+  using WeightSmem = smem_col<T, 0, 0, 0, 64, 64, 64>;
   WeightSmem input_weight_smem(shared_weight);
   WeightSmem input_weight_smem_buffer(shared_weight);
 
@@ -220,7 +220,7 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
                  A_DESC,
                  B_DESC,
                  false,
-                 true>(s_frag, a_desc, b_desc);
+                 false>(s_frag, a_desc, b_desc);
       wgmma::mma_commit_group();
       wgmma::mma_async_wait();
 
@@ -238,6 +238,11 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
       int col = (i / 2) * 8 + (idx_in_warp % 4) * 2;
       mm_output_smem.at(row, col) = bfloat16(s_frag[i * 2]);
       mm_output_smem.at(row, col + 1) = bfloat16(s_frag[i * 2 + 1]);
+
+      if (threadIdx.x == 8) {
+        printf("mm_output_smem.at(%d, %d) = %f\n", row, col, (float)mm_output_smem.at(row, col));
+        printf("mm_output_smem.at(%d, %d) = %f\n", row, col + 1, (float)mm_output_smem.at(row, col + 1));
+      }
     }
 
     // make sure generic proxy's modification to smem is visible to tma store

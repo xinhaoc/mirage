@@ -24,13 +24,14 @@ __device__ static inline uint64_t matrix_descriptor_encode(uint64_t x) {
   return (((x)&0x3FFFF) >> 0x4);
 }
 // from  kitten include/ops/group/wgmma/base/base.cuh
-template <typename SMEM, bool MNmajor = true>
+template <typename SMEM, bool MNmajor = false>
 struct mma_descriptor {
   uint64_t base_desc;
 
   __device__ mma_descriptor(SMEM smem) {
     base_desc = matrix_descriptor_encode((uint64_t)(smem.base_ptr));
-    if constexpr (MNmajor == true) {
+    printf("smem::b: %d\n", SMEM::b);
+    if constexpr (MNmajor == false) {
       // swizzle mode
       if constexpr (SMEM::b == 3) {
         base_desc |= matrix_descriptor_encode((uint64_t)16) << 16;
@@ -46,11 +47,30 @@ struct mma_descriptor {
         base_desc |= 3llu << 62; // set wgmma_swizzle mode
       } else {
         base_desc |= matrix_descriptor_encode((uint64_t)16) << 16;
-        base_desc |= matrix_descriptor_encode((uint64_t)128) << 32;
+        base_desc |= matrix_descriptor_encode((uint64_t)256) << 32;
         base_desc |= 0llu << 62; // set wgmma_swizzle mode
       }
     } else {
-      assert(false);
+      // if constexpr (SMEM::b == 3) {
+      //       base_desc |= matrix_descriptor_encode((uint64_t)2048*ST::height) << 16;
+      //       base_desc |= matrix_descriptor_encode((uint64_t)1024) << 32;
+      //       base_desc |= 1llu << 62; // set wgmma_swizzle mode
+      //   }
+      //   else if constexpr (SMEM::b == 2) {
+      //       base_desc |= matrix_descriptor_encode((uint64_t)1024*ST::height) << 16;
+      //       base_desc |= matrix_descriptor_encode((uint64_t)512) << 32;
+      //       base_desc |= 2llu << 62; // set wgmma_swizzle mode
+      //   }
+      //   else if constexpr (SMEM::b == 1) {
+      //       base_desc |= matrix_descriptor_encode((uint64_t)512*ST::height) << 16;
+      //       base_desc |= matrix_descriptor_encode((uint64_t)256) << 32;
+      //       base_desc |= 3llu << 62; // set wgmma_swizzle mode
+      //   }
+      //   else {
+      //       base_desc |= matrix_descriptor_encode((uint64_t)256) << 16;
+      //       base_desc |= matrix_descriptor_encode((uint64_t)128) << 32;
+      //       base_desc |= 0llu << 62; // set wgmma_swizzle mode
+      //   }
     }
   }
 
@@ -176,10 +196,10 @@ __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
   static_assert(SMEM_B::ROW == N);
   if constexpr (M == 64 && N == 64 && K == 16 &&
                 std::is_same<T, bfloat16>::value && tnspA == false &&
-                tnspB == true) {
+                tnspB == false) {
     for (int k = 0; k < (SMEM_A::COL / K); k++) {
-      wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(0),
-                                                 b_desc.at(0),
+      wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(k * K * sizeof(T)),
+                                                 b_desc.at(k * K * sizeof(T)),
                                                  frag[0],
                                                  frag[1],
                                                  frag[2],
