@@ -30,7 +30,6 @@ struct mma_descriptor {
 
   __device__ mma_descriptor(SMEM smem) {
     base_desc = matrix_descriptor_encode((uint64_t)(smem.base_ptr));
-    printf("smem::b: %d\n", SMEM::b);
     if constexpr (MNmajor == false) {
       // swizzle mode
       if constexpr (SMEM::b == 3) {
@@ -46,8 +45,12 @@ struct mma_descriptor {
         base_desc |= matrix_descriptor_encode((uint64_t)256) << 32;
         base_desc |= 3llu << 62; // set wgmma_swizzle mode
       } else {
-        base_desc |= matrix_descriptor_encode((uint64_t)16) << 16;
-        base_desc |= matrix_descriptor_encode((uint64_t)256) << 32;
+        base_desc |= matrix_descriptor_encode((uint64_t)128) << 16;
+        // 一个core matrix有8*8=64个元素，沿着k有 A_COL/8个core matrix
+        // 不是A_COL而是64，因为切块smem k为64
+        // sbo = 64*64/8 * 2 bytes
+        // = 64 * 64 / 4
+        base_desc |= matrix_descriptor_encode((uint64_t)1024) << 32;
         base_desc |= 0llu << 62; // set wgmma_swizzle mode
       }
     } else {
@@ -198,8 +201,8 @@ __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
                 std::is_same<T, bfloat16>::value && tnspA == false &&
                 tnspB == false) {
     for (int k = 0; k < (SMEM_A::COL / K); k++) {
-      wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(k * K * sizeof(T)),
-                                                 b_desc.at(k * K * sizeof(T)),
+      wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(k * 16 * sizeof(T)),
+                                                 b_desc.at(k * 16 * sizeof(T)),
                                                  frag[0],
                                                  frag[1],
                                                  frag[2],

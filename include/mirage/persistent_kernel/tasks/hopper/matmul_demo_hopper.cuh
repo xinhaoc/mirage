@@ -177,7 +177,7 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
     // wg_increase_regs<160>();
     for (int i = 0; i < num_k; i++) {
       // wait input, weight
-      // wait(input_barrier[i % Kstages], ((i / Kstages) % Kstages));
+      wait(input_barrier[i % Kstages], ((i / Kstages) % Kstages));
       wait(weight_barrier[i % Kstages], ((i / Kstages) % Kstages));
 
       input_smem.set_ptr(shared_input +
@@ -239,7 +239,7 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
       mm_output_smem.at(row, col) = bfloat16(s_frag[i * 2]);
       mm_output_smem.at(row, col + 1) = bfloat16(s_frag[i * 2 + 1]);
 
-      if (threadIdx.x == 8) {
+      if (threadIdx.x == 28) {
         printf("mm_output_smem.at(%d, %d) = %f\n", row, col, (float)mm_output_smem.at(row, col));
         printf("mm_output_smem.at(%d, %d) = %f\n", row, col + 1, (float)mm_output_smem.at(row, col + 1));
       }
