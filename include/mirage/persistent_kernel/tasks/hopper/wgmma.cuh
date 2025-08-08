@@ -24,13 +24,13 @@ __device__ static inline uint64_t matrix_descriptor_encode(uint64_t x) {
   return (((x)&0x3FFFF) >> 0x4);
 }
 // from  kitten include/ops/group/wgmma/base/base.cuh
-template <typename SMEM, bool MNmajor = true>
+template <typename SMEM, bool MNmajor = false>
 struct mma_descriptor {
   uint64_t base_desc;
 
   __device__ mma_descriptor(SMEM smem) {
     base_desc = matrix_descriptor_encode((uint64_t)(smem.base_ptr));
-    if constexpr (MNmajor == true) {
+    if constexpr (MNmajor == false) {
       // swizzle mode
       if constexpr (SMEM::b == 3) {
         base_desc |= matrix_descriptor_encode((uint64_t)16) << 16;
@@ -46,11 +46,9 @@ struct mma_descriptor {
         base_desc |= 3llu << 62; // set wgmma_swizzle mode
       } else {
         base_desc |= matrix_descriptor_encode((uint64_t)16) << 16;
-        base_desc |= matrix_descriptor_encode((uint64_t)128) << 32;
+        base_desc |= matrix_descriptor_encode((uint64_t)256) << 32;
         base_desc |= 0llu << 62; // set wgmma_swizzle mode
       }
-    } else {
-      assert(false);
     }
   }
 
@@ -173,13 +171,15 @@ template <typename T,
           bool tnspB>
 __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
   static_assert(SMEM_A::ROW == M);
-  static_assert(SMEM_B::ROW == N);
+  static_assert(SMEM_A::COL == K);
+  static_assert(SMEM_B::ROW == K);
+  static_assert(SMEM_B::COL == N);
   if constexpr (M == 64 && N == 64 && K == 16 &&
                 std::is_same<T, bfloat16>::value && tnspA == false &&
-                tnspB == true) {
+                tnspB == false) {
     for (int k = 0; k < (SMEM_A::COL / K); k++) {
-      wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(0),
-                                                 b_desc.at(0),
+      wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(k * 16 * sizeof(T)),
+                                                 b_desc.at(k * 16 * sizeof(T)),
                                                  frag[0],
                                                  frag[1],
                                                  frag[2],

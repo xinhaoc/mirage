@@ -139,6 +139,10 @@ struct smem_col {
 
   using value_type = T;
 
+  static constexpr int b = B;
+  static constexpr int m = M;
+  static constexpr int s = S;
+
   static constexpr size_t ROW = ROW_;
   static constexpr size_t COL = COL_;
 
