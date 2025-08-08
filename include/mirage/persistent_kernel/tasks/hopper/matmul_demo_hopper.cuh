@@ -45,27 +45,27 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
                                                      const TMA_B &tma_b,
                                                      const TMA_OUT &tma_out) {
   constexpr int chunk_size = 16 / sizeof(T);
-  constexpr int TILE_SIZE = 64;
+  constexpr int TILE_SIZE = 16;
   constexpr int THREADS_PER_WARPGROUP = 128;
   constexpr int CONSUMER_WARPGROUPS = 1;
   constexpr int PRODUCER_WARPGROUPS = 1;
   constexpr int NUM_WARPGROUPS = CONSUMER_WARPGROUPS + PRODUCER_WARPGROUPS;
-  
+
   constexpr int TMA_TRANS_BYTES_A = sizeof(T) * BATCH_SIZE * TILE_SIZE;
-  constexpr int TMA_TRANS_BYTES_B = sizeof(T) * TILE_SIZE * TILE_SIZE;
+  constexpr int TMA_TRANS_BYTES_B = sizeof(T) * TILE_SIZE * OUTPUT_SIZE;
   constexpr int TMA_TRANS_BYTES_OUT = sizeof(T) * BATCH_SIZE * TILE_SIZE;
 
   // using SM90_64x64x16_F16F16F16F32
   constexpr int num_n = OUTPUT_SIZE / 64;
   constexpr int num_m = BATCH_SIZE / 64;
-  constexpr int num_k = REDUCTION_SIZE / 64;
+  constexpr int num_k = REDUCTION_SIZE / TILE_SIZE;
   int warp_idx = warp_id();
   int idx_in_warp = threadIdx.x % 32;
   int warpgroup_id = warp_idx / WARPGROUP_WARPS;
 
   T __restrict__ *d_output = static_cast<T *>(output_ptr);
 
-  dmem_row<T, 64, 64, 64> output_dmem(d_output);
+  dmem_row<T, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE> output_dmem(d_output);
 
   extern __shared__ char smem[];
 
@@ -88,18 +88,19 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
   // out
 
   // define the swizzle mode
-  using InputSmem = smem_row<T, 0, 0, 0, 64, 64, 64>;
+  using InputSmem = smem_row<T, 0, 4, 3, BATCH_SIZE, TILE_SIZE, TILE_SIZE>;
   InputSmem input_smem(shared_input);
   InputSmem input_smem_buffer(shared_input);
 
-  using WeightSmem = smem_col<T, 0, 0, 0, 64, 64, 64>;
+  using WeightSmem = smem_col<T, 0, 4, 3, TILE_SIZE, OUTPUT_SIZE, TILE_SIZE>;
   WeightSmem input_weight_smem(shared_weight);
   WeightSmem input_weight_smem_buffer(shared_weight);
 
   using A_DESC = wgmma::mma_descriptor<InputSmem>;
   using B_DESC = wgmma::mma_descriptor<WeightSmem>;
 
-  smem_row<T, 0, 0, 0, 64, 64, 64> mm_output_smem(mm_output);
+  smem_row<T, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE> mm_output_smem(
+      mm_output);
   float s_frag[32];
 
 #pragma unroll
@@ -123,28 +124,6 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
 
   __syncthreads();
 
-  // if (threadIdx.x == 0) {
-  //   // launch the first group of copy
-  //   for (int i = 0; i < Kstages - 1; i++) {
-  //     // int4 tma_coords = {0, 0, 0, 0};
-  //     int2 tma_coords_A = {0, i};
-  //     int2 tma_coords_B = {0, i};
-  //     // sizeof(T) * TILE_SIZE * TILE_SIZE = 8192
-  //     set_barrier_transaction_bytes(input_barrier[i], 8192);
-  //     tma_a.tma_cp_async(
-  //         input_barrier[i], input_smem_buffer(0, 0), tma_coords_A);
-  //     set_barrier_transaction_bytes(weight_barrier[i], 8192);
-  //     tma_b.tma_cp_async(
-  //         weight_barrier[i], input_weight_smem_buffer(0, 0), tma_coords_B);
-  //     // mv smem ptr to next buffer
-  //     // sizeof(T) * TILE_SIZE * TILE_SIZE = 8192
-  //     input_smem_buffer.set_ptr(shared_input + (i + 1) % Kstages * 8192);
-  //     input_weight_smem_buffer.set_ptr(shared_weight + (i + 1) % Kstages * 8192);
-  //   }
-  // }
-
-  __syncthreads();
-
   // warp specialization data movement warpgroup
   if (warpgroup_id == NUM_WARPGROUPS - 1) {
 
@@ -152,24 +131,28 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
     if (lane_id() == 0 && warp_idx == (NUM_WARPGROUPS * WARPGROUP_WARPS - 4)) {
       for (int i = 0; i < num_k; i++) {
         // get cord, copy
-        int2 tma_coords_A = {i*TILE_SIZE, 0};
-        int2 tma_coords_B = {i*TILE_SIZE, 0};
-        set_barrier_transaction_bytes(input_barrier[(i) % Kstages], 8192);
+        int2 tma_coords_A = {i * TILE_SIZE, 0};
+        int2 tma_coords_B = {i * TILE_SIZE, 0};
+        set_barrier_transaction_bytes(input_barrier[(i) % Kstages],
+                                      TMA_TRANS_BYTES_A);
         tma_a.tma_cp_async(input_barrier[(i) % Kstages],
                            input_smem_buffer(0, 0),
                            tma_coords_A);
-        set_barrier_transaction_bytes(weight_barrier[(i) % Kstages], 8192);
+        set_barrier_transaction_bytes(weight_barrier[(i) % Kstages],
+                                      TMA_TRANS_BYTES_B);
 
         tma_b.tma_cp_async(weight_barrier[(i) % Kstages],
                            input_weight_smem_buffer(0, 0),
                            tma_coords_B);
 
-        wait(compute_done[(i+1) % Kstages], ((i+1+Kstages) / Kstages) % Kstages);
+        wait(compute_done[(i + 1) % Kstages],
+             ((i + 1 + Kstages) / Kstages) % Kstages);
 
-        input_smem_buffer.set_ptr(shared_input +
-                                  ((i+1) % Kstages) * 8192 / 2);
-        input_weight_smem_buffer.set_ptr(shared_weight +
-                                         ((i+1) % Kstages) * 8192 / 2);
+        input_smem_buffer.set_ptr(
+            shared_input + ((i + 1) % Kstages) * TMA_TRANS_BYTES_A / sizeof(T));
+        input_weight_smem_buffer.set_ptr(shared_weight + ((i + 1) % Kstages) *
+                                                             TMA_TRANS_BYTES_B /
+                                                             sizeof(T));
       }
     }
   } else {
@@ -181,25 +164,24 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
       wait(weight_barrier[i % Kstages], ((i / Kstages) % Kstages));
 
       input_smem.set_ptr(shared_input +
-                          ((i) % Kstages) * 8192 / 2);
-      input_weight_smem.set_ptr(shared_weight +
-                                        ((i) % Kstages) * 8192 / 2);
+                         ((i) % Kstages) * TMA_TRANS_BYTES_A / sizeof(T));
+      input_weight_smem.set_ptr(
+          shared_weight + ((i) % Kstages) * TMA_TRANS_BYTES_B / sizeof(T));
 
       if (threadIdx.x == 0) {
         printf("i: %d\n", i);
         printf("input_smem ptr: %p\n", input_smem(0, 0));
         printf("input_weight_smem ptr: %p\n", input_weight_smem(0, 0));
         printf("input_smem\n");
-        for (int j = 0; j < 64; j++) {
-          for (int k = 0; k < 64; k++) {
+        for (int j = 0; j < BATCH_SIZE; j++) {
+          for (int k = 0; k < TILE_SIZE; k++) {
             printf("%f ", (float)input_smem.at(j, k));
-            
           }
           printf("\n");
         }
         printf("input_weight_smem\n");
-        for (int j = 0; j < 64; j++) {
-          for (int k = 0; k < 64; k++) {
+        for (int j = 0; j < OUTPUT_SIZE; j++) {
+          for (int k = 0; k < TILE_SIZE; k++) {
             printf("%f ", (float)input_weight_smem.at(j, k));
           }
           printf("\n");
@@ -239,9 +221,15 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
       mm_output_smem.at(row, col) = bfloat16(s_frag[i * 2]);
       mm_output_smem.at(row, col + 1) = bfloat16(s_frag[i * 2 + 1]);
 
-      if (threadIdx.x == 28) {
-        printf("mm_output_smem.at(%d, %d) = %f\n", row, col, (float)mm_output_smem.at(row, col));
-        printf("mm_output_smem.at(%d, %d) = %f\n", row, col + 1, (float)mm_output_smem.at(row, col + 1));
+      if (threadIdx.x == 8) {
+        printf("mm_output_smem.at(%d, %d) = %f\n",
+               row,
+               col,
+               (float)mm_output_smem.at(row, col));
+        printf("mm_output_smem.at(%d, %d) = %f\n",
+               row,
+               col + 1,
+               (float)mm_output_smem.at(row, col + 1));
       }
     }
 
@@ -252,6 +240,16 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
     // this is inter-thread sync
     wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
 
+    //  if (threadIdx.x == 0) {
+    //    printf("mm_output_smem\n");
+    //    for (int j = 0; j < BATCH_SIZE; j++) {
+    //      for (int k = 0; k < OUTPUT_SIZE; k++) {
+    //        printf("%f ", (float)mm_output_smem.at(j, k));
+    //      }
+    //      printf("\n");
+    //    }
+    //  }
+
     // copy back to dmem
     if (warp_idx % 4 == 0 && lane_id() == 0) {
       tma_out.tma_store_async(mm_output_smem(0, 0), {0, 0});
@@ -259,6 +257,16 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
     }
     store_async_wait<0>();
     wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
+
+    if (threadIdx.x == 0) {
+      printf("mm_output_gmem\n");
+      for (int j = 0; j < BATCH_SIZE; j++) {
+        for (int k = 0; k < OUTPUT_SIZE; k++) {
+          printf("%f ", (float)output_dmem.at(j, k));
+        }
+        printf("\n");
+      }
+    }
   }
 }
 
