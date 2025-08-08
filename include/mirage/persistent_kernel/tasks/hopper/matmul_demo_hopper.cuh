@@ -168,25 +168,25 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
       input_weight_smem.set_ptr(
           shared_weight + ((i) % Kstages) * TMA_TRANS_BYTES_B / sizeof(T));
 
-      if (threadIdx.x == 0) {
-        printf("i: %d\n", i);
-        printf("input_smem ptr: %p\n", input_smem(0, 0));
-        printf("input_weight_smem ptr: %p\n", input_weight_smem(0, 0));
-        printf("input_smem\n");
-        for (int j = 0; j < BATCH_SIZE; j++) {
-          for (int k = 0; k < TILE_SIZE; k++) {
-            printf("%f ", (float)input_smem.at(j, k));
-          }
-          printf("\n");
-        }
-        printf("input_weight_smem\n");
-        for (int j = 0; j < OUTPUT_SIZE; j++) {
-          for (int k = 0; k < TILE_SIZE; k++) {
-            printf("%f ", (float)input_weight_smem.at(j, k));
-          }
-          printf("\n");
-        }
-      }
+      // if (threadIdx.x == 0) {
+      //   printf("i: %d\n", i);
+      //   printf("input_smem ptr: %p\n", input_smem(0, 0));
+      //   printf("input_weight_smem ptr: %p\n", input_weight_smem(0, 0));
+      //   printf("input_smem\n");
+      //   for (int j = 0; j < BATCH_SIZE; j++) {
+      //     for (int k = 0; k < TILE_SIZE; k++) {
+      //       printf("%f ", (float)input_smem.at(j, k));
+      //     }
+      //     printf("\n");
+      //   }
+      //   printf("input_weight_smem\n");
+      //   for (int j = 0; j < OUTPUT_SIZE; j++) {
+      //     for (int k = 0; k < TILE_SIZE; k++) {
+      //       printf("%f ", (float)input_weight_smem.at(j, k));
+      //     }
+      //     printf("\n");
+      //   }
+      // }
 
       A_DESC a_desc(input_smem(0, 0));
       B_DESC b_desc(input_weight_smem(0, 0));
@@ -221,16 +221,16 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
       mm_output_smem.at(row, col) = bfloat16(s_frag[i * 2]);
       mm_output_smem.at(row, col + 1) = bfloat16(s_frag[i * 2 + 1]);
 
-      if (threadIdx.x == 8) {
-        printf("mm_output_smem.at(%d, %d) = %f\n",
-               row,
-               col,
-               (float)mm_output_smem.at(row, col));
-        printf("mm_output_smem.at(%d, %d) = %f\n",
-               row,
-               col + 1,
-               (float)mm_output_smem.at(row, col + 1));
-      }
+      // if (threadIdx.x == 8) {
+      //   printf("mm_output_smem.at(%d, %d) = %f\n",
+      //          row,
+      //          col,
+      //          (float)mm_output_smem.at(row, col));
+      //   printf("mm_output_smem.at(%d, %d) = %f\n",
+      //          row,
+      //          col + 1,
+      //          (float)mm_output_smem.at(row, col + 1));
+      // }
     }
 
     // make sure generic proxy's modification to smem is visible to tma store
@@ -258,15 +258,15 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
     store_async_wait<0>();
     wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
 
-    if (threadIdx.x == 0) {
-      printf("mm_output_gmem\n");
-      for (int j = 0; j < BATCH_SIZE; j++) {
-        for (int k = 0; k < OUTPUT_SIZE; k++) {
-          printf("%f ", (float)output_dmem.at(j, k));
-        }
-        printf("\n");
-      }
-    }
+    // if (threadIdx.x == 0) {
+    //   printf("mm_output_gmem\n");
+    //   for (int j = 0; j < BATCH_SIZE; j++) {
+    //     for (int k = 0; k < OUTPUT_SIZE; k++) {
+    //       printf("%f ", (float)output_dmem.at(j, k));
+    //     }
+    //     printf("\n");
+    //   }
+    // }
   }
 }
 

@@ -45,36 +45,10 @@ struct mma_descriptor {
         base_desc |= matrix_descriptor_encode((uint64_t)256) << 32;
         base_desc |= 3llu << 62; // set wgmma_swizzle mode
       } else {
-        // 64*2
         base_desc |= matrix_descriptor_encode((uint64_t)16) << 16;
-        // 一个core matrix有8*8=64个元素，沿着k有 A_COL/8个core matrix
-        // 不是A_COL而是64，因为切块smem k为64
-        // sbo = 64*64/8 * 2 bytes
-        // = 64 * 64 / 4
         base_desc |= matrix_descriptor_encode((uint64_t)256) << 32;
         base_desc |= 0llu << 62; // set wgmma_swizzle mode
       }
-    } else {
-      // if constexpr (SMEM::b == 3) {
-      //       base_desc |= matrix_descriptor_encode((uint64_t)2048*ST::height)
-      //       << 16; base_desc |= matrix_descriptor_encode((uint64_t)1024) <<
-      //       32; base_desc |= 1llu << 62; // set wgmma_swizzle mode
-      //   }
-      //   else if constexpr (SMEM::b == 2) {
-      //       base_desc |= matrix_descriptor_encode((uint64_t)1024*ST::height)
-      //       << 16; base_desc |= matrix_descriptor_encode((uint64_t)512) <<
-      //       32; base_desc |= 2llu << 62; // set wgmma_swizzle mode
-      //   }
-      //   else if constexpr (SMEM::b == 1) {
-      //       base_desc |= matrix_descriptor_encode((uint64_t)512*ST::height)
-      //       << 16; base_desc |= matrix_descriptor_encode((uint64_t)256) <<
-      //       32; base_desc |= 3llu << 62; // set wgmma_swizzle mode
-      //   }
-      //   else {
-      //       base_desc |= matrix_descriptor_encode((uint64_t)256) << 16;
-      //       base_desc |= matrix_descriptor_encode((uint64_t)128) << 32;
-      //       base_desc |= 0llu << 62; // set wgmma_swizzle mode
-      //   }
     }
   }
 
