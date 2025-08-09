@@ -56,7 +56,7 @@
    using TMA_A = kernel::tma::tma<bfloat16, 1, 4, 3, BATCH_SIZE, REDUCTION_SIZE, BATCH_SIZE, 16, true>;
    using TMA_B = kernel::tma::tma<bfloat16, 1, 4, 3, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE, 16, true>;
  
-   using TMA_OUT = kernel::tma::tma<bfloat16, 1, 4, 3, BATCH_SIZE, OUTPUT_SIZE, BATCH_SIZE, 64, true>;
+   using TMA_OUT = kernel::tma::tma<bfloat16, 0, 4, 3, BATCH_SIZE, OUTPUT_SIZE, BATCH_SIZE, 64, true>;
  
    TMA_A tma_a(input_ptr);
    TMA_B tma_b(weight_ptr);
