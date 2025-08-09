@@ -1,6 +1,7 @@
 [submodule "deps/cutlass"]
 	path = deps/cutlass
-	url = https://github.com/NVIDIA/cutlass.git
+	url = https://github.com/yzhou442/cutlass.git
+	branch = mirage-patched
 [submodule "deps/z3"]
 	path = deps/z3
 	url = https://github.com/Z3Prover/z3.git

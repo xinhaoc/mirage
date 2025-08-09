@@ -144,7 +144,7 @@ constexpr CUtensorMapSwizzle tma_swizzle = (B == 1    ? CU_TENSOR_MAP_SWIZZLE_32
 // uint32_t smem_box_stride[5] = {1, 1, 1, 1, 1};
 
 // sw32
-uint64_t gmem_shape[5] = {GMEM_COL, GMEM_ROW, 1, 1, 1};
+uint64_t gmem_prob_shape[5] = {GMEM_COL, GMEM_ROW, 1, 1, 1};
 uint64_t gmem_prob_stride[5] = {sizeof(T), GMEM_COL * sizeof(T), 0, 0, 0};
 
 assert((reinterpret_cast<uint64_t>(gmem_address) & 0b1111) == 0);  // Address must be 16B-aligned
