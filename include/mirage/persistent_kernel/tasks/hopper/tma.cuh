@@ -147,7 +147,7 @@ constexpr CUtensorMapSwizzle tma_swizzle = (B == 1    ? CU_TENSOR_MAP_SWIZZLE_32
 uint64_t gmem_prob_shape[5] = {GMEM_COL, GMEM_ROW, 1, 1, 1};
 uint64_t gmem_prob_stride[5] = {sizeof(T), GMEM_COL * sizeof(T), 0, 0, 0};
 
-assert((reinterpret_cast<uint64_t>(gmem_address) & 0b1111) == 0);  // Address must be 16B-aligned
+assert((reinterpret_cast<uint64_t>(global_addr) & 0b1111) == 0);  // Address must be 16B-aligned
 
 assert(gmem_prob_shape[0] >= (uint64_t(1)));               // Size must be min 1
 assert(gmem_prob_shape[0] <= (uint64_t(1) << 32));         // Size must be max 2^32
@@ -196,13 +196,13 @@ assert(smem_box_stride[3] <= (uint32_t(8)));               // Stride must be max
 assert(smem_box_stride[4] >= (uint32_t(1)));               // Stride must be min 1
 assert(smem_box_stride[4] <= (uint32_t(8)));               // Stride must be max 2^3 = 8
 
-uint64_t const *gmem_shape_ptr = &gmem_shape[0];
+uint64_t const *gmem_shape_ptr = &gmem_prob_shape[0];
 uint64_t const *gmem_stride_ptr = &gmem_prob_stride[0];
 uint32_t const *smem_box_shape_ptr = &smem_box_shape[0];
 uint32_t const *smem_box_stride_ptr = &smem_box_stride[0];
 
 
-printf("gmem_shape: %lu, %lu, %lu, %lu, %lu\n", gmem_shape[0], gmem_shape[1], gmem_shape[2], gmem_shape[3], gmem_shape[4]);
+printf("gmem_prob_shape: %lu, %lu, %lu, %lu, %lu\n", gmem_prob_shape[0], gmem_prob_shape[1], gmem_prob_shape[2], gmem_prob_shape[3], gmem_prob_shape[4]);
 printf("gmem_prob_stride: %lu, %lu, %lu, %lu, %lu\n", gmem_prob_stride[0], gmem_prob_stride[1], gmem_prob_stride[2], gmem_prob_stride[3], gmem_prob_stride[4]);
 printf("smem_box_shape: %d, %d, %d, %d, %d\n", smem_box_shape[0], smem_box_shape[1], smem_box_shape[2], smem_box_shape[3], smem_box_shape[4]);
 printf("smem_box_stride: %d, %d, %d, %d, %d\n", smem_box_stride[0], smem_box_stride[1], smem_box_stride[2], smem_box_stride[3], smem_box_stride[4]);
@@ -226,7 +226,7 @@ if (result != CUDA_SUCCESS) {
 std::cerr << "TMA Desc Addr:   " << &tma_desc << "\nformat         "
               << tma_format << "\ndim            " << tma_dim
               << "\ngmem_address   " << global_addr << "\nglobalDim      "
-              << gmem_shape << "\nglobalStrides  " << gmem_prob_stride
+              << gmem_prob_shape << "\nglobalStrides  " << gmem_prob_stride
               << "\nboxDim         " << smem_box_shape << "\nelementStrides "
               << smem_box_stride << "\ninterleave     " << tma_interleave
               << "\nswizzle        " << tma_swizzle << "\nl2Promotion    "
