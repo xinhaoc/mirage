@@ -22,7 +22,7 @@ for output_size in output_sizes:
         for j in range(reduction_size):
             w[i, j] = 0.1
 
-    x[2, 127] = 0.2
+    x[1, 0] = 0.2
     # x[0, 0] = 0.2
 
     runtime_kernel_hopper.linear(x, w, output)
