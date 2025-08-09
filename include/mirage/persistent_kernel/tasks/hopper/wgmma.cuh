@@ -30,6 +30,7 @@ namespace kernel {
   
     __device__ mma_descriptor(SMEM smem) {
       base_desc = matrix_descriptor_encode((uint64_t)(smem.base_ptr));
+      printf("SMEM::b %d\n", SMEM::b);
       if constexpr (MNmajor == false) {
         // swizzle mode
         if constexpr (SMEM::b == 3) {

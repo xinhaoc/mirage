@@ -65,65 +65,69 @@ struct smem_row {
     // (Pow2_M * Pow2_S)
     // + icol * (Pow2_M) + offset_in_bank;
 
-    size_t block_idx = logical_idx >> (M + S + B);
-    size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
+    // size_t block_idx = logical_idx >> (M + S + B);
+    // size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
 
-    size_t irow = in_block_idx >> (M + S);
-    size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
-    icol ^= irow;
-    size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
-    size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
-                        (icol << M) + offset_in_bank;
+    // size_t irow = in_block_idx >> (M + S);
+    // size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
+    // icol ^= irow;
+    // size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
+    // size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
+    //                     (icol << M) + offset_in_bank;
     // printf("phy_offset %d, %d\n", (int)logical_idx, (int)phy_offset);
-    return &base_ptr[phy_offset];
+    // return &base_ptr[phy_offset];
+    return &base_ptr[logical_idx];
   }
   __device__ __forceinline__ T &at(size_t logical_idx_row,
                                    size_t logical_idx_col) {
     size_t logical_idx = logical_idx_row * STRIDE + logical_idx_col;
     // assert(logical_idx < SIZE);
 
-    size_t block_idx = logical_idx >> (M + S + B);
-    size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
+    // size_t block_idx = logical_idx >> (M + S + B);
+    // size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
 
-    size_t irow = in_block_idx >> (M + S);
-    size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
-    icol ^= irow;
-    size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
+    // size_t irow = in_block_idx >> (M + S);
+    // size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
+    // icol ^= irow;
+    // size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
 
-    size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
-                        (icol << M) + offset_in_bank;
-    return base_ptr[phy_offset];
+    // size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
+    //                     (icol << M) + offset_in_bank;
+    // return base_ptr[phy_offset];
+    return base_ptr[logical_idx];
   }
 
   // 1D access
   __device__ __forceinline__ T &at(size_t logical_idx) {
     // assert(logical_idx < SIZE);
-    size_t block_idx = logical_idx >> (M + S + B);
-    size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
+    // size_t block_idx = logical_idx >> (M + S + B);
+    // size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
 
-    size_t irow = in_block_idx >> (M + S);
-    size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
-    icol ^= irow;
-    size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
+    // size_t irow = in_block_idx >> (M + S);
+    // size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
+    // icol ^= irow;
+    // size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
 
-    size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
-                        (icol << M) + offset_in_bank;
-    return base_ptr[phy_offset];
+    // size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
+    //                     (icol << M) + offset_in_bank;
+    // return base_ptr[phy_offset];
+    return base_ptr[logical_idx];
   }
 
   __device__ __forceinline__ T *operator[](size_t logical_idx) const {
     // assert(logical_idx < SIZE);
-    size_t block_idx = logical_idx >> (M + S + B);
-    size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
+    // size_t block_idx = logical_idx >> (M + S + B);
+    // size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
 
-    size_t irow = in_block_idx >> (M + S);
-    size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
-    icol ^= irow;
-    size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
+    // size_t irow = in_block_idx >> (M + S);
+    // size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
+    // icol ^= irow;
+    // size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
 
-    size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
-                        (icol << M) + offset_in_bank;
-    return &base_ptr[phy_offset];
+    // size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
+    //                     (icol << M) + offset_in_bank;
+    // return &base_ptr[phy_offset];
+    return &base_ptr[logical_idx];
   }
 };
 
@@ -159,61 +163,65 @@ struct smem_col {
   __device__ __forceinline__ T *operator()(size_t logical_idx_row,
                                            size_t logical_idx_col) {
     size_t logical_idx = logical_idx_col * STRIDE + logical_idx_row;
-    size_t block_idx = logical_idx >> (M + S + B);
-    size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
+    // size_t block_idx = logical_idx >> (M + S + B);
+    // size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
 
-    size_t irow = in_block_idx >> (M + S);
-    size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
-    icol ^= irow;
-    size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
+    // size_t irow = in_block_idx >> (M + S);
+    // size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
+    // icol ^= irow;
+    // size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
 
-    size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
-                        (icol << M) + offset_in_bank;
-    return &base_ptr[phy_offset];
+    // size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
+    //                     (icol << M) + offset_in_bank;
+    // return &base_ptr[phy_offset];
+    return &base_ptr[logical_idx];
   }
 
   __device__ __forceinline__ T &at(size_t logical_idx) {
-    size_t block_idx = logical_idx >> (M + S + B);
-    size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
+    // size_t block_idx = logical_idx >> (M + S + B);
+    // size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
 
-    size_t irow = in_block_idx >> (M + S);
-    size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
-    icol ^= irow;
-    size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
+    // size_t irow = in_block_idx >> (M + S);
+    // size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
+    // icol ^= irow;
+    // size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
 
-    size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
-                        (icol << M) + offset_in_bank;
-    return base_ptr[phy_offset];
+    // size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
+    //                     (icol << M) + offset_in_bank;
+    // return base_ptr[phy_offset];
+    return base_ptr[logical_idx];
   }
 
   __device__ __forceinline__ T &at(size_t logical_idx_row,
                                    size_t logical_idx_col) {
     size_t logical_idx = logical_idx_col * STRIDE + logical_idx_row;
-    size_t block_idx = logical_idx >> (M + S + B);
-    size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
+    // size_t block_idx = logical_idx >> (M + S + B);
+    // size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
 
-    size_t irow = in_block_idx >> (M + S);
-    size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
-    icol ^= irow;
-    size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
+    // size_t irow = in_block_idx >> (M + S);
+    // size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
+    // icol ^= irow;
+    // size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
 
-    size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
-                        (icol << M) + offset_in_bank;
-    return base_ptr[phy_offset];
+    // size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
+    //                     (icol << M) + offset_in_bank;
+    // return base_ptr[phy_offset];
+    return base_ptr[logical_idx];
   }
 
   __device__ __forceinline__ T *operator[](size_t logical_idx) const {
-    size_t block_idx = logical_idx >> (M + S + B);
-    size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
+    // size_t block_idx = logical_idx >> (M + S + B);
+    // size_t in_block_idx = logical_idx & ((1 << (M + S + B)) - 1);
 
-    size_t irow = in_block_idx >> (M + S);
-    size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
-    icol ^= irow;
-    size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
+    // size_t irow = in_block_idx >> (M + S);
+    // size_t icol = (in_block_idx >> M) & ((1 << S) - 1);
+    // icol ^= irow;
+    // size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
 
-    size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
-                        (icol << M) + offset_in_bank;
-    return &base_ptr[phy_offset];
+    // size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
+    //                     (icol << M) + offset_in_bank;
+    // return &base_ptr[phy_offset];
+    return &base_ptr[logical_idx];
   }
 };
 } // namespace kernel

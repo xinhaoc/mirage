@@ -58,8 +58,8 @@
    // using SM90_64x64x16_F16F16F16F32
    constexpr int num_n = OUTPUT_SIZE / 64;
    constexpr int num_m = BATCH_SIZE / 64;
-   // constexpr int num_k = REDUCTION_SIZE / TILE_SIZE;
-   constexpr int num_k = 1;
+   constexpr int num_k = REDUCTION_SIZE / TILE_SIZE;
+  //  constexpr int num_k = 1;
    int warp_idx = warp_id();
    int idx_in_warp = threadIdx.x % 32;
    int warpgroup_id = warp_idx / WARPGROUP_WARPS;
@@ -89,18 +89,18 @@
    // out
  
    // define the swizzle mode
-   using InputSmem = smem_row<T, 0, 0, 0, BATCH_SIZE, TILE_SIZE, TILE_SIZE>;
+   using InputSmem = smem_row<T, 1, 4, 3, BATCH_SIZE, TILE_SIZE, TILE_SIZE>;
    InputSmem input_smem(shared_input);
    InputSmem input_smem_buffer(shared_input);
  
-   using WeightSmem = smem_col<T, 0, 0, 0, TILE_SIZE, OUTPUT_SIZE, TILE_SIZE>;
+   using WeightSmem = smem_col<T, 1, 4, 3, TILE_SIZE, OUTPUT_SIZE, TILE_SIZE>;
    WeightSmem input_weight_smem(shared_weight);
    WeightSmem input_weight_smem_buffer(shared_weight);
  
    using A_DESC = wgmma::mma_descriptor<InputSmem>;
    using B_DESC = wgmma::mma_descriptor<WeightSmem>;
  
-   smem_row<T, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE> mm_output_smem(
+   smem_row<T, 1, 4, 3, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE> mm_output_smem(
        mm_output);
    float s_frag[32];
  
