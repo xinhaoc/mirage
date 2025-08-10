@@ -30,7 +30,6 @@ struct mma_descriptor {
 
   __device__ mma_descriptor(SMEM smem) {
     base_desc = matrix_descriptor_encode((uint64_t)(smem.base_ptr));
-    printf("SMEM::b %d\n", SMEM::b);
     if constexpr (MNmajor == false) {
       // swizzle mode
       if constexpr (SMEM::b == 3) {
@@ -69,8 +68,7 @@ __device__ static inline void warpgroup_commit_batch() {
 
 template <int tnspA, int tnspB>
 __device__ static inline void
-    wgmma_m64n64k16_bf16bf16bf32(bool accum,
-                                 uint64_t const &desc_a,
+    wgmma_m64n64k16_bf16bf16bf32(uint64_t const &desc_a,
                                  uint64_t const &desc_b,
                                  float &d00,
                                  float &d01,
@@ -105,10 +103,6 @@ __device__ static inline void
                                  float &d30,
                                  float &d31) {
 #ifdef MIRAGE_GRACE_HOPPER
-  if (threadIdx.x == 0) {
-    printf("desc_a: %llx\n", desc_a);
-    printf("desc_b: %llx\n", desc_b);
-  }
   asm volatile("{\n"
                ".reg .pred p;\n"
                "setp.ne.b32 p, %34, 0;\n"
@@ -155,7 +149,7 @@ __device__ static inline void
                  "+f"(d31)
                : "l"(desc_a),
                  "l"(desc_b),
-                 "r"(int32_t(accum == true ? 1 : 0)),
+                 "r"(int32_t(1)),
                  "n"(int32_t(1)),
                  "n"(int32_t(1)),
                  "n"(int32_t(tnspA)),
@@ -175,8 +169,7 @@ template <typename T,
           typename B_DESC,
           bool tnspA,
           bool tnspB>
-__device__ static inline void
-    mma(float *frag, A_DESC a_desc, B_DESC b_desc, bool accum) {
+__device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
   static_assert(SMEM_A::ROW == M);
   static_assert(SMEM_A::COL == K);
   static_assert(SMEM_B::ROW == K);
@@ -185,8 +178,7 @@ __device__ static inline void
                 std::is_same<T, bfloat16>::value && tnspA == false &&
                 tnspB == false) {
     for (int k = 0; k < (SMEM_A::COL / K); k++) {
-      wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(accum,
-                                                 a_desc.at(k * 16 * sizeof(T)),
+      wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(k * 16 * sizeof(T)),
                                                  b_desc.at(k * 16 * sizeof(T)),
                                                  frag[0],
                                                  frag[1],

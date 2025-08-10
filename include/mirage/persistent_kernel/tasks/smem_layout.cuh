@@ -29,6 +29,10 @@ struct smem_row {
   static constexpr size_t COL = COL_;
   static constexpr size_t SIZE = ROW * COL;
 
+  static constexpr int b = B;
+  static constexpr int m = M;
+  static constexpr int s = S;
+
   // static constexpr size_t Pow2_M = (1 << M);
   // static constexpr size_t Pow2_S = (1 << S);
   // static constexpr size_t Pow2_B = (1 << B);
@@ -155,6 +159,10 @@ struct smem_col {
 
   static constexpr size_t ROW = ROW_;
   static constexpr size_t COL = COL_;
+
+  static constexpr int b = B;
+  static constexpr int m = M;
+  static constexpr int s = S;
 
   static constexpr size_t Pow2_M = (1 << M);
   static constexpr size_t Pow2_S = (1 << S);

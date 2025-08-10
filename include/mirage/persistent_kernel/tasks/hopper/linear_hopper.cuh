@@ -30,7 +30,6 @@ namespace kernel {
 using namespace tma;
 using bfloat16 = type::bfloat16_t;
 
-// a 64X64X4K kernel for reference
 template <typename T,
           int BATCH_SIZE,
           int OUTPUT_SIZE,
@@ -40,11 +39,10 @@ template <typename T,
           typename TMA_B,
           typename TMA_OUT,
           int OUTPUT_STRIDE = OUTPUT_SIZE>
-__device__ __forceinline__ void
-    linear_kernel_hopper_demo(void *output_ptr,
-                              const TMA_A &tma_a,
-                              const TMA_B &tma_b,
-                              const TMA_OUT &tma_out) {
+__device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
+                                                     const TMA_A &tma_a,
+                                                     const TMA_B &tma_b,
+                                                     const TMA_OUT &tma_out) {
   constexpr int chunk_size = 16 / sizeof(T);
   constexpr int TILE_SIZE = 16;
   constexpr int THREADS_PER_WARPGROUP = 128;
@@ -56,11 +54,11 @@ __device__ __forceinline__ void
   constexpr int TMA_TRANS_BYTES_B = sizeof(T) * TILE_SIZE * OUTPUT_SIZE;
   constexpr int TMA_TRANS_BYTES_OUT = sizeof(T) * BATCH_SIZE * TILE_SIZE;
 
-  // using SM90_64x64x16_F16F16F16F32
+  // using SM90_64x64x16_F32BF16BF16
   constexpr int num_n = OUTPUT_SIZE / 64;
   constexpr int num_m = BATCH_SIZE / 64;
   constexpr int num_k = REDUCTION_SIZE / TILE_SIZE;
-  //  constexpr int num_k = 1;
+
   int warp_idx = warp_id();
   int idx_in_warp = threadIdx.x % 32;
   int warpgroup_id = warp_idx / WARPGROUP_WARPS;
@@ -172,26 +170,6 @@ __device__ __forceinline__ void
       input_weight_smem.set_ptr(
           shared_weight + ((i) % Kstages) * TMA_TRANS_BYTES_B / sizeof(T));
 
-      //  if (threadIdx.x == 0) {
-      //    printf("i: %d\n", i);
-      //    printf("input_smem ptr: %p\n", input_smem(0, 0));
-      //    printf("input_weight_smem ptr: %p\n", input_weight_smem(0, 0));
-      //    printf("input_smem\n");
-      //    for (int j = 0; j < BATCH_SIZE; j++) {
-      //      for (int k = 0; k < TILE_SIZE; k++) {
-      //        printf("%f ", (float)input_smem.at(j, k));
-      //      }
-      //      printf("\n");
-      //    }
-      //    printf("input_weight_smem\n");
-      //    for (int j = 0; j < TILE_SIZE; j++) {
-      //      for (int k = 0; k < OUTPUT_SIZE; k++) {
-      //        printf("%f ", (float)input_weight_smem.at(j, k));
-      //      }
-      //      printf("\n");
-      //    }
-      //  }
-
       A_DESC a_desc(input_smem(0, 0));
       B_DESC b_desc(input_weight_smem(0, 0));
 
@@ -212,12 +190,6 @@ __device__ __forceinline__ void
       wgmma::mma_async_wait();
       wgmma::warpgroup_fence_fragment(s_frag);
 
-      if (threadIdx.x == 4) {
-        for (int s = 0; s < 32; s++) {
-          printf("s_frag[%d] = %f\n", s, (float)s_frag[s]);
-        }
-      }
-
       // flip compute done
       if (idx_in_warp == 0 && warp_idx % 4 == 0) {
         arrive(compute_done[i % Kstages], 1);
@@ -232,17 +204,6 @@ __device__ __forceinline__ void
       int col = (i / 2) * 8 + (idx_in_warp % 4) * 2;
       mm_output_smem.at(row, col) = bfloat16(s_frag[i * 2]);
       mm_output_smem.at(row, col + 1) = bfloat16(s_frag[i * 2 + 1]);
-
-      //  if (threadIdx.x == 4) {
-      //    printf("mm_output_smem.at(%d, %d) = %f\n",
-      //           row,
-      //           col,
-      //           (float)mm_output_smem.at(row, col));
-      //    printf("mm_output_smem.at(%d, %d) = %f\n",
-      //           row,
-      //           col + 1,
-      //           (float)mm_output_smem.at(row, col + 1));
-      //  }
     }
 
     // make sure generic proxy's modification to smem is visible to tma store
@@ -252,16 +213,6 @@ __device__ __forceinline__ void
     // this is inter-thread sync
     wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
 
-    //  if (threadIdx.x == 0) {
-    //    printf("mm_output_smem\n");
-    //    for (int j = 0; j < BATCH_SIZE; j++) {
-    //      for (int k = 0; k < OUTPUT_SIZE; k++) {
-    //        printf("%f ", (float)mm_output_smem.at(j, k));
-    //      }
-    //      printf("\n");
-    //    }
-    //  }
-
     // copy back to dmem
     if (warp_idx % 4 == 0 && lane_id() == 0) {
       tma_out.tma_store_async(mm_output_smem(0, 0), {0, 0});
@@ -269,16 +220,6 @@ __device__ __forceinline__ void
     }
     store_async_wait<0>();
     wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
-
-    // if (threadIdx.x == 0) {
-    //   printf("mm_output_gmem\n");
-    //   for (int j = 0; j < BATCH_SIZE; j++) {
-    //     for (int k = 0; k < OUTPUT_SIZE; k++) {
-    //       printf("%f ", (float)output_dmem.at(j, k));
-    //     }
-    //     printf("\n");
-    //   }
-    // }
   }
 }
 

@@ -35,10 +35,10 @@ template <typename T,
           int B,
           int M,
           int S,
-          size_t GMEM_ROW, // 64
-          size_t GMEM_COL, // 4096
-          size_t SMEM_ROW, // 64
-          size_t SMEM_COL, // 64
+          size_t GMEM_ROW,
+          size_t GMEM_COL,
+          size_t SMEM_ROW,
+          size_t SMEM_COL,
           bool ROW_MAJOR = true>
 struct tma {
 
@@ -53,7 +53,9 @@ struct tma {
 
     cudaPointerAttributes attr;
     cudaPointerGetAttributes(&attr, desc_ptr);
+#ifdef MIRAGE_DEBUG_HOPPER
     std::cout << "Memory type: " << attr.type << std::endl;
+#endif
   }
 
 public:
@@ -65,10 +67,6 @@ public:
         static_cast<uint32_t>(__cvta_generic_to_shared(&mbar));
     uint32_t smem_int_ptr =
         static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
-
-    // if (threadIdx.x == 128 && threadIdx.y == 0 && threadIdx.z == 0) {
-    //   printf("tma_cp_async: crd0: %d, crd1: %d", tma_coords.x, tma_coords.y);
-    // }
 
     asm volatile("cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier:"
                  ":complete_tx::bytes"
@@ -132,17 +130,7 @@ private:
          : B == 2 ? CU_TENSOR_MAP_SWIZZLE_64B
          : B == 3 ? CU_TENSOR_MAP_SWIZZLE_128B
                   : CU_TENSOR_MAP_SWIZZLE_NONE);
-    //  constexpr CUtensorMapSwizzle tma_swizzle = CU_TENSOR_MAP_SWIZZLE_NONE;
 
-    //     printf("GMEM_ROW: %zu, GMEM_COL: %zu\n", GMEM_ROW, GMEM_COL);
-
-    // no swizzle
-    // uint64_t gmem_shape[5] = {GMEM_COL, GMEM_ROW, 1, 1, 1};
-    // uint64_t gmem_prob_stride[5] = {sizeof(T), GMEM_COL * sizeof(T), 0, 0,
-    // 0}; uint32_t smem_box_shape[5] = {SMEM_COL, SMEM_ROW, 1, 1, 1}; uint32_t
-    // smem_box_stride[5] = {1, 1, 1, 1, 1};
-
-    // sw32
     uint64_t gmem_prob_shape[5] = {GMEM_COL, GMEM_ROW, 1, 1, 1};
     uint64_t gmem_prob_stride[5] = {sizeof(T), GMEM_COL * sizeof(T), 0, 0, 0};
 
@@ -213,6 +201,7 @@ private:
     uint32_t const *smem_box_shape_ptr = &smem_box_shape[0];
     uint32_t const *smem_box_stride_ptr = &smem_box_stride[0];
 
+#ifdef MIRAGE_DEBUG_HOPPER
     printf("gmem_prob_shape: %lu, %lu, %lu, %lu, %lu\n",
            gmem_prob_shape[0],
            gmem_prob_shape[1],
@@ -237,6 +226,7 @@ private:
            smem_box_stride[2],
            smem_box_stride[3],
            smem_box_stride[4]);
+#endif
 
     CUresult result = cuTensorMapEncodeTiled(tma_desc,
                                              tma_format,
