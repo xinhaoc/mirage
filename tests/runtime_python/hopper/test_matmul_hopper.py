@@ -21,10 +21,14 @@ for reduction_size in reduction_sizes:
         w = torch.randn(
             (output_size, reduction_size), device="cuda", dtype=torch.bfloat16
         )
+        residual = torch.randn(64, output_size, device="cuda", dtype=torch.bfloat16)
         output = torch.empty(64, output_size, device="cuda", dtype=torch.bfloat16)
 
-        runtime_kernel_hopper.linear(x, w, output)
+        runtime_kernel_hopper.linear(x, w, residual, output)
         torch_out = torch.matmul(x, torch.transpose(w, 0, 1))
+        torch_out = torch_out + residual
+
+
 
         # print("torch_out.shape", torch_out.shape)
         # print(torch_out)
@@ -36,7 +40,7 @@ for reduction_size in reduction_sizes:
 
         # Warm-up
         for _ in range(16):
-            runtime_kernel_hopper.linear(x, w, output)
+            runtime_kernel_hopper.linear(x, w, residual, output)
 
         torch.cuda.synchronize()
         starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(
@@ -45,7 +49,7 @@ for reduction_size in reduction_sizes:
         repetitions = 1000
         starter.record()
         for rep in range(repetitions):
-            runtime_kernel_hopper.linear(x, w, output)
+            runtime_kernel_hopper.linear(x, w, residual, output)
         ender.record()
         torch.cuda.synchronize()
         total_time = starter.elapsed_time(ender)

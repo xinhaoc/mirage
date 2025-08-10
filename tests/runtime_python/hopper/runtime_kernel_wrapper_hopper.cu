@@ -26,13 +26,15 @@ template <typename T,
           int REDUCTION_SIZE,
           typename TMA_A,
           typename TMA_B,
+          typename TMA_RESIDUAL,
           typename TMA_OUT,
           int Kstages = 2>
-__global__ __launch_bounds__(256, 1) void
-    linear_kernel_hopper_wrapper(void *output_ptr,
-                                 const __grid_constant__ TMA_A tma_a,
-                                 const __grid_constant__ TMA_B tma_b,
-                                 const __grid_constant__ TMA_OUT tma_out) {
+__global__ __launch_bounds__(256, 1) void linear_kernel_hopper_wrapper(
+    void *output_ptr,
+    const __grid_constant__ TMA_A tma_a,
+    const __grid_constant__ TMA_B tma_b,
+    const __grid_constant__ TMA_RESIDUAL tma_residual,
+    const __grid_constant__ TMA_OUT tma_out) {
   linear_kernel_hopper<T,
                        BATCH_SIZE,
                        OUTPUT_SIZE,
@@ -40,11 +42,15 @@ __global__ __launch_bounds__(256, 1) void
                        Kstages,
                        TMA_A,
                        TMA_B,
-                       TMA_OUT>(output_ptr, tma_a, tma_b, tma_out);
+                       TMA_OUT>(
+      output_ptr, tma_a, tma_b, tma_residual, tma_out);
 }
 
 template <typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE>
-void launch_linear_hopper(void *input_ptr, void *weight_ptr, void *output_ptr) {
+void launch_linear_hopper(void *input_ptr,
+                          void *weight_ptr,
+                          void *residual_ptr,
+                          void *output_ptr) {
 
   constexpr int B = 3;
   constexpr int M = 4;
@@ -52,8 +58,15 @@ void launch_linear_hopper(void *input_ptr, void *weight_ptr, void *output_ptr) {
 
   constexpr int TILE_SIZE = 64;
 
-  using TMA_A = kernel::tma::
-      tma<bfloat16, B, M, S, BATCH_SIZE, REDUCTION_SIZE, BATCH_SIZE, TILE_SIZE, true>;
+  using TMA_A = kernel::tma::tma<bfloat16,
+                                 B,
+                                 M,
+                                 S,
+                                 BATCH_SIZE,
+                                 REDUCTION_SIZE,
+                                 BATCH_SIZE,
+                                 TILE_SIZE,
+                                 true>;
   using TMA_B = kernel::tma::tma<bfloat16,
                                  B,
                                  M,
@@ -63,12 +76,29 @@ void launch_linear_hopper(void *input_ptr, void *weight_ptr, void *output_ptr) {
                                  OUTPUT_SIZE,
                                  TILE_SIZE,
                                  true>;
+  using TMA_RESIDUAL = kernel::tma::tma<bfloat16,
+                                        0,
+                                        0,
+                                        0,
+                                        BATCH_SIZE,
+                                        OUTPUT_SIZE,
+                                        BATCH_SIZE,
+                                        OUTPUT_SIZE,
+                                        true>;
 
-  using TMA_OUT = kernel::tma::
-      tma<bfloat16, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, BATCH_SIZE, 64, true>;
+  using TMA_OUT = kernel::tma::tma<bfloat16,
+                                   0,
+                                   0,
+                                   0,
+                                   BATCH_SIZE,
+                                   OUTPUT_SIZE,
+                                   BATCH_SIZE,
+                                   TILE_SIZE,
+                                   true>;
 
   TMA_A tma_a(input_ptr);
   TMA_B tma_b(weight_ptr);
+  TMA_RESIDUAL tma_residual(residual_ptr);
   TMA_OUT tma_out(output_ptr);
 
   dim3 grid_dim(1, 1, 1);
@@ -80,6 +110,7 @@ void launch_linear_hopper(void *input_ptr, void *weight_ptr, void *output_ptr) {
                                                     REDUCTION_SIZE,
                                                     TMA_A,
                                                     TMA_B,
+                                                    TMA_RESIDUAL,
                                                     TMA_OUT>,
                        cudaFuncAttributeMaxDynamicSharedMemorySize,
                        smem_size);
@@ -90,15 +121,16 @@ void launch_linear_hopper(void *input_ptr, void *weight_ptr, void *output_ptr) {
                                REDUCTION_SIZE,
                                TMA_A,
                                TMA_B,
-                               TMA_OUT>
-      <<<grid_dim, block_dim, smem_size>>>(output_ptr, tma_a, tma_b, tma_out);
+                               TMA_RESIDUAL,
+                               TMA_OUT><<<grid_dim, block_dim, smem_size>>>(
+      output_ptr, tma_a, tma_b, tma_residual, tma_out);
 }
 
 #define DISPATCH_LINEAR_HOPPER_REDUCTION_SIZE_CASE(                            \
     BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE)                                   \
   case REDUCTION_SIZE:                                                         \
     launch_linear_hopper<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE>(   \
-        input_ptr, weight_ptr, output_ptr);                                    \
+        input_ptr, weight_ptr, residual_ptr, output_ptr);                      \
     break;
 
 #define DISPATCH_LINEAR_HOPPER_REDUCTION_SIZE(BATCH_SIZE, OUTPUT_SIZE)         \
@@ -133,10 +165,12 @@ void launch_linear_hopper(void *input_ptr, void *weight_ptr, void *output_ptr) {
 
 void linear_kernel(torch::Tensor input,
                    torch::Tensor weight,
+                   torch::Tensor residual,
                    torch::Tensor output) {
 
   void *input_ptr = input.data_ptr();
   void *weight_ptr = weight.data_ptr();
+  void *residual_ptr = residual.data_ptr();
   void *output_ptr = output.data_ptr();
 
   switch (input.size(0)) {
