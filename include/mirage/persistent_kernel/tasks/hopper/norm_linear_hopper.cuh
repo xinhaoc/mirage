@@ -197,6 +197,9 @@
       if (lane_id() == 0 && warp_idx == (NUM_WARPGROUPS * WARPGROUP_WARPS - 4)) {
        int prefetch = (Kstages < num_k) ? Kstages : num_k;
        for (int i = 0; i < prefetch; i++) {
+          if (threadIdx.x == 128){
+            printf("prefetch: %d\n", i);
+          }
          int slot = i % Kstages;
           int2 tma_coords_in = {i * TILE_SIZE, 0};
           int2 tma_coords_w  = {i * TILE_SIZE, 0};
@@ -220,11 +223,6 @@
               linear_weight_barrier[slot], linear_weight_smem_buffer(0, 0), tma_coords_w);
        }
  
-       // launch tma for residual
-        set_barrier_transaction_bytes(linear_weight_barrier[0],
-                                      TMA_TRANS_BYTES_LINEAR_WEIGHT);
-         tma_linear_weight.tma_cp_async(
-             linear_weight_barrier[0], linear_weight_smem(0, 0), {0, 0});
  
         for (int i = prefetch; i < num_k; i++) {
          int slot = i % Kstages;
@@ -256,6 +254,7 @@
    } else {
      // warp specialization compute warpgroup
      // wg_increase_regs<160>();
+
       for (int i = 0; i < num_k; i++) {
        int slot = i % Kstages;
        int phase = (i / Kstages) % 2;
@@ -307,27 +306,27 @@
      // write back to shared memory
  
      // TODO: overlap this with mma, put it before async wait
-     {
-        float const scalars[] = {0.0f, 1.0f / float(REDUCTION_SIZE)};
-        perform_element_unary_chain_kernel<true,
-                                           decltype(element_unary_smem),
-                                           decltype(input_smem),
-                                           ElementUnaryOpType::SQUARE,
-                                           ElementUnaryOpType::MULSCALAR>(
-            element_unary_smem, input_smem, scalars);
+    //  {
+    //     float const scalars[] = {0.0f, 1.0f / float(REDUCTION_SIZE)};
+    //     perform_element_unary_chain_kernel<true,
+    //                                        decltype(element_unary_smem),
+    //                                        decltype(input_smem),
+    //                                        ElementUnaryOpType::SQUARE,
+    //                                        ElementUnaryOpType::MULSCALAR>(
+    //         element_unary_smem, input_smem, scalars);
 
-        wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
-      }
-      {
-        float const scalars[] = {eps, 0.0f};
-        reduction_sum_col<T,
-                          decltype(reduction_output_smem),
-                          decltype(element_unary_smem),
-                          ElementUnaryOpType::ADDSCALAR,
-                          ElementUnaryOpType::SQRT>(
-            reduction_output_smem, element_unary_smem, scalars);
-        wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
-     }
+    //     wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
+    //   }
+    //   {
+    //     float const scalars[] = {eps, 0.0f};
+    //     reduction_sum_col<T,
+    //                       decltype(reduction_output_smem),
+    //                       decltype(element_unary_smem),
+    //                       ElementUnaryOpType::ADDSCALAR,
+    //                       ElementUnaryOpType::SQRT>(
+    //         reduction_output_smem, element_unary_smem, scalars);
+    //     wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
+    //  }
       
  #pragma unroll 1
      for (uint32_t i = 0; i < 16; i++) {
@@ -342,7 +341,7 @@
      wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
 
      // divide
-     div_col(mm_output_smem, mm_output_smem, reduction_output_smem);
+    //  div_col(mm_output_smem, mm_output_smem, reduction_output_smem);
 
 
  
