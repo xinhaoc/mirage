@@ -81,7 +81,7 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
       SHARED_INPUT_BUFFER_OFFSET + sizeof(T) * Kstages * BATCH_SIZE * TILE_SIZE;
 
   constexpr size_t SHARED_MM_OUTPUT_BUFFER_OFFSET =
-      SHARED_WEIGHT_BUFFER_OFFSET + sizeof(T) * Kstages * TILE_SIZE * TILE_SIZE;
+      SHARED_WEIGHT_BUFFER_OFFSET + sizeof(T) * Kstages * TILE_SIZE * OUTPUT_SIZE;
 
   // copy input
   T *shared_input = (T *)(smem + SHARED_INPUT_BUFFER_OFFSET);
@@ -133,46 +133,62 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
   // warp specialization data movement warpgroup
   if (warpgroup_id == NUM_WARPGROUPS - 1) {
 
-    wg_decrease_regs<32>();
+    // wg_decrease_regs<32>();
     if (lane_id() == 0 && warp_idx == (NUM_WARPGROUPS * WARPGROUP_WARPS - 4)) {
-      for (int i = 0; i < num_k; i++) {
-        // get cord, copy
+      int prefetch = (Kstages < num_k) ? Kstages : num_k;
+      for (int i = 0; i < prefetch; i++) {
+        int slot = i % Kstages;
         int2 tma_coords_A = {i * TILE_SIZE, 0};
         int2 tma_coords_B = {i * TILE_SIZE, 0};
-        set_barrier_transaction_bytes(input_barrier[(i) % Kstages],
-                                      TMA_TRANS_BYTES_A);
-        tma_a.tma_cp_async(input_barrier[(i) % Kstages],
-                           input_smem_buffer(0, 0),
-                           tma_coords_A);
-        set_barrier_transaction_bytes(weight_barrier[(i) % Kstages],
-                                      TMA_TRANS_BYTES_B);
-
-        tma_b.tma_cp_async(weight_barrier[(i) % Kstages],
-                           input_weight_smem_buffer(0, 0),
-                           tma_coords_B);
-
-        wait(compute_done[(i + 1) % Kstages],
-             ((i + 1 + Kstages) / Kstages) % Kstages);
 
         input_smem_buffer.set_ptr(
-            shared_input + ((i + 1) % Kstages) * TMA_TRANS_BYTES_A / sizeof(T));
-        input_weight_smem_buffer.set_ptr(shared_weight + ((i + 1) % Kstages) *
-                                                             TMA_TRANS_BYTES_B /
-                                                             sizeof(T));
+            shared_input + slot * TMA_TRANS_BYTES_A / sizeof(T));
+        set_barrier_transaction_bytes(input_barrier[slot], TMA_TRANS_BYTES_A);
+        tma_a.tma_cp_async(input_barrier[slot], input_smem_buffer(0, 0),
+                           tma_coords_A);
+
+        input_weight_smem_buffer.set_ptr(
+            shared_weight + slot * TMA_TRANS_BYTES_B / sizeof(T));
+        set_barrier_transaction_bytes(weight_barrier[slot], TMA_TRANS_BYTES_B);
+        tma_b.tma_cp_async(weight_barrier[slot],
+                           input_weight_smem_buffer(0, 0), tma_coords_B);
+      }
+
+      for (int i = prefetch; i < num_k; i++) {
+        int slot = i % Kstages;
+        int phase = (i / Kstages) % 2;
+        wait(compute_done[slot], phase^1);
+
+        int2 tma_coords_A = {i * TILE_SIZE, 0};
+        int2 tma_coords_B = {i * TILE_SIZE, 0};
+
+        input_smem_buffer.set_ptr(
+            shared_input + slot * TMA_TRANS_BYTES_A / sizeof(T));
+        set_barrier_transaction_bytes(input_barrier[slot], TMA_TRANS_BYTES_A);
+        tma_a.tma_cp_async(input_barrier[slot], input_smem_buffer(0, 0),
+                           tma_coords_A);
+
+        input_weight_smem_buffer.set_ptr(
+            shared_weight + slot * TMA_TRANS_BYTES_B / sizeof(T));
+        set_barrier_transaction_bytes(weight_barrier[slot], TMA_TRANS_BYTES_B);
+        tma_b.tma_cp_async(weight_barrier[slot],
+                           input_weight_smem_buffer(0, 0), tma_coords_B);
       }
     }
   } else {
     // warp specialization compute warpgroup
-    wg_increase_regs<160>();
+    // wg_increase_regs<160>();
     for (int i = 0; i < num_k; i++) {
+      int slot = i % Kstages;
+      int phase = (i / Kstages) % 2;
       // wait input, weight
-      wait(input_barrier[i % Kstages], ((i / Kstages) % Kstages));
-      wait(weight_barrier[i % Kstages], ((i / Kstages) % Kstages));
+      wait(input_barrier[slot], phase);
+      wait(weight_barrier[slot], phase);
 
       input_smem.set_ptr(shared_input +
-                         ((i) % Kstages) * TMA_TRANS_BYTES_A / sizeof(T));
+                         (slot) * TMA_TRANS_BYTES_A / sizeof(T));
       input_weight_smem.set_ptr(
-          shared_weight + ((i) % Kstages) * TMA_TRANS_BYTES_B / sizeof(T));
+          shared_weight + (slot) * TMA_TRANS_BYTES_B / sizeof(T));
 
       A_DESC a_desc(input_smem(0, 0));
       B_DESC b_desc(input_weight_smem(0, 0));
@@ -196,7 +212,7 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
 
       // flip compute done
       if (idx_in_warp == 0 && warp_idx % 4 == 0) {
-        arrive(compute_done[i % Kstages], 1);
+        arrive(compute_done[slot], 1);
       }
     }
     // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-register-fragment-wgmma-64n16:~:text=The%20layout%20of%20the%20fragments%20held%20by%20different%20threads%20is%20shown%20in%20Figure%20149.
