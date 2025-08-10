@@ -46,20 +46,26 @@ __global__ void
 template <typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE>
 void launch_linear_hopper(void *input_ptr, void *weight_ptr, void *output_ptr) {
 
+  constexpr int B = 3;
+  constexpr int M = 4;
+  constexpr int S = 3;
+
+  constexpr int TILE_SIZE = 64;
+
   using TMA_A = kernel::tma::
-      tma<bfloat16, 1, 4, 3, BATCH_SIZE, REDUCTION_SIZE, BATCH_SIZE, 16, true>;
+      tma<bfloat16, B, M, S, BATCH_SIZE, REDUCTION_SIZE, BATCH_SIZE, TILE_SIZE, true>;
   using TMA_B = kernel::tma::tma<bfloat16,
-                                 1,
-                                 4,
-                                 3,
+                                 B,
+                                 M,
+                                 S,
                                  OUTPUT_SIZE,
                                  REDUCTION_SIZE,
                                  OUTPUT_SIZE,
-                                 16,
+                                 TILE_SIZE,
                                  true>;
 
   using TMA_OUT = kernel::tma::
-      tma<bfloat16, 0, 4, 3, BATCH_SIZE, OUTPUT_SIZE, BATCH_SIZE, 64, true>;
+      tma<bfloat16, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, BATCH_SIZE, 64, true>;
 
   TMA_A tma_a(input_ptr);
   TMA_B tma_b(weight_ptr);

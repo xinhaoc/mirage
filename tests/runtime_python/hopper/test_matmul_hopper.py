@@ -8,7 +8,7 @@ g = torch.Generator(device="cuda").manual_seed(1234)
 
 # reduction_size = 4096
 # output_sizes = [16, 32, 64]
-reduction_sizes = [128, 256, 3072, 4096]
+reduction_sizes = [4096]
 output_sizes = [64]
 
 for reduction_size in reduction_sizes:
@@ -33,3 +33,21 @@ for reduction_size in reduction_sizes:
 
         print("Ratio (kernel / torch):")
         print(output / torch_out)
+
+        # Warm-up
+        for _ in range(16):
+            runtime_kernel_hopper.linear(x, w, output)
+
+        torch.cuda.synchronize()
+        starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(
+            enable_timing=True
+        )
+        repetitions = 1000
+        starter.record()
+        for rep in range(repetitions):
+            runtime_kernel_hopper.linear(x, w, output)
+        ender.record()
+        torch.cuda.synchronize()
+        total_time = starter.elapsed_time(ender)
+        avg_time = total_time / repetitions
+        print(f"Average time over {repetitions} runs: {avg_time:.6f} ms")

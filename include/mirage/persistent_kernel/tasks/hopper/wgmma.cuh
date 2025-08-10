@@ -171,15 +171,14 @@ template <typename T,
           bool tnspB>
 __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
   static_assert(SMEM_A::ROW == M);
-  static_assert(SMEM_A::COL == K);
-  static_assert(SMEM_B::ROW == K);
   static_assert(SMEM_B::COL == N);
   if constexpr (M == 64 && N == 64 && K == 16 &&
                 std::is_same<T, bfloat16>::value && tnspA == false &&
                 tnspB == false) {
     for (int k = 0; k < (SMEM_A::COL / K); k++) {
-      wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(k * 16 * sizeof(T)),
-                                                 b_desc.at(k * 16 * sizeof(T)),
+      int k_offset = (k % 4) * 32 + (k / 4) * 8 * 2048;
+      wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(k_offset),
+                                                 b_desc.at(k_offset),
                                                  frag[0],
                                                  frag[1],
                                                  frag[2],

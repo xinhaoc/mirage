@@ -43,8 +43,9 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
                                                      const TMA_A &tma_a,
                                                      const TMA_B &tma_b,
                                                      const TMA_OUT &tma_out) {
+
   constexpr int chunk_size = 16 / sizeof(T);
-  constexpr int TILE_SIZE = 16;
+  constexpr int TILE_SIZE = 64;
   constexpr int THREADS_PER_WARPGROUP = 128;
   constexpr int CONSUMER_WARPGROUPS = 1;
   constexpr int PRODUCER_WARPGROUPS = 1;
@@ -52,12 +53,15 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
 
   constexpr int TMA_TRANS_BYTES_A = sizeof(T) * BATCH_SIZE * TILE_SIZE;
   constexpr int TMA_TRANS_BYTES_B = sizeof(T) * TILE_SIZE * OUTPUT_SIZE;
-  constexpr int TMA_TRANS_BYTES_OUT = sizeof(T) * BATCH_SIZE * TILE_SIZE;
 
   // using SM90_64x64x16_F32BF16BF16
   constexpr int num_n = OUTPUT_SIZE / 64;
   constexpr int num_m = BATCH_SIZE / 64;
   constexpr int num_k = REDUCTION_SIZE / TILE_SIZE;
+
+  constexpr int B = 3;
+  constexpr int M = 4;
+  constexpr int S = 3;
 
   int warp_idx = warp_id();
   int idx_in_warp = threadIdx.x % 32;
@@ -89,19 +93,19 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
 
   // define the swizzle mode
   using InputSmem =
-      smem_row<T, 1, 4, 3, BATCH_SIZE, TILE_SIZE, TILE_SIZE, true>;
+      smem_row<T, B, M, S, BATCH_SIZE, TILE_SIZE, TILE_SIZE, true>;
   InputSmem input_smem(shared_input);
   InputSmem input_smem_buffer(shared_input);
 
   using WeightSmem =
-      smem_col<T, 1, 4, 3, TILE_SIZE, OUTPUT_SIZE, TILE_SIZE, true>;
+      smem_col<T, B, M, S, TILE_SIZE, OUTPUT_SIZE, TILE_SIZE, true>;
   WeightSmem input_weight_smem(shared_weight);
   WeightSmem input_weight_smem_buffer(shared_weight);
 
   using A_DESC = wgmma::mma_descriptor<InputSmem>;
   using B_DESC = wgmma::mma_descriptor<WeightSmem>;
 
-  smem_row<T, 0, 4, 3, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE, false>
+  smem_row<T, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE, false>
       mm_output_smem(mm_output);
   float s_frag[32];
 
@@ -129,7 +133,7 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
   // warp specialization data movement warpgroup
   if (warpgroup_id == NUM_WARPGROUPS - 1) {
 
-    // wg_decrease_regs<32>();
+    wg_decrease_regs<32>();
     if (lane_id() == 0 && warp_idx == (NUM_WARPGROUPS * WARPGROUP_WARPS - 4)) {
       for (int i = 0; i < num_k; i++) {
         // get cord, copy
@@ -159,7 +163,6 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
     }
   } else {
     // warp specialization compute warpgroup
-    // wg_increase_regs<160>();
     for (int i = 0; i < num_k; i++) {
       // wait input, weight
       wait(input_barrier[i % Kstages], ((i / Kstages) % Kstages));
@@ -173,8 +176,9 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
       A_DESC a_desc(input_smem(0, 0));
       B_DESC b_desc(input_weight_smem(0, 0));
 
-      wgmma::warpgroup_fence_fragment(s_frag);
+    //   wgmma::warpgroup_fence_fragment(s_frag);
       wgmma::warpgroup_arrive();
+      wg_increase_regs<160>();
       // wgmma
       wgmma::mma<bfloat16,
                  64,
@@ -188,7 +192,7 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
                  false>(s_frag, a_desc, b_desc);
       wgmma::mma_commit_group();
       wgmma::mma_async_wait();
-      wgmma::warpgroup_fence_fragment(s_frag);
+    //   wgmma::warpgroup_fence_fragment(s_frag);
 
       // flip compute done
       if (idx_in_warp == 0 && warp_idx % 4 == 0) {
@@ -198,7 +202,9 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
     // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-register-fragment-wgmma-64n16:~:text=The%20layout%20of%20the%20fragments%20held%20by%20different%20threads%20is%20shown%20in%20Figure%20149.
     // write back to shared memory
 
-#pragma unroll
+    // asm volatile("" ::: "memory");
+
+#pragma unroll 1
     for (uint32_t i = 0; i < 16; i++) {
       int row = (warp_idx % 4) * 16 + (i % 2) * 8 + idx_in_warp / 4;
       int col = (i / 2) * 8 + (idx_in_warp % 4) * 2;
@@ -219,7 +225,6 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
       store_commit_group();
     }
     store_async_wait<0>();
-    wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
   }
 }
 
