@@ -28,7 +28,7 @@ template <typename T,
           typename TMA_B,
           typename TMA_OUT,
           int Kstages = 2>
-__global__ void
+__global__ __launch_bounds__(256, 1) void
     linear_kernel_hopper_wrapper(void *output_ptr,
                                  const __grid_constant__ TMA_A tma_a,
                                  const __grid_constant__ TMA_B tma_b,

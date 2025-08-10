@@ -163,6 +163,7 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
     }
   } else {
     // warp specialization compute warpgroup
+    wg_increase_regs<160>();
     for (int i = 0; i < num_k; i++) {
       // wait input, weight
       wait(input_barrier[i % Kstages], ((i / Kstages) % Kstages));
@@ -178,7 +179,6 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
 
     //   wgmma::warpgroup_fence_fragment(s_frag);
       wgmma::warpgroup_arrive();
-      wg_increase_regs<160>();
       // wgmma
       wgmma::mma<bfloat16,
                  64,
@@ -217,7 +217,7 @@ __device__ __forceinline__ void linear_kernel_hopper(void *output_ptr,
     async_proxy_fence();
 
     // this is inter-thread sync
-    wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
+    // wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
 
     // copy back to dmem
     if (warp_idx % 4 == 0 && lane_id() == 0) {
