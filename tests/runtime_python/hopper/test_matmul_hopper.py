@@ -8,8 +8,8 @@ g = torch.Generator(device="cuda").manual_seed(1234)
 
 # reduction_size = 4096
 # output_sizes = [16, 32, 64]
-reduction_sizes = [4096]
-output_sizes = [64]
+reduction_sizes = [128, 3072, 4096]
+output_sizes = [16, 32, 64]
 
 for reduction_size in reduction_sizes:
     for output_size in output_sizes:

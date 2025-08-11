@@ -132,8 +132,6 @@ __device__ __forceinline__ void
   // reduction output
   T *shared_reduction_output = (T *)(smem + SHARED_REDUCTION_OUTPUT_OFFSET);
   // output
-  T *shared_output = (T *)(smem + SHARED_OUTPUT_OFFSET);
-  // output
   T *mm_output = (T *)(smem + SHARED_MM_OUTPUT_OFFSET);
 
   // define the swizzle mode

@@ -70,6 +70,107 @@ __device__ static inline void warpgroup_commit_batch() {
 
 template <int tnspA, int tnspB>
 __device__ static inline void
+    wgmma_m64n16k16_bf16bf16bf32(uint64_t const &desc_a,
+                                       uint64_t const &desc_b,
+                                       float &d00,
+                                       float &d01,
+                                       float &d02,
+                                       float &d03,
+                                       float &d04,
+                                       float &d05,
+                                       float &d06,
+                                       float &d07) {
+#ifdef MIRAGE_GRACE_HOPPER
+  asm volatile("{\n"
+               ".reg .pred p;\n"
+               "setp.ne.b32 p, %10, 0;\n"
+               "wgmma.mma_async.sync.aligned.m64n16k16.f32.f16.f16 "
+               "{%0,  %1,  %2,  %3,  %4,  %5,  %6,  %7},"
+               " %8,"
+               " %9,"
+               " p,   %11, %12, %13, %14;\n"
+               "}\n"
+               : "+f"(d00),
+                 "+f"(d01),
+                 "+f"(d02),
+                 "+f"(d03),
+                 "+f"(d04),
+                 "+f"(d05),
+                 "+f"(d06),
+                 "+f"(d07)
+               : "l"(desc_a),
+                 "l"(desc_b),
+                 "r"(int32_t(1)),
+                 "n"(int32_t(1)),
+                 "n"(int32_t(1)),
+                 "n"(int32_t(tnspA)),
+                 "n"(int32_t(tnspB)));
+#elif defined(__CUDA_ARCH__)
+  asm volatile("brkpt;\n" ::);
+#endif
+}
+
+template <int tnspA, int tnspB>
+__device__ static inline void
+    wgmma_m64n32k16_bf16bf16bf32(uint64_t const &desc_a,
+                                 uint64_t const &desc_b,
+                                 float &d00,
+                                 float &d01,
+                                 float &d02,
+                                 float &d03,
+                                 float &d04,
+                                 float &d05,
+                                 float &d06,
+                                 float &d07,
+                                 float &d08,
+                                 float &d09,
+                                 float &d10,
+                                 float &d11,
+                                 float &d12,
+                                 float &d13,
+                                 float &d14,
+                                 float &d15) {
+#ifdef MIRAGE_GRACE_HOPPER
+  asm volatile("{\n"
+               ".reg .pred p;\n"
+               "setp.ne.b32 p, %18, 0;\n"
+               "wgmma.mma_async.sync.aligned.m64n32k16.f32.f16.f16 "
+               "{%0,  %1,  %2,  %3,  %4,  %5,  %6,  %7,  "
+               " %8,  %9,  %10, %11, %12, %13, %14, %15},"
+               " %16,"
+               " %17,"
+               " p,   %19, %20, %21, %22;\n"
+               "}\n"
+               : "+f"(d00),
+                 "+f"(d01),
+                 "+f"(d02),
+                 "+f"(d03),
+                 "+f"(d04),
+                 "+f"(d05),
+                 "+f"(d06),
+                 "+f"(d07),
+                 "+f"(d08),
+                 "+f"(d09),
+                 "+f"(d10),
+                 "+f"(d11),
+                 "+f"(d12),
+                 "+f"(d13),
+                 "+f"(d14),
+                 "+f"(d15)
+               : "l"(desc_a),
+                 "l"(desc_b),
+                 "r"(int32_t(1)),
+                 "n"(int32_t(1)),
+                 "n"(int32_t(1)),
+                 "n"(int32_t(tnspA)),
+                 "n"(int32_t(tnspB)));
+#elif defined(__CUDA_ARCH__)
+  asm volatile("brkpt;\n" ::);
+#endif
+}
+
+template <int tnspA, int tnspB>
+__device__ static inline void
     wgmma_m64n64k16_bf16bf16bf32(uint64_t const &desc_a,
                                  uint64_t const &desc_b,
                                  float &d00,
@@ -173,48 +274,86 @@ template <typename T,
           bool tnspB>
 __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
   static_assert(SMEM_A::ROW == M);
-  static_assert(SMEM_B::COL == N);
-  if constexpr (M == 64 && N == 64 && K == 16 &&
-                std::is_same<T, bfloat16>::value && tnspA == false &&
-                tnspB == false) {
+  // static_assert(SMEM_B::COL == N);
+  if constexpr (M == 64 && K == 16 && std::is_same<T, bfloat16>::value &&
+                tnspA == false && tnspB == false) {
     for (int k = 0; k < (SMEM_A::COL / K); k++) {
       static_assert(SMEM_A::b == 3);
       static_assert(SMEM_B::b == 3);
       int k_offset = (k % 4) * 32 + (k / 4) * 8 * 2048;
-      wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(k_offset),
-                                                 b_desc.at(k_offset),
-                                                 frag[0],
-                                                 frag[1],
-                                                 frag[2],
-                                                 frag[3],
-                                                 frag[4],
-                                                 frag[5],
-                                                 frag[6],
-                                                 frag[7],
-                                                 frag[8],
-                                                 frag[9],
-                                                 frag[10],
-                                                 frag[11],
-                                                 frag[12],
-                                                 frag[13],
-                                                 frag[14],
-                                                 frag[15],
-                                                 frag[16],
-                                                 frag[17],
-                                                 frag[18],
-                                                 frag[19],
-                                                 frag[20],
-                                                 frag[21],
-                                                 frag[22],
-                                                 frag[23],
-                                                 frag[24],
-                                                 frag[25],
-                                                 frag[26],
-                                                 frag[27],
-                                                 frag[28],
-                                                 frag[29],
-                                                 frag[30],
-                                                 frag[31]);
+      switch (N) {
+        case 16:
+          wgmma_m64n16k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(k_offset),
+                                                     b_desc.at(k_offset),
+                                                     frag[0],
+                                                     frag[1],
+                                                     frag[2],
+                                                     frag[3],
+                                                     frag[4],
+                                                     frag[5],
+                                                     frag[6],
+                                                     frag[7]);
+          break;
+        case 32:
+          wgmma_m64n32k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(k_offset),
+                                                     b_desc.at(k_offset),
+                                                     frag[0],
+                                                     frag[1],
+                                                     frag[2],
+                                                     frag[3],
+                                                     frag[4],
+                                                     frag[5],
+                                                     frag[6],
+                                                     frag[7],
+                                                     frag[8],
+                                                     frag[9],
+                                                     frag[10],
+                                                     frag[11],
+                                                     frag[12],
+                                                     frag[13],
+                                                     frag[14],
+                                                     frag[15]);
+          break;
+        case 64:
+          wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(k_offset),
+                                                     b_desc.at(k_offset),
+                                                     frag[0],
+                                                     frag[1],
+                                                     frag[2],
+                                                     frag[3],
+                                                     frag[4],
+                                                     frag[5],
+                                                     frag[6],
+                                                     frag[7],
+                                                     frag[8],
+                                                     frag[9],
+                                                     frag[10],
+                                                     frag[11],
+                                                     frag[12],
+                                                     frag[13],
+                                                     frag[14],
+                                                     frag[15],
+                                                     frag[16],
+                                                     frag[17],
+                                                     frag[18],
+                                                     frag[19],
+                                                     frag[20],
+                                                     frag[21],
+                                                     frag[22],
+                                                     frag[23],
+                                                     frag[24],
+                                                     frag[25],
+                                                     frag[26],
+                                                     frag[27],
+                                                     frag[28],
+                                                     frag[29],
+                                                     frag[30],
+                                                     frag[31]);
+          break;
+        default:
+          assert("false");
+          break;
+      }
     }
   } else {
     assert(false);

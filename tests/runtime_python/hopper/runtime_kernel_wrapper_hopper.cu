@@ -95,7 +95,7 @@ void launch_linear_hopper(void *input_ptr,
                                    BATCH_SIZE,
                                    OUTPUT_SIZE,
                                    BATCH_SIZE,
-                                   TILE_SIZE,
+                                   OUTPUT_SIZE,
                                    true>;
 
   TMA_A tma_a(input_ptr);
@@ -154,6 +154,8 @@ void launch_linear_hopper(void *input_ptr,
 
 #define DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE(BATCH_SIZE)                         \
   switch (output.size(1)) {                                                    \
+    DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE_CASE(BATCH_SIZE, 16)                    \
+    DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE_CASE(BATCH_SIZE, 32)                    \
     DISPATCH_LINEAR_HOPPER_OUTPUT_SIZE_CASE(BATCH_SIZE, 64)                    \
     default:                                                                   \
       printf("Unsupported output size in test: %zu\n", output.size(1));        \
