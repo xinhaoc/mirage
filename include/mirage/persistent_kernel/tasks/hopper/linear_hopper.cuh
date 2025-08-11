@@ -236,7 +236,7 @@ __device__ __forceinline__ void
       // wgmma
       wgmma::mma<bfloat16,
                  64,
-                 64,
+                 OUTPUT_SIZE,
                  16,
                  InputSmem,
                  WeightSmem,
@@ -261,7 +261,7 @@ __device__ __forceinline__ void
     wait(residual_barrier[0], 0);
 
 #pragma unroll 1
-    for (uint32_t i = 0; i < 16; i++) {
+    for (uint32_t i = 0; i < (OUTPUT_SIZE / 4); i++) {
       int row = (warp_idx % 4) * 16 + (i % 2) * 8 + idx_in_warp / 4;
       int col = (i / 2) * 8 + (idx_in_warp % 4) * 2;
       mm_output_smem.at(row, col) =
