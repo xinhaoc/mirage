@@ -302,7 +302,7 @@ __device__ __forceinline__ void
       // wgmma
       wgmma::mma<bfloat16,
                  64,
-                 64,
+                 OUTPUT_SIZE,
                  16,
                  InputSmem,
                  LinearWeightSmem,
@@ -343,7 +343,7 @@ __device__ __forceinline__ void
     wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
 
 #pragma unroll 1
-    for (uint32_t i = 0; i < 16; i++) {
+    for (uint32_t i = 0; i < (OUTPUT_SIZE / 4); i++) {
       int row = (warp_idx % 4) * 16 + (i % 2) * 8 + idx_in_warp / 4;
       int col = (i / 2) * 8 + (idx_in_warp % 4) * 2;
       mm_output_smem.at(row, col) = bfloat16(s_frag[i * 2]);

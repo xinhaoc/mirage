@@ -267,14 +267,14 @@ void launch_norm_linear_hopper(void *input_ptr,
                                              true>;
 
   using TMA_OUT = kernel::tma::tma<bfloat16,
-                                   0,
-                                   0,
-                                   0,
-                                   BATCH_SIZE,
-                                   OUTPUT_SIZE,
-                                   BATCH_SIZE,
-                                   TILE_SIZE,
-                                   true>;
+                                    0,
+                                    0,
+                                    0,
+                                    BATCH_SIZE,
+                                    OUTPUT_SIZE,
+                                    BATCH_SIZE,
+                                    OUTPUT_SIZE,
+                                    true>;
 
   TMA_INPUT tma_input(input_ptr);
   TMA_NORM_WEIGHT tma_norm_weight(norm_weight_ptr);
@@ -332,6 +332,8 @@ void launch_norm_linear_hopper(void *input_ptr,
 
 #define DISPATCH_NORM_LINEAR_HOPPER_OUTPUT_SIZE(BATCH_SIZE)                                \
   switch (output.size(1)) {                                                                \
+    DISPATCH_NORM_LINEAR_HOPPER_OUTPUT_SIZE_CASE(BATCH_SIZE, 16)                           \
+    DISPATCH_NORM_LINEAR_HOPPER_OUTPUT_SIZE_CASE(BATCH_SIZE, 32)                           \
     DISPATCH_NORM_LINEAR_HOPPER_OUTPUT_SIZE_CASE(BATCH_SIZE, 64)                           \
     default:                                                                               \
       printf("Unsupported output size in test: %zu\n", output.size(1));                  \
