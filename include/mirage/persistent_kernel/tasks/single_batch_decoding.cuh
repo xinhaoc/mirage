@@ -1,4 +1,3 @@
-
 /* Copyright 2025 CMU
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,6 +22,7 @@
 #include "mma.cuh"
 #include "norm.cuh"
 #include "reduction.cuh"
+#include "rotary_embedding.cuh"
 #include "smem_layout.cuh"
 #include "utils.cuh"
 namespace kernel {
@@ -63,10 +63,10 @@ __device__ __forceinline__ void
   int cp_finished_seq_len = curr_iter_len;
   int last_seq_len = curr_iter_len;
 
-  const __restrict__ T *d_q = static_cast<T const *>(qkv_ptr);
-  const __restrict__ T *d_k =
+  __restrict__ T const *d_q = static_cast<T const *>(qkv_ptr);
+  __restrict__ T const *d_k =
       static_cast<T const *>(qkv_ptr) + HEAD_DIM * NUM_Q_HEADS;
-  const __restrict__ T *d_v =
+  __restrict__ T const *d_v =
       static_cast<T const *>(qkv_ptr) + HEAD_DIM * (NUM_Q_HEADS + NUM_KV_HEADS);
   T __restrict__ *d_k_cache = static_cast<T *>(k_cache_ptr);
   T __restrict__ *d_v_cache = static_cast<T *>(v_cache_ptr);
@@ -128,9 +128,7 @@ __device__ __forceinline__ void
   // smem_row<T, 3, 3, 3, NUM_Q_HEADS, 128, 128> output_smem(shared_output);
 
   // todo, add a chunk assigned function
-  for (int i = 0; i < 8; i++) {
-    zero_buffer.at(i) = (bfloat16)0.0f;
-  }
+  vec_zero_t<T, 8>::fill_zero(zero_buf);
 
 // load first Q, K, V
 #pragma unroll
@@ -235,31 +233,48 @@ __device__ __forceinline__ void
     }
     __syncthreads();
 
-    // q_norm
-    if (qk_norm && kv_idx == 0) {
-      rms_norm<T, QSmem, NUM_Q_HEADS, HEAD_DIM>(
-          q_smem,
-          static_cast<T const *>(qnorm_weight_ptr),
-          qnorm_sum,
-          q_eps,
-          0,
-          rotary_emd,
-          static_cast<T const *>(cos_ptr) + seq_len * HEAD_DIM,
-          static_cast<T const *>(sin_ptr) + seq_len * HEAD_DIM);
+    if (qk_norm) {
+      if (kv_idx == 0) {
+        // q_norm && rope
+        rms_norm<T, QSmem, NUM_Q_HEADS, 1, HEAD_DIM>(
+            q_smem,
+            static_cast<T const *>(qnorm_weight_ptr),
+            qnorm_sum,
+            q_eps,
+            0,
+            rotary_emd,
+            static_cast<T const *>(cos_ptr) + (seq_len - 1) * HEAD_DIM,
+            static_cast<T const *>(sin_ptr) + (seq_len - 1) * HEAD_DIM);
+      } else if (kv_idx == num_iterations - 1) {
+        // knorm && rope
+        rms_norm<T, KSmem, NUM_KV_HEADS, 1, HEAD_DIM>(
+            k_cache_smem,
+            static_cast<T const *>(knorm_weight_ptr),
+            knorm_sum,
+            k_eps,
+            curr_iter_len - 1,
+            rotary_emd,
+            static_cast<T const *>(cos_ptr) + (seq_len - 1) * HEAD_DIM,
+            static_cast<T const *>(sin_ptr) + (seq_len - 1) * HEAD_DIM);
+      }
+    } else {
+      if (rotary_emd && kv_idx == 0) {
+        // q rope
+        rotary_embedding<T, QSmem, NUM_Q_HEADS, 1, HEAD_DIM>(
+            q_smem,
+            static_cast<T const *>(cos_ptr) + (seq_len - 1) * HEAD_DIM,
+            static_cast<T const *>(sin_ptr) + (seq_len - 1) * HEAD_DIM,
+            0);
+      } else if (rotary_emd && kv_idx == num_iterations - 1) {
+        // k rope
+        rotary_embedding<T, KSmem, NUM_KV_HEADS, 1, HEAD_DIM>(
+            k_cache_smem,
+            static_cast<T const *>(cos_ptr) + (seq_len - 1) * HEAD_DIM,
+            static_cast<T const *>(sin_ptr) + (seq_len - 1) * HEAD_DIM,
+            curr_iter_len - 1);
+      }
     }
 
-    // knorm
-    if (qk_norm && kv_idx == num_iterations - 1) {
-      rms_norm<T, KSmem, NUM_KV_HEADS, HEAD_DIM>(
-          k_cache_smem,
-          static_cast<T const *>(knorm_weight_ptr),
-          knorm_sum,
-          k_eps,
-          curr_iter_len - 1,
-          rotary_emd,
-          static_cast<T const *>(cos_ptr) + seq_len * HEAD_DIM,
-          static_cast<T const *>(sin_ptr) + seq_len * HEAD_DIM);
-    }
     __syncthreads();
 
     float s_frag[8];
@@ -367,7 +382,7 @@ __device__ __forceinline__ void
       cp_finished_seq_len += next_iter_len;
       curr_iter_len = next_iter_len;
     }
-  }
+  } // kv_idx
 
   for (int n = 0; n < 8; n++) {
     // write the result to osmem, index is 0, 1, 4, 5
@@ -392,6 +407,8 @@ __device__ __forceinline__ void
 #pragma unroll
     for (uint32_t tidx = 0; tidx < 4; tidx++) {
       // head idx is idx in warp / 4
+      // TODO: this is int shmem_idx = idx_in_warp + tidx * 32
+      // This is actually mapping to previous threadid
       int shmem_idx = (idx_in_warp / 4) * 4 + tidx * 32 + (idx_in_warp % 4);
       float other_m = max_smem[shmem_idx];
       float other_d = d_smem[shmem_idx];
