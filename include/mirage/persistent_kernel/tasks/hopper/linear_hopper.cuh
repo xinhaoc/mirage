@@ -116,23 +116,23 @@ __device__ __forceinline__ void
 
   // define the swizzle mode
   using InputSmem =
-      smem_row<T, B, M, S, BATCH_SIZE, TILE_SIZE, TILE_SIZE, false>;
+      smem_row<T, B, M, S, BATCH_SIZE, TILE_SIZE, TILE_SIZE>;
   InputSmem input_smem(shared_input);
   InputSmem input_smem_buffer(shared_input);
 
   using WeightSmem =
-      smem_col<T, B, M, S, TILE_SIZE, OUTPUT_SIZE, TILE_SIZE, false>;
+      smem_col<T, B, M, S, TILE_SIZE, OUTPUT_SIZE, TILE_SIZE>;
   WeightSmem input_weight_smem(shared_weight);
   WeightSmem input_weight_smem_buffer(shared_weight);
 
   using ResidualSmem =
-      smem_row<T, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE, false>;
+      smem_row<T, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE>;
   ResidualSmem residual_smem(shared_residual);
 
   using A_DESC = wgmma::mma_descriptor<InputSmem>;
   using B_DESC = wgmma::mma_descriptor<WeightSmem>;
 
-  smem_row<T, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE, false>
+  smem_row<T, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE>
       mm_output_smem(mm_output);
   float s_frag[32];
 

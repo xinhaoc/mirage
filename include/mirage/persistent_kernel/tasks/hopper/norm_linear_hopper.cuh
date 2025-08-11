@@ -138,19 +138,19 @@ __device__ __forceinline__ void
 
   // define the swizzle mode
   using InputSmem =
-      smem_row<T, B, M, S, BATCH_SIZE, TILE_SIZE, TILE_SIZE, false>;
+      smem_row<T, B, M, S, BATCH_SIZE, TILE_SIZE, TILE_SIZE>;
   InputSmem input_smem(shared_input);
   InputSmem input_smem_buffer(shared_input);
   InputSmem mul_output_smem(shared_mul_output);
   InputSmem element_unary_smem(shared_element_unary_output);
 
   using NormWeightSmem =
-      smem_row<T, B, M, S, BATCH_SIZE, TILE_SIZE, TILE_SIZE, false>;
+      smem_row<T, B, M, S, BATCH_SIZE, TILE_SIZE, TILE_SIZE>;
   NormWeightSmem norm_weight_smem(shared_norm_weight);
   NormWeightSmem norm_weight_smem_buffer(shared_norm_weight);
 
   using LinearWeightSmem =
-      smem_col<T, B, M, S, TILE_SIZE, OUTPUT_SIZE, TILE_SIZE, false>;
+      smem_col<T, B, M, S, TILE_SIZE, OUTPUT_SIZE, TILE_SIZE>;
   LinearWeightSmem linear_weight_smem(shared_linear_weight);
   LinearWeightSmem linear_weight_smem_buffer(shared_linear_weight);
 
@@ -158,10 +158,10 @@ __device__ __forceinline__ void
   using B_DESC = wgmma::mma_descriptor<LinearWeightSmem>;
 
   using MmaOutputSmem =
-      smem_row<T, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE, false>;
+      smem_row<T, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE>;
   MmaOutputSmem mm_output_smem(mm_output);
 
-  using ReductionOutputSmem = smem_row<T, 0, 0, 0, BATCH_SIZE, 1, 1, false>;
+  using ReductionOutputSmem = smem_row<T, 0, 0, 0, BATCH_SIZE, 1, 1>;
   ReductionOutputSmem reduction_output_smem(shared_reduction_output);
 
   float s_frag[32];

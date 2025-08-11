@@ -91,19 +91,19 @@ __device__ __forceinline__ void
 
   // define the swizzle mode
   using InputSmem =
-      smem_row<T, 1, 4, 3, BATCH_SIZE, TILE_SIZE, TILE_SIZE, true>;
+      smem_row<T, 1, 4, 3, BATCH_SIZE, TILE_SIZE, TILE_SIZE>;
   InputSmem input_smem(shared_input);
   InputSmem input_smem_buffer(shared_input);
 
   using WeightSmem =
-      smem_col<T, 1, 4, 3, TILE_SIZE, OUTPUT_SIZE, TILE_SIZE, true>;
+      smem_col<T, 1, 4, 3, TILE_SIZE, OUTPUT_SIZE, TILE_SIZE>;
   WeightSmem input_weight_smem(shared_weight);
   WeightSmem input_weight_smem_buffer(shared_weight);
 
   using A_DESC = wgmma::mma_descriptor<InputSmem>;
   using B_DESC = wgmma::mma_descriptor<WeightSmem>;
 
-  smem_row<T, 0, 4, 3, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE, false>
+  smem_row<T, 0, 4, 3, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE>
       mm_output_smem(mm_output);
   float s_frag[32];
 
