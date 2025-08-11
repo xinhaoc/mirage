@@ -76,8 +76,6 @@ __device__ __forceinline__ void
   int idx_in_warp = threadIdx.x % 32;
   int warpgroup_id = warp_idx / WARPGROUP_WARPS;
 
-  T __restrict__ *d_output = static_cast<T *>(output_ptr);
-
   extern __shared__ char smem[];
 
   constexpr size_t ZERO_BUFFER_OFFSET = 0;
@@ -131,8 +129,6 @@ __device__ __forceinline__ void
   // element unary output
   T *shared_element_unary_output =
       (T *)(smem + SHARED_ELEMENTARY_UNARY_OUTPUT_OFFSET);
-  // mm output
-  T *shared_mm_output = (T *)(smem + SHARED_MM_OUTPUT_OFFSET);
   // reduction output
   T *shared_reduction_output = (T *)(smem + SHARED_REDUCTION_OUTPUT_OFFSET);
   // output
@@ -174,6 +170,8 @@ __device__ __forceinline__ void
   for (int i = 0; i < 4; i++) {
     clear_8_floats(s_frag + i * 8);
   }
+
+  clear_smem_buffer<T, BATCH_SIZE * TILE_SIZE>(shared_element_unary_output);
 
   // define barriers
   Barrier *input_barrier =
