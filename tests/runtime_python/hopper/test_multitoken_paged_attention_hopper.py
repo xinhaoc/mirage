@@ -3,6 +3,20 @@ import torch
 import torch.nn.functional as F
 import runtime_kernel_hopper as runtime_kernel
 
+torch.set_printoptions(sci_mode=False)
+torch.set_printoptions(profile="full")
+
+qo_heads = 4
+kv_heads = 1
+head_dim = 128
+page_size = 64
+max_num_pages = 64
+prompt_len = 8
+max_tokens = 4
+
+device = "cuda"
+dtype = torch.bfloat16
+
 
 def rotate_half(x):
     x1 = x[..., : x.shape[-1] // 2]
@@ -49,13 +63,6 @@ def torch_multitoken_paged_attention(
     sin,
     eps=1e-6,
 ):
-    device = q.device
-    dtype = q.dtype
-    qo_heads = q.shape[1]
-    kv_heads = 1
-    head_dim = q.shape[-1]
-    page_size = paged_k_cache.shape[1]
-
     first_page_pos = paged_kv_indptr_buffer[request_id]
     last_page_pos = paged_kv_indptr_buffer[request_id + 1]
     num_pages = last_page_pos - first_page_pos
@@ -81,10 +88,7 @@ def torch_multitoken_paged_attention(
             k_cache[seq_len - num_tokens + i, :], k_norm_weight, eps
         )
         norm_q[i, :], norm_k[i, :] = apply_rotary_pos_emb(
-            norm_q[i, :],
-            norm_k[i, :],
-            cos[seq_len - num_tokens + i, :],
-            sin[seq_len - num_tokens + i, :],
+            norm_q[i, :], norm_k[i, :], cos[seq_len - num_tokens + i, :], sin[seq_len - num_tokens + i, :]
         )
     k_cache[seq_len - num_tokens : seq_len, :] = norm_k
     paged_k_cache[page_indices[-1], last_page_len - num_tokens : last_page_len, :] = (
@@ -95,130 +99,115 @@ def torch_multitoken_paged_attention(
     v = v_cache[:seq_len, :]
     v = v.view(seq_len * kv_heads, head_dim)
     scores = torch.matmul(norm_q, k.transpose(-2, -1))
-    assert scores.shape == (num_tokens * qo_heads, seq_len * kv_heads)
-    prompt_len = seq_len - num_tokens
+    #scores = scores.reshape(num_tokens * qo_heads, (num_tokens + prompt_len)* kv_heads)
+    assert scores.shape==(num_tokens * qo_heads, seq_len * kv_heads)
     mask = torch.tril(torch.ones((num_tokens, num_tokens), device=device, dtype=dtype))
-    mask = torch.cat(
-        (torch.ones((num_tokens, prompt_len), device=device, dtype=dtype), mask),
-        dim=-1,
-    )
+    mask = torch.cat((torch.ones((num_tokens, prompt_len), device=device, dtype=dtype), mask), dim=-1)
     mask = mask.repeat_interleave(qo_heads, dim=0).repeat_interleave(kv_heads, dim=1)
+    print("scores.shape", scores.shape)
+    print("mask.shape", mask.shape)
+    print(mask)
+
     scores = scores.masked_fill(mask == 0, float("-inf"))
     attn = F.softmax(scores / np.sqrt(head_dim), dim=-1)
     output = torch.matmul(attn, v)
     return output
 
 
-def test_multitoken_paged_attention_hopper():
-    torch.set_printoptions(sci_mode=False)
-    torch.set_printoptions(profile="full")
+paged_k_cache = torch.empty(
+    (max_num_pages, page_size, kv_heads * head_dim),
+    device=device,
+    dtype=dtype,
+)
+paged_v_cache = torch.empty(
+    (max_num_pages, page_size, kv_heads * head_dim),
+    device=device,
+    dtype=dtype,
+)
+paged_kv_indptr_buffer = torch.arange(
+    max_num_pages + 1, device=device, dtype=torch.int32
+)
+qo_indptr_buffer = torch.tensor([0, max_tokens], device=device, dtype=torch.int32)
+paged_kv_indptr_buffer = torch.tensor([0, 1], device=device, dtype=torch.int32)
+paged_kv_indices_buffer = torch.arange(max_num_pages, device=device, dtype=torch.int32)
+paged_kv_last_page_len_buffer = torch.tensor(
+    [prompt_len + max_tokens], device=device, dtype=torch.int32
+)
 
-    qo_heads = 4
-    kv_heads = 1
-    head_dim = 128
-    page_size = 64
-    max_num_pages = 64
-    prompt_len = 8
-    max_tokens = 4
+torch_paged_k_cache = paged_k_cache.clone()
+torch_paged_v_cache = paged_v_cache.clone()
 
-    device = "cuda"
-    dtype = torch.bfloat16
+all_cos = torch.randn((513, head_dim), device=device, dtype=dtype)
+all_sin = torch.randn((513, head_dim), device=device, dtype=dtype)
+#all_cos = torch.full((513, head_dim), 0.1, device=device, dtype=dtype)
+#all_sin = torch.full((513, head_dim), 0.1, device=device, dtype=dtype)
 
-    paged_k_cache = torch.empty(
-        (max_num_pages, page_size, kv_heads * head_dim),
-        device=device,
-        dtype=dtype,
-    )
-    paged_v_cache = torch.empty(
-        (max_num_pages, page_size, kv_heads * head_dim),
-        device=device,
-        dtype=dtype,
-    )
-    paged_kv_indptr_buffer = torch.tensor([0, 1], device=device, dtype=torch.int32)
-    qo_indptr_buffer = torch.tensor([0, max_tokens], device=device, dtype=torch.int32)
-    paged_kv_indices_buffer = torch.arange(max_num_pages, device=device, dtype=torch.int32)
-    paged_kv_last_page_len_buffer = torch.tensor(
-        [prompt_len + max_tokens], device=device, dtype=torch.int32
-    )
+qkv = torch.randn(
+    (max_tokens, (qo_heads + 2 * kv_heads) * head_dim), device=device, dtype=dtype
+)
 
-    torch_paged_k_cache = paged_k_cache.clone()
-    torch_paged_v_cache = paged_v_cache.clone()
+#qkv = torch.full(
+#    (max_tokens, (qo_heads + 2 * kv_heads) * head_dim), 0.1, device=device, dtype=dtype
+#)
 
-    all_cos = torch.randn((513, head_dim), device=device, dtype=dtype)
-    all_sin = torch.randn((513, head_dim), device=device, dtype=dtype)
+q = qkv[:max_tokens, : qo_heads * head_dim]
+q = q.view(max_tokens, qo_heads, head_dim)
+k = qkv[:max_tokens, qo_heads * head_dim : qo_heads * head_dim + kv_heads * head_dim]
+v = qkv[:max_tokens, qo_heads * head_dim + kv_heads * head_dim :]
 
-    qkv = torch.randn(
-        (max_tokens, (qo_heads + 2 * kv_heads) * head_dim), device=device, dtype=dtype
-    )
+page_idx = paged_kv_indices_buffer[0]
+page_offset = prompt_len
+assert prompt_len < page_size, "Assume prompt can fit in a single page for now"
 
-    q = qkv[:max_tokens, : qo_heads * head_dim]
-    q = q.view(max_tokens, qo_heads, head_dim)
-    k = qkv[
-        :max_tokens, qo_heads * head_dim : qo_heads * head_dim + kv_heads * head_dim
-    ]
-    v = qkv[:max_tokens, qo_heads * head_dim + kv_heads * head_dim :]
+torch_paged_k_cache[page_idx, page_offset : page_offset + max_tokens] = k
+torch_paged_v_cache[page_idx, page_offset : page_offset + max_tokens] = v
 
-    page_idx = paged_kv_indices_buffer[0]
-    page_offset = prompt_len
-    assert prompt_len < page_size, "Assume prompt can fit in a single page for now"
+mirage_qkv = qkv.clone()
 
-    torch_paged_k_cache[page_idx, page_offset : page_offset + max_tokens] = k
-    torch_paged_v_cache[page_idx, page_offset : page_offset + max_tokens] = v
+q_norm_weight = torch.randn((1, head_dim), device=device, dtype=dtype)
+k_norm_weight = torch.randn((1, head_dim), device=device, dtype=dtype)
 
-    mirage_qkv = qkv.clone()
+torch_cos = all_cos[0 : max_tokens + prompt_len + 1, :]
+torch_sin = all_sin[0 : max_tokens + prompt_len + 1, :]
 
-    q_norm_weight = torch.randn((1, head_dim), device=device, dtype=dtype)
-    k_norm_weight = torch.randn((1, head_dim), device=device, dtype=dtype)
+eps = 1e-5
 
-    torch_cos = all_cos[0 : max_tokens + prompt_len + 1, :]
-    torch_sin = all_sin[0 : max_tokens + prompt_len + 1, :]
+mirage_output = torch.empty(max_tokens * qo_heads, head_dim, device=device, dtype=dtype)
 
-    eps = 1e-5
+runtime_kernel.multitoken_paged_attention(
+    mirage_qkv,
+    paged_k_cache,
+    paged_v_cache,
+    mirage_output,
+    qo_indptr_buffer,
+    paged_kv_indptr_buffer,
+    paged_kv_indices_buffer,
+    paged_kv_last_page_len_buffer,
+    0,
+    True,
+    True,
+    q_norm_weight,
+    k_norm_weight,
+    all_cos,
+    all_sin,
+    eps,
+    eps,
+)
 
-    mirage_output = torch.empty(
-        max_tokens * qo_heads, head_dim, device=device, dtype=dtype
-    )
-
-    runtime_kernel.multitoken_paged_attention(
-        mirage_qkv,
-        paged_k_cache,
-        paged_v_cache,
-        mirage_output,
-        qo_indptr_buffer,
-        paged_kv_indptr_buffer,
-        paged_kv_indices_buffer,
-        paged_kv_last_page_len_buffer,
-        0,
-        True,
-        True,
-        q_norm_weight,
-        k_norm_weight,
-        all_cos,
-        all_sin,
-        eps,
-        eps,
-    )
-
-    torch_out = torch_multitoken_paged_attention(
-        q,
-        torch_paged_k_cache,
-        torch_paged_v_cache,
-        paged_kv_indptr_buffer,
-        paged_kv_indices_buffer,
-        paged_kv_last_page_len_buffer,
-        0,
-        max_tokens,
-        q_norm_weight,
-        k_norm_weight,
-        torch_cos,
-        torch_sin,
-        eps=eps,
-    )
-    print("Ratio (Mirage / Torch):")
-    print(mirage_output / torch_out)
-
-
-if __name__ == "__main__":
-    test_multitoken_paged_attention_hopper()
-
-
+torch_out = torch_multitoken_paged_attention(
+    q,
+    torch_paged_k_cache,
+    torch_paged_v_cache,
+    paged_kv_indptr_buffer,
+    paged_kv_indices_buffer,
+    paged_kv_last_page_len_buffer,
+    0,
+    max_tokens,
+    q_norm_weight,
+    k_norm_weight,
+    torch_cos,
+    torch_sin,
+    eps=eps,
+)
+print("Ratio (Mirage / Torch):")
+print(mirage_output / torch_out)
