@@ -15,11 +15,13 @@
 #include "bfloat16.h"
 #include "hopper/linear_hopper.cuh"
 #include "hopper/norm_linear_hopper.cuh"
+#include "hopper/multitoken_paged_attention_hopper.cuh"
 #include <cuda_runtime.h>
 #include <torch/extension.h>
 // create tma
 using kernel::linear_kernel_hopper;
 using kernel::norm_linear_kernel_hopper;
+using kernel::multitoken_paged_attention_hopper;
 using bfloat16 = type::bfloat16_t;
 
 template <typename T,
@@ -32,7 +34,6 @@ template <typename T,
           typename TMA_OUT,
           int Kstages = 2>
 __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_wrapper(
-    void *output_ptr,
     const __grid_constant__ TMA_A tma_a,
     const __grid_constant__ TMA_B tma_b,
     const __grid_constant__ TMA_RESIDUAL tma_residual,
@@ -44,8 +45,7 @@ __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_wrapper(
                        Kstages,
                        TMA_A,
                        TMA_B,
-                       TMA_OUT>(
-      output_ptr, tma_a, tma_b, tma_residual, tma_out);
+                       TMA_OUT>(tma_a, tma_b, tma_residual, tma_out);
 }
 
 template <typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE>
@@ -125,7 +125,7 @@ void launch_linear_hopper(void *input_ptr,
                                TMA_B,
                                TMA_RESIDUAL,
                                TMA_OUT><<<grid_dim, block_dim, smem_size>>>(
-      output_ptr, tma_a, tma_b, tma_residual, tma_out);
+      tma_a, tma_b, tma_residual, tma_out);
 }
 
 #define DISPATCH_LINEAR_HOPPER_REDUCTION_SIZE_CASE(                            \
@@ -203,7 +203,6 @@ template <typename T,
           typename TMA_OUT,
           int Kstages = 2>
 __global__ __launch_bounds__(256, 1) void norm_linear_kernel_hopper_wrapper(
-    void *output_ptr,
     const __grid_constant__ TMA_INPUT tma_input,
     const __grid_constant__ TMA_NORM_WEIGHT tma_norm_weight,
     const __grid_constant__ TMA_LINEAR_WEIGHT tma_linear_weight,
@@ -217,12 +216,10 @@ __global__ __launch_bounds__(256, 1) void norm_linear_kernel_hopper_wrapper(
                             TMA_INPUT,
                             TMA_NORM_WEIGHT,
                             TMA_LINEAR_WEIGHT,
-                            TMA_OUT>(output_ptr,
-                                     tma_input,
+                            TMA_OUT>(tma_input,
                                      tma_norm_weight,
                                      tma_linear_weight,
-                                     tma_out,
-                                     eps);
+                                     tma_out, eps);
 }
 
 template <typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE>
@@ -303,7 +300,7 @@ void launch_norm_linear_hopper(void *input_ptr,
                                     TMA_NORM_WEIGHT,
                                     TMA_LINEAR_WEIGHT,
                                     TMA_OUT><<<grid_dim, block_dim, smem_size>>>(
-      output_ptr, tma_input, tma_norm_weight, tma_linear_weight, tma_out, eps);
+      tma_input, tma_norm_weight, tma_linear_weight, tma_out, eps);
 }
 
 #define DISPATCH_NORM_LINEAR_HOPPER_REDUCTION_SIZE_CASE(                                   \
@@ -369,7 +366,210 @@ void norm_linear_kernel(torch::Tensor input,
   }
 }
 
+
+template <typename T,
+          int NUM_QO_HEADS,
+          int NUM_KV_HEADS,
+          int HEAD_DIM,
+          int PAGE_SIZE,
+          int MAX_SEQ_LEN,
+          int MAX_TOKENS = 8>
+__global__ void multitoken_paged_attention_hopper_wrapper(
+    void const *qkv_ptr,
+    void *paged_k_cache_ptr,
+    void *paged_v_cache_ptr,
+    void *output_ptr,
+    int const *qo_indptr_buffer_ptr,
+    int const *paged_kv_indptr_buffer_ptr,
+    int const *paged_kv_indices_buffer_ptr,
+    int const *paged_kv_last_page_len_buffer_ptr,
+    int request_id,
+    bool qk_norm,
+    bool rope,
+    void const *q_norm_weight_ptr,
+    void const *k_norm_weight_ptr,
+    void const *cos_ptr,
+    void const *sin_ptr,
+    float q_eps,
+    float k_eps) {
+  multitoken_paged_attention_task_impl<T,
+                                       NUM_QO_HEADS,
+                                       NUM_KV_HEADS,
+                                       HEAD_DIM,
+                                       PAGE_SIZE,
+                                       MAX_SEQ_LEN,
+                                       MAX_TOKENS>(qkv_ptr,
+                                                   paged_k_cache_ptr,
+                                                   paged_v_cache_ptr,
+                                                   output_ptr,
+                                                   qo_indptr_buffer_ptr,
+                                                   paged_kv_indptr_buffer_ptr,
+                                                   paged_kv_indices_buffer_ptr,
+                                                   paged_kv_last_page_len_buffer_ptr,
+                                                   request_id,
+                                                   qk_norm,
+                                                   rope,
+                                                   q_norm_weight_ptr,
+                                                   k_norm_weight_ptr,
+                                                   cos_ptr,
+                                                   sin_ptr,
+                                                   q_eps,
+                                                   k_eps);
+}
+
+template <typename T,
+          int NUM_QO_HEADS,
+          int NUM_KV_HEADS,
+          int HEAD_DIM,
+          int PAGE_SIZE,
+          int MAX_SEQ_LEN,
+          int MAX_TOKENS = 8>
+void launch_multitoken_paged_attention_hopper(
+    void const *qkv_ptr,
+    void *paged_k_cache_ptr,
+    void *paged_v_cache_ptr,
+    void *output_ptr,
+    int const *qo_indptr_buffer_ptr,
+    int const *paged_kv_indptr_buffer_ptr,
+    int const *paged_kv_indices_buffer_ptr,
+    int const *paged_kv_last_page_len_buffer_ptr,
+    int request_id,
+    bool qk_norm,
+    bool rope,
+    void const *q_norm_weight_ptr,
+    void const *k_norm_weight_ptr,
+    void const *cos_ptr,
+    void const *sin_ptr,
+    float q_eps,
+    float k_eps) {
+  dim3 grid_dim(1, 1, 1);
+  dim3 block_dim(128, 1, 1);
+  // Conservatively large dynamic shared memory for Hopper path
+  size_t smem_size = 131072; // 128KB
+
+  cudaFuncSetAttribute(
+      (multitoken_paged_attention_hopper_wrapper<T,
+                                                 NUM_QO_HEADS,
+                                                 NUM_KV_HEADS,
+                                                 HEAD_DIM,
+                                                 PAGE_SIZE,
+                                                 MAX_SEQ_LEN,
+                                                 MAX_TOKENS>),
+      cudaFuncAttributeMaxDynamicSharedMemorySize,
+      smem_size);
+
+  multitoken_paged_attention_hopper_wrapper<T,
+                                            NUM_QO_HEADS,
+                                            NUM_KV_HEADS,
+                                            HEAD_DIM,
+                                            PAGE_SIZE,
+                                            MAX_SEQ_LEN,
+                                            MAX_TOKENS><<<grid_dim, block_dim, smem_size>>>(
+      qkv_ptr,
+      paged_k_cache_ptr,
+      paged_v_cache_ptr,
+      output_ptr,
+      qo_indptr_buffer_ptr,
+      paged_kv_indptr_buffer_ptr,
+      paged_kv_indices_buffer_ptr,
+      paged_kv_last_page_len_buffer_ptr,
+      request_id,
+      qk_norm,
+      rope,
+      q_norm_weight_ptr,
+      k_norm_weight_ptr,
+      cos_ptr,
+      sin_ptr,
+      q_eps,
+      k_eps);
+}
+
+void multitoken_paged_attention(
+    torch::Tensor qkv,
+    torch::Tensor paged_k_cache,
+    torch::Tensor paged_v_cache,
+    torch::Tensor output,
+    torch::Tensor qo_indptr_buffer,
+    torch::Tensor paged_kv_indptr_buffer,
+    torch::Tensor paged_kv_indices_buffer,
+    torch::Tensor paged_kv_last_page_len_buffer,
+    int request_id,
+    bool qk_norm,
+    bool rope,
+    torch::optional<torch::Tensor> q_norm_weight = torch::nullopt,
+    torch::optional<torch::Tensor> k_norm_weight = torch::nullopt,
+    torch::optional<torch::Tensor> cos = torch::nullopt,
+    torch::optional<torch::Tensor> sin = torch::nullopt,
+    float q_eps = 0.0f,
+    float k_eps = 0.0f) {
+  void const *qkv_ptr = qkv.data_ptr();
+  void *paged_k_cache_ptr = paged_k_cache.data_ptr();
+  void *paged_v_cache_ptr = paged_v_cache.data_ptr();
+  void *output_ptr = output.data_ptr();
+  int const *qo_indptr_buffer_ptr = qo_indptr_buffer.data_ptr<int>();
+  int const *paged_kv_indptr_buffer_ptr =
+      paged_kv_indptr_buffer.data_ptr<int>();
+  int const *paged_kv_indices_buffer_ptr =
+      paged_kv_indices_buffer.data_ptr<int>();
+  int const *paged_kv_last_page_len_buffer_ptr =
+      paged_kv_last_page_len_buffer.data_ptr<int>();
+
+  void const *q_norm_weight_ptr = qk_norm ? q_norm_weight->data_ptr() : nullptr;
+  void const *k_norm_weight_ptr = qk_norm ? k_norm_weight->data_ptr() : nullptr;
+  void const *cos_ptr = rope ? cos->data_ptr() : nullptr;
+  void const *sin_ptr = rope ? sin->data_ptr() : nullptr;
+
+  // Compile-time parameters aligned with the Python test
+  constexpr int qo_heads = 4;
+  constexpr int kv_heads = 1;
+  constexpr int head_dim = 128;
+  constexpr int page_size = 64;
+  constexpr int max_seq_len = 512;
+  constexpr int max_tokens = 8;
+
+  // Sanity checks on strides
+  int const qkv_stride = (qo_heads + 2 * kv_heads) * head_dim;
+  (void)qkv_stride; // unused in Hopper path (deduced in kernel)
+  int const kv_stride = head_dim * kv_heads;
+  (void)kv_stride;
+  int const o_stride = head_dim * qo_heads;
+  (void)o_stride;
+
+  launch_multitoken_paged_attention_hopper<bfloat16,
+                                           qo_heads,
+                                           kv_heads,
+                                           head_dim,
+                                           page_size,
+                                           max_seq_len,
+                                           max_tokens>(qkv_ptr,
+                                                       paged_k_cache_ptr,
+                                                       paged_v_cache_ptr,
+                                                       output_ptr,
+                                                       qo_indptr_buffer_ptr,
+                                                       paged_kv_indptr_buffer_ptr,
+                                                       paged_kv_indices_buffer_ptr,
+                                                       paged_kv_last_page_len_buffer_ptr,
+                                                       request_id,
+                                                       qk_norm,
+                                                       rope,
+                                                       q_norm_weight_ptr,
+                                                       k_norm_weight_ptr,
+                                                       cos_ptr,
+                                                       sin_ptr,
+                                                       q_eps,
+                                                       k_eps);
+
+  cudaError_t err = cudaDeviceSynchronize();
+  if (err != cudaSuccess) {
+    printf("CUDA kernel launch error: %s\n", cudaGetErrorString(err));
+  }
+}
+
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("linear", &linear_kernel, "Linear kernel");
   m.def("norm_linear", &norm_linear_kernel, "NormLinear kernel");
+  m.def("multitoken_paged_attention",
+        &multitoken_paged_attention,
+        "Multitoken paged attention (Hopper)");
 }

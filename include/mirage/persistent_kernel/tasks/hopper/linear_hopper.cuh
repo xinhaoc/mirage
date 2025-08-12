@@ -41,8 +41,7 @@ template <typename T,
           typename TMA_OUT,
           int OUTPUT_STRIDE = OUTPUT_SIZE>
 __device__ __forceinline__ void
-    linear_kernel_hopper(void *output_ptr,
-                         const TMA_A &tma_a,
+    linear_kernel_hopper(const TMA_A &tma_a,
                          const TMA_B &tma_b,
                          const TMA_RESIDUAL &tma_residual,
                          const TMA_OUT &tma_out) {
@@ -70,10 +69,6 @@ __device__ __forceinline__ void
   int warp_idx = warp_id();
   int idx_in_warp = threadIdx.x % 32;
   int warpgroup_id = warp_idx / WARPGROUP_WARPS;
-
-  T __restrict__ *d_output = static_cast<T *>(output_ptr);
-
-  dmem_row<T, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE> output_dmem(d_output);
 
   extern __shared__ char smem[];
 

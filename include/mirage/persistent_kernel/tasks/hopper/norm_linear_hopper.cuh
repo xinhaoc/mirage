@@ -42,8 +42,7 @@ template <typename T,
           typename TMA_OUT,
           int OUTPUT_STRIDE = OUTPUT_SIZE>
 __device__ __forceinline__ void
-    norm_linear_kernel_hopper(void *output_ptr,
-                              const TMA_INPUT &tma_input,
+    norm_linear_kernel_hopper(const TMA_INPUT &tma_input,
                               const TMA_NORM_WEIGHT &tma_norm_weight,
                               const TMA_LINEAR_WEIGHT &tma_linear_weight,
                               const TMA_OUT &tma_out,
@@ -61,7 +60,6 @@ __device__ __forceinline__ void
       sizeof(T) * BATCH_SIZE * TILE_SIZE;
   constexpr int TMA_TRANS_BYTES_LINEAR_WEIGHT =
       sizeof(T) * TILE_SIZE * OUTPUT_SIZE;
-  constexpr int TMA_TRANS_BYTES_RESIDUAL = sizeof(T) * BATCH_SIZE * OUTPUT_SIZE;
 
   // using SM90_64x64x16_F32BF16BF16
   constexpr int num_n = OUTPUT_SIZE / 64;
