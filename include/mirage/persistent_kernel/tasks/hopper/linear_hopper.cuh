@@ -166,8 +166,8 @@ __device__ __forceinline__ void
       int prefetch = (Kstages < num_k) ? Kstages : num_k;
       for (int i = 0; i < prefetch; i++) {
         int slot = i % Kstages;
-        int2 tma_coords_A = {i * TILE_SIZE, 0};
-        int2 tma_coords_B = {i * TILE_SIZE, 0};
+        int tma_coords_A[2] = {i * TILE_SIZE, 0};
+        int tma_coords_B[2] = {i * TILE_SIZE, 0};
 
         input_smem_buffer.set_ptr(shared_input +
                                   slot * TMA_TRANS_BYTES_A / sizeof(T));
@@ -193,8 +193,8 @@ __device__ __forceinline__ void
         int phase = (i / Kstages) % 2;
         wait(compute_done[slot], phase ^ 1);
 
-        int2 tma_coords_A = {i * TILE_SIZE, 0};
-        int2 tma_coords_B = {i * TILE_SIZE, 0};
+        int tma_coords_A[2] = {i * TILE_SIZE, 0};
+        int tma_coords_B[2] = {i * TILE_SIZE, 0};
 
         input_smem_buffer.set_ptr(shared_input +
                                   slot * TMA_TRANS_BYTES_A / sizeof(T));

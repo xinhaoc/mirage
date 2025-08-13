@@ -60,14 +60,22 @@ struct tma {
   }
 
 public:
+template<int NDIM>
   __device__ inline void
-      tma_cp_async(Barrier &mbar, T *smem_ptr, int2 const &tma_coords) const {
+      tma_cp_async(Barrier &mbar, T *smem_ptr, const int (&tma_coords)[NDIM]) const {
 #ifdef MIRAGE_GRACE_HOPPER
     uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(desc_ptr);
     uint32_t smem_int_mbar =
         static_cast<uint32_t>(__cvta_generic_to_shared(&mbar));
     uint32_t smem_int_ptr =
         static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
+
+int c0=0, c1=0, c2=0, c3=0, c4=0;
+if constexpr (NDIM > 0) c0 = tma_coords[0];
+if constexpr (NDIM > 1) c1 = tma_coords[1];
+if constexpr (NDIM > 2) c2 = tma_coords[2];
+if constexpr (NDIM > 3) c3 = tma_coords[3];
+if constexpr (NDIM > 4) c4 = tma_coords[4];
 
     asm volatile("cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier:"
                  ":complete_tx::bytes"
@@ -76,34 +84,43 @@ public:
                  : "r"(smem_int_ptr),
                    "l"(gmem_int_desc),
                    "r"(smem_int_mbar),
-                   "r"(tma_coords.x),
-                   "r"(tma_coords.y),
-                   "r"(0),
-                   "r"(0),
-                   "r"(0)
+                   "r"(c0),
+                   "r"(c1),
+                   "r"(c2),
+                   "r"(c3),
+                   "r"(c4)
                  : "memory");
 #elif defined(__CUDA_ARCH__)
     asm volatile("brkpt;\n" ::);
 #endif
   }
 
+  template<int NDIM>
   __device__ inline void tma_store_async(void *smem_ptr,
-                                         int2 const &tma_coords) const {
+                                         const int (&tma_coords)[NDIM]) const {
 #ifdef MIRAGE_GRACE_HOPPER
     uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(desc_ptr);
     uint32_t smem_int_ptr =
         static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
     // not sure what this line means
     //  cutlass::arch::synclog_emit_tma_load(
+    int c0=0, c1=0, c2=0, c3=0, c4=0;
+    if constexpr (NDIM > 0) c0 = tma_coords[0];
+    if constexpr (NDIM > 1) c1 = tma_coords[1];
+    if constexpr (NDIM > 2) c2 = tma_coords[2];
+    if constexpr (NDIM > 3) c3 = tma_coords[3];
+    if constexpr (NDIM > 4) c4 = tma_coords[4];
+
     asm volatile("cp.async.bulk.tensor.5d.global.shared::cta.bulk_group [%0, "
                  "{%2, %3, %4, %5, %6}], [%1];"
                  :
                  : "l"(gmem_int_desc),
                    "r"(smem_int_ptr),
-                   "r"(tma_coords.x),
-                   "r"(tma_coords.y),
-                   "r"(0),
-                   "r"(0) "r"(0)
+                   "r"(c0),
+                   "r"(c1),
+                   "r"(c2),
+                   "r"(c3),
+                   "r"(c4)
                  : "memory");
 #elif defined(__CUDA_ARCH__)
     asm volatile("brkpt;\n" ::);
