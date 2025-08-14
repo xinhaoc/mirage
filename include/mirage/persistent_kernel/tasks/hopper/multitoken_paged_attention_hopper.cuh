@@ -27,7 +27,6 @@
  #include "../utils.cuh"
  #include "rotary_embedding_wg.cuh"
  #include "norm_wg.cuh"
- 
  namespace kernel {
  
  // NOTE(Jinchen): this task implements the paged attention where a causal mask
@@ -88,7 +87,7 @@
    constexpr int CONSUMER_WARPGROUPS = 1;
    constexpr int PRODUCER_WARPGROUPS = 1;
    constexpr int NUM_WARPGROUPS = CONSUMER_WARPGROUPS + PRODUCER_WARPGROUPS;
- 
+   constexpr int Kstages = 2;
    // NOTE(Jinchen): we use m16n16k16 mma to compute matrix multiplication
    constexpr int MMA_ITERS_M = (MAX_TOKENS * NUM_QO_PER_KV + 15) / 16;
  
@@ -211,7 +210,8 @@
  
    T *zero_buf = reinterpret_cast<T *>(smem + ZERO_BUFFER_OFFSET);
    clear_smem_buffer<T, 8>(zero_buf);
-   T *s_q = reinterpret_cast<T *>(smem + ((S_Q_OFFSET + 127) / 128 * 128));
+  //  T *s_q = reinterpret_cast<T *>(smem + ((S_Q_OFFSET + 127) / 128 * 128));
+   T *s_q = reinterpret_cast<T *>(smem + S_Q_OFFSET); 
    T *s_k = reinterpret_cast<T *>(smem + S_K_OFFSET);
    T *s_k_buffer = reinterpret_cast<T *>(smem + S_K_BUFFER_OFFSET);
    T *s_v = reinterpret_cast<T *>(smem + S_V_OFFSET);
@@ -224,10 +224,15 @@
    float *s_o_buffer = reinterpret_cast<float *>(smem + S_O_BUFFER_OFFSET);
  
    // STensors' layouts
-   using ZeroBufferSmem = smem_row<T, 0, 0, 0, 1, 8, 8>;
-   using QOSmem = smem_row<T, 0, 0, 0, 64, HEAD_DIM, HEAD_DIM>;
-   using KVSmem = smem_row<T, 0, 0, 0, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
- 
+  //  using ZeroBufferSmem = smem_row<T, 0, 0, 0, 1, 8, 8>;
+  //  using QOSmem = smem_row<T, 0, 0, 0, 64, HEAD_DIM, HEAD_DIM>;
+  //  using KVSmem = smem_row<T, 0, 0, 0, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
+  using ZeroBufferSmem = smem_row<T, 0, 0, 0, 1, 8, 8>;
+  using QOSmem =
+      smem_row<T, 3, 3, 3, MAX_TOKENS * NUM_QO_PER_KV, HEAD_DIM, HEAD_DIM>;
+  using KVSmem = smem_row<T, 3, 3, 3, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
+
+
    ZeroBufferSmem zero_buffer(zero_buf);
    QOSmem q_smem(s_q), o_smem(s_o);
    KVSmem k_smem(s_k), v_smem(s_v);
@@ -256,10 +261,12 @@
  
    // init barrier
    if (threadIdx.x == 0) {
-     initialize_barrier(q_barrier[0], 1);
-     initialize_barrier(kv_barrier[0], 1);
-     initialize_barrier(o_barrier[0], 1);
-     initialize_barrier(compute_done[0], 1);
+     for (int i = 0; i < Kstages; i++) {
+       initialize_barrier(q_barrier[i], 1);
+       initialize_barrier(kv_barrier[i], 1);
+       initialize_barrier(o_barrier[i], 1);
+       initialize_barrier(compute_done[i], 1);
+     }
    }
    __syncthreads();
  
@@ -322,7 +329,8 @@
      }
  
      for (int iter = 0; iter < num_iters; iter++) {
-       int phase = iter % 2;
+       int phase = (iter / Kstages) % 2;
+       int slot = iter % Kstages;
        // wait(compute_done[0], phase);
        if (threadIdx.x == 128) {
          printf("start loading iter %d\n", iter);
@@ -376,10 +384,10 @@
  
        // arrive barrier
        if (lane_idx == 0 && warp_idx % 4 == 0) {
-         arrive(kv_barrier[0], 1);
+         arrive(kv_barrier[slot], 1);
        }
  
-       wait(compute_done[0], phase);
+       wait(compute_done[slot], phase);
        if (threadIdx.x == 128) {
          printf("finish waiting for compute iter, phase is %d\n", phase);
        }
@@ -422,18 +430,20 @@
        }
      }
  
+     wait(q_barrier[0], 0);
      for (int iter = 0; iter < num_iters; iter++) {
        
        int next_iter_len = iter + 1 < num_iters
        ? min(seq_len - cp_finished_seq_len, KV_TILE_SIZE)
        : 0;
        
-       int phase = (iter) % 2;
+       int phase = (iter / Kstages) % 2;
+       int slot = iter % Kstages;
        if (threadIdx.x == 0) {
          printf("start compute iter %d\n", iter);
          printf("consumer wait for kv barrier, phase is %d\n", phase);
        }
-       wait(kv_barrier[0], phase);
+       wait(kv_barrier[slot], phase);
 
         // rotate the buffers
         if ((iter & 0x1) == 0) {
@@ -693,7 +703,7 @@
        curr_iter_len = next_iter_len;
        // printf("arrive compute_done\n");
        if (warp_idx == 0 && lane_idx == 0) {
-         arrive(compute_done[0], 1);
+         arrive(compute_done[slot], 1);
        }
  
 
