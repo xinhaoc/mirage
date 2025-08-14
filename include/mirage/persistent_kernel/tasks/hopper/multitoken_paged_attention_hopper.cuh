@@ -204,7 +204,7 @@
  
    T *zero_buf = reinterpret_cast<T *>(smem + ZERO_BUFFER_OFFSET);
    clear_smem_buffer<T, 8>(zero_buf);
-   T *s_q = reinterpret_cast<T *>(smem + S_Q_OFFSET);
+   T *s_q = reinterpret_cast<T *>(smem + ((S_Q_OFFSET + 127)/128*128));
    T *s_k = reinterpret_cast<T *>(smem + S_K_OFFSET);
    T *s_k_buffer = reinterpret_cast<T *>(smem + S_K_BUFFER_OFFSET);
    T *s_v = reinterpret_cast<T *>(smem + S_V_OFFSET);
@@ -219,8 +219,8 @@
    // STensors' layouts
    using ZeroBufferSmem = smem_row<T, 0, 0, 0, 1, 8, 8>;
    using QOSmem =
-       smem_row<T, 3, 3, 3, MAX_TOKENS * NUM_QO_PER_KV, HEAD_DIM, HEAD_DIM>;
-   using KVSmem = smem_row<T, 3, 3, 3, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
+       smem_row<T, 0, 0, 0, 64, HEAD_DIM, HEAD_DIM>;
+   using KVSmem = smem_row<T, 0, 0, 0, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
  
    ZeroBufferSmem zero_buffer(zero_buf);
    QOSmem q_smem(s_q), o_smem(s_o);
@@ -236,6 +236,8 @@
    // Currently assume that PAGE_SIZE is a multiplier of KV_TILE_SIZE
    // so that we access a single page in one iteration
    static_assert(PAGE_SIZE % KV_TILE_SIZE == 0);
+
+   // 16*128 = 2048
 
   const int TMA_TRANS_BYTES_Q = num_tokens * NUM_QO_PER_KV * HEAD_DIM * sizeof(T);
 
@@ -272,6 +274,8 @@
 
   wait(q_barrier[0], 0);
   __syncthreads();
+
+  
 
 
 

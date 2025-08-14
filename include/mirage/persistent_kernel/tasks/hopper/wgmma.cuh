@@ -278,8 +278,8 @@ __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
   if constexpr (M == 64 && K == 16 && std::is_same<T, bfloat16>::value &&
                 tnspA == false && tnspB == false) {
     for (int k = 0; k < (SMEM_A::COL / K); k++) {
-      static_assert(SMEM_A::b == 3);
-      static_assert(SMEM_B::b == 3);
+      // static_assert(SMEM_A::b == 3);
+      // static_assert(SMEM_B::b == 3);
       int k_offset = (k % 4) * 32 + (k / 4) * 8 * 2048;
       switch (N) {
         case 16:

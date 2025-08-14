@@ -476,10 +476,12 @@ void launch_multitoken_paged_attention_hopper(
   constexpr int prompt_len = 8;
   constexpr int num_tokens = 4;
 
-  using TMA_Q = kernel::tma::tma<bfloat16, 3, 3, 3, prompt_len * NUM_QO_HEADS, HEAD_DIM, KV_TILE_SIZE, HEAD_DIM, true>;
-  using TMA_KV = kernel::tma::tma<bfloat16, 3, 3, 3, prompt_len * NUM_KV_HEADS, HEAD_DIM, KV_TILE_SIZE, HEAD_DIM, true>;
+  // printf("on wrapper, num_tokens*NUM_QO_HEADS: %d\n", num_tokens * NUM_QO_HEADS);
 
-  using TMA_PAGED_KV_CACHE = kernel::tma::tma<bfloat16, 3, 3, 3, KV_TILE_SIZE, HEAD_DIM, KV_TILE_SIZE, HEAD_DIM, true>;
+  using TMA_Q = kernel::tma::tma<bfloat16, 0, 0, 0, num_tokens * NUM_QO_HEADS, HEAD_DIM, 16, HEAD_DIM, true>;
+  using TMA_KV = kernel::tma::tma<bfloat16, 0, 0, 0, num_tokens * NUM_KV_HEADS, HEAD_DIM, 16, HEAD_DIM, true>;
+
+  using TMA_PAGED_KV_CACHE = kernel::tma::tma<bfloat16, 0, 0, 0, KV_TILE_SIZE, HEAD_DIM, KV_TILE_SIZE, HEAD_DIM, true>;
   using TMA_OUTPUT = kernel::tma::tma<bfloat16, 0, 0, 0, MAX_TOKENS * NUM_QO_HEADS, HEAD_DIM, MAX_TOKENS * NUM_QO_HEADS, HEAD_DIM, true>;
   
   bfloat16 *__restrict__ qkv_ptr_bf16 = static_cast<bfloat16 *>(qkv_ptr);
