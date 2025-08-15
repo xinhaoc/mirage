@@ -360,6 +360,70 @@ __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
   }
 }
 
+// __device__ static inline void wgmma_m64n64k16_bf16bf16bf32_rs(uint32_t const& a0, uint32_t const& a1, uint32_t const& a2, uint32_t const& a3,
+//   uint64_t const& desc_b,
+//   float         & d0, float         & d1, float         & d2, float         & d3,
+//   float         & d4, float         & d5, float         & d6, float         & d7)
+// {
+// #ifdef MIRAGE_GRACE_HOPPER
+// asm volatile(
+// "{\n"
+//   ".reg .pred p;\n"
+//   "setp.ne.b32 p, %13, 0;\n"
+//   "wgmma.mma_async.sync.aligned.m64n16k16.f32.bf16.bf16 "
+//   "{%0,  %1,  %2,  %3,  %4,  %5,  %6,  %7},"
+//   "{%8,  %9,  %10, %11},"
+//   " %12,"
+//   " p,   %14, %15, %16;\n"
+// "}\n"
+//   : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3),
+//     "+f"(d4), "+f"(d5), "+f"(d6), "+f"(d7)
+//   :  "r"(a0),  "r"(a1),  "r"(a2),  "r"(a3),
+//      "l"(desc_b),
+//      "r"(int32_t(1)), "n"(int32_t(1)), "n"(int32_t(1)), "n"(int32_t(tnspB)));
+// #else
+//   asm volatile("brkpt;\n" ::);
+// #endif
+// }
+
+// template <typename T,
+//           int M,
+//           int N,
+//           int K,
+//           typename SMEM_B,
+//           typename B_DESC,
+//           bool tnspB>
+// __device__ static inline void mma_rs(float *frag, uint32_t *a_frag, B_DESC b_desc) {
+//   // static_assert(SMEM_B::COL == N);
+//   if constexpr (M == 64 && K == 16 && std::is_same<T, bfloat16>::value &&
+//                 tnspB == false) {
+//     for (int k = 0; k < (SMEM_B::COL / K); k++) {
+//       // static_assert(SMEM_A::b == 3);
+//       // static_assert(SMEM_B::b == 3);
+//       int k_offset = (k % 4) * 32 + (k / 4) * 8 * 2048;
+//       switch (N) {
+//         case 64:
+//           wgmma_m64n64k16_bf16bf16bf32_rs<tnspB>(a_frag[0], a_frag[1], a_frag[2], a_frag[3],
+//                                                      b_desc.at(k_offset),
+//                                                      frag[0],
+//                                                      frag[1],
+//                                                      frag[2],
+//                                                      frag[3],
+//                                                      frag[4],
+//                                                      frag[5],
+//                                                      frag[6],
+//                                                      frag[7]);
+//           break;
+//         default:
+//           assert("false");
+//           break;
+//       }
+//     }
+//   } else {
+//     assert(false);
+//   }
+// }
+
 __device__ static inline void warpgroup_arrive() {
   asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");
 }
