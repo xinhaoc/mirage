@@ -56,7 +56,7 @@
                            void *output_ptr) {
  
    constexpr int B = 3;
-   constexpr int M = 4;
+   constexpr int M = 3;
    constexpr int S = 3;
  
    constexpr int TILE_SIZE = 64;
@@ -231,7 +231,7 @@
                                 float eps) {
  
    constexpr int B = 3;
-   constexpr int M = 4;
+   constexpr int M = 3;
    constexpr int S = 3;
  
    constexpr int TILE_SIZE = 64;

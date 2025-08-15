@@ -67,7 +67,7 @@ __device__ __forceinline__ void
   constexpr int num_k = REDUCTION_SIZE / TILE_SIZE;
 
   constexpr int B = 3;
-  constexpr int M = 4;
+  constexpr int M = 3;
   constexpr int S = 3;
 
   int warp_idx = warp_id();
