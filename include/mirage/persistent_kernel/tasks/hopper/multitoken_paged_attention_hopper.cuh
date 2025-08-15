@@ -235,7 +235,7 @@
   // using QOSmem =
   //     smem_row<T, 0, 4, 3, MAX_TOKENS * NUM_QO_PER_KV, HEAD_DIM, HEAD_DIM>;
   using QOSmem =
-      smem_row<T, 3, 3, 3, MAX_TOKENS * NUM_QO_PER_KV, HEAD_DIM, HEAD_DIM>;
+      smem_row<T, 0, 4, 3, MAX_TOKENS * NUM_QO_PER_KV, HEAD_DIM, HEAD_DIM>;
   using KVSmem = smem_row<T, 3, 3, 3, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
 
 
@@ -257,19 +257,18 @@
    // 16*128 = 2048
  
    const int TMA_TRANS_BYTES_Q = num_tokens * NUM_QO_PER_KV * HEAD_DIM * sizeof(T);
+   int TMA_TRANS_BYTES_KV = KV_TILE_SIZE * HEAD_DIM * sizeof(T);
  
    //  define barries
-   Barrier *q_barrier = reinterpret_cast<Barrier *>(smem + 70000);
-   Barrier *kv_barrier = reinterpret_cast<Barrier *>(smem + 80000);
-   Barrier *o_barrier = reinterpret_cast<Barrier *>(smem + 90000);
-   Barrier *compute_done = reinterpret_cast<Barrier *>(smem + 100000);
+   Barrier *q_barrier = reinterpret_cast<Barrier *>(smem + 170000);
+   Barrier *kv_barrier = reinterpret_cast<Barrier *>(smem + 180000);
+   Barrier *compute_done = reinterpret_cast<Barrier *>(smem + 200000);
  
    // init barrier
    if (threadIdx.x == 0) {
      for (int i = 0; i < Kstages; i++) {
        initialize_barrier(q_barrier[i], 1);
        initialize_barrier(kv_barrier[i], 1);
-       initialize_barrier(o_barrier[i], 1);
        initialize_barrier(compute_done[i], 1);
      }
    }
@@ -278,29 +277,31 @@
    if (warpgroup_id == NUM_WARPGROUPS - 1) {
  // prefetch
  // load q
- #pragma unroll
-     for (int chunk_idx = threadIdx.x;
-          chunk_idx < num_tokens * NUM_QO_PER_KV * HEAD_DIM / CP_CHUNK_SIZE;
-          chunk_idx += NUM_THREADS) {
-       int src_row = chunk_idx / (NUM_QO_PER_KV * HEAD_DIM / CP_CHUNK_SIZE);
-       int src_col = (chunk_idx % (NUM_QO_PER_KV * HEAD_DIM / CP_CHUNK_SIZE)) *
-                     CP_CHUNK_SIZE;
-       int dst_row = src_row * NUM_QO_PER_KV + src_col / HEAD_DIM;
-       int dst_col = src_col % HEAD_DIM;
-       load_smem(q_smem(dst_row, dst_col), q_dmem(src_row, src_col));
-     }
+//  #pragma unroll
+//      for (int chunk_idx = threadIdx.x;
+//           chunk_idx < num_tokens * NUM_QO_PER_KV * HEAD_DIM / CP_CHUNK_SIZE;
+//           chunk_idx += NUM_THREADS) {
+//        int src_row = chunk_idx / (NUM_QO_PER_KV * HEAD_DIM / CP_CHUNK_SIZE);
+//        int src_col = (chunk_idx % (NUM_QO_PER_KV * HEAD_DIM / CP_CHUNK_SIZE)) *
+//                      CP_CHUNK_SIZE;
+//        int dst_row = src_row * NUM_QO_PER_KV + src_col / HEAD_DIM;
+//        int dst_col = src_col % HEAD_DIM;
+//        load_smem(q_smem(dst_row, dst_col), q_dmem(src_row, src_col));
+//      }
 
-    // if (lane_idx == 0 && warp_idx % 4 == 0) {
-    //   set_barrier_transaction_bytes(q_barrier[0], TMA_TRANS_BYTES_Q);
-    //   tma_q.tma_cp_async(q_barrier[0], q_smem(0, 0), {0, 0});
-    // }
+// if (warp_idx == (NUM_WARPGROUPS * 4 - 4) && lane_idx == 0) {
+//   arrive(q_barrier[0], 1);
+// }
+
+    if (lane_idx == 0 && warp_idx % 4 == 0) {
+      set_barrier_transaction_bytes(q_barrier[0], TMA_TRANS_BYTES_Q);
+      tma_q.tma_cp_async(q_barrier[0], q_smem(0, 0), {0, 0});
+    }
 
  
      wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
 
-     if (warp_idx == (NUM_WARPGROUPS * 4 - 4) && lane_idx == 0) {
-       arrive(q_barrier[0], 1);
-     }
+
 
  
  
@@ -474,14 +475,6 @@
           v_buffer_smem.set_ptr(s_v_buffer);
         }
  
-       if (threadIdx.x == 0) {
-         printf("finish waiting for kv barrier, phase is %d\n", phase);
-         for (int i = 0; i < 10; i++) {
-          //  for (int j = 0; j < 10; j++) {
-          //    printf("k_smem[%d][%d] = %f\n", i, j, k_smem.at(i, j));
-          //  }
-         }
-       }
  
        int kv_tokens_to_process = min(
            curr_iter_len,
