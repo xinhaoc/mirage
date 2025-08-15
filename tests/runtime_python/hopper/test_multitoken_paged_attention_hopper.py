@@ -141,10 +141,16 @@ all_cos = torch.randn((513, head_dim), device=device, dtype=dtype)
 all_sin = torch.randn((513, head_dim), device=device, dtype=dtype)
 #all_cos = torch.full((513, head_dim), 0.1, device=device, dtype=dtype)
 #all_sin = torch.full((513, head_dim), 0.1, device=device, dtype=dtype)
-
 qkv = torch.randn(
     (max_tokens, (qo_heads + 2 * kv_heads) * head_dim), device=device, dtype=dtype
 )
+
+for i in range(qkv.shape[0]):
+    for j in range(qkv.shape[1]):
+        qkv[i, j] = 0.1 + 0.1 * (i * qkv.shape[1] + j)
+
+print("qkv[:, :qo_heads * head_dim] is", qkv[:, :qo_heads * head_dim].shape)
+print("q is", qkv[:, :qo_heads * head_dim])
 
 #qkv = torch.full(
 #    (max_tokens, (qo_heads + 2 * kv_heads) * head_dim), 0.1, device=device, dtype=dtype

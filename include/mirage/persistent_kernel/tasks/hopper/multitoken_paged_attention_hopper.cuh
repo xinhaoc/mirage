@@ -105,6 +105,9 @@
      return;
    }
    int const num_tokens = last_token_pos - first_token_pos;
+   if (threadIdx.x == 128) {
+     printf("num_tokens: %d\n", num_tokens);
+   }
  
    // NOTE(Jinchen): to simplify the implementation, we assume that the metadata
    // of the paged KV cache includes the new tokens, i.e., spaces are allocated
@@ -163,7 +166,7 @@
    constexpr size_t ZERO_BUFFER_OFFSET = 0;
    constexpr size_t ZERO_BUFFER_SIZE = sizeof(T) * 8;
  
-   constexpr size_t S_Q_OFFSET = ZERO_BUFFER_OFFSET + ZERO_BUFFER_SIZE;
+   constexpr size_t S_Q_OFFSET = (ZERO_BUFFER_OFFSET + ZERO_BUFFER_SIZE + 127) / 128 * 128;
    constexpr size_t S_Q_SIZE = sizeof(T) * MAX_TOKENS * NUM_QO_PER_KV * HEAD_DIM;
  
    constexpr size_t S_K_OFFSET = S_Q_OFFSET + S_Q_SIZE;
@@ -206,11 +209,12 @@
    constexpr size_t S_TOTAL_OFFSET = S_O_BUFFER_OFFSET + S_O_BUFFER_SIZE;
    static_assert(S_TOTAL_OFFSET <= 224 * 1024);
  
-   extern __shared__ char smem[];
+   extern __shared__ char smem_ptr[];
  
-   T *zero_buf = reinterpret_cast<T *>(smem + ZERO_BUFFER_OFFSET);
+   T *zero_buf = reinterpret_cast<T *>(smem_ptr + ZERO_BUFFER_OFFSET);
    clear_smem_buffer<T, 8>(zero_buf);
-  //  T *s_q = reinterpret_cast<T *>(smem + ((S_Q_OFFSET + 127) / 128 * 128));
+   uintptr_t smem = (reinterpret_cast<uintptr_t>(zero_buf) + 127) / 128 * 128;
+
    T *s_q = reinterpret_cast<T *>(smem + S_Q_OFFSET); 
    T *s_k = reinterpret_cast<T *>(smem + S_K_OFFSET);
    T *s_k_buffer = reinterpret_cast<T *>(smem + S_K_BUFFER_OFFSET);
@@ -228,6 +232,8 @@
   //  using QOSmem = smem_row<T, 0, 0, 0, 64, HEAD_DIM, HEAD_DIM>;
   //  using KVSmem = smem_row<T, 0, 0, 0, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
   using ZeroBufferSmem = smem_row<T, 0, 0, 0, 1, 8, 8>;
+  // using QOSmem =
+  //     smem_row<T, 0, 4, 3, MAX_TOKENS * NUM_QO_PER_KV, HEAD_DIM, HEAD_DIM>;
   using QOSmem =
       smem_row<T, 3, 3, 3, MAX_TOKENS * NUM_QO_PER_KV, HEAD_DIM, HEAD_DIM>;
   using KVSmem = smem_row<T, 3, 3, 3, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
@@ -250,8 +256,7 @@
  
    // 16*128 = 2048
  
-   // const int TMA_TRANS_BYTES_Q = num_tokens * NUM_QO_PER_KV * HEAD_DIM *
-   // sizeof(T);
+   const int TMA_TRANS_BYTES_Q = num_tokens * NUM_QO_PER_KV * HEAD_DIM * sizeof(T);
  
    //  define barries
    Barrier *q_barrier = reinterpret_cast<Barrier *>(smem + 70000);
@@ -284,17 +289,19 @@
        int dst_col = src_col % HEAD_DIM;
        load_smem(q_smem(dst_row, dst_col), q_dmem(src_row, src_col));
      }
-     if (threadIdx.x == 128) {
-       printf("start loading q\n");
-     }
+
+    // if (lane_idx == 0 && warp_idx % 4 == 0) {
+    //   set_barrier_transaction_bytes(q_barrier[0], TMA_TRANS_BYTES_Q);
+    //   tma_q.tma_cp_async(q_barrier[0], q_smem(0, 0), {0, 0});
+    // }
+
  
      wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
+
      if (warp_idx == (NUM_WARPGROUPS * 4 - 4) && lane_idx == 0) {
        arrive(q_barrier[0], 1);
      }
-     if (threadIdx.x == 128) {
-       printf("finish loading q\n");
-     }
+
  
  
      // load k and v
@@ -431,6 +438,15 @@
      }
  
      wait(q_barrier[0], 0);
+     // print all q
+     for (int i = 0; i < num_tokens * NUM_QO_PER_KV; i++) {
+       for (int j = 0; j < HEAD_DIM; j++) {
+        if (threadIdx.x == 0) {
+          printf("q_smem[%d][%d] = %f\n", i, j, (float)q_smem.at(i, j));
+        }
+       }
+     }
+
      for (int iter = 0; iter < num_iters; iter++) {
        
        int next_iter_len = iter + 1 < num_iters
@@ -461,9 +477,9 @@
        if (threadIdx.x == 0) {
          printf("finish waiting for kv barrier, phase is %d\n", phase);
          for (int i = 0; i < 10; i++) {
-           for (int j = 0; j < 10; j++) {
-             printf("k_smem[%d][%d] = %f\n", i, j, k_smem.at(i, j));
-           }
+          //  for (int j = 0; j < 10; j++) {
+          //    printf("k_smem[%d][%d] = %f\n", i, j, k_smem.at(i, j));
+          //  }
          }
        }
  

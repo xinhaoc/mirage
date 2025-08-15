@@ -16,6 +16,7 @@
  #include "hopper/linear_hopper.cuh"
  #include "hopper/norm_linear_hopper.cuh"
  #include "hopper/multitoken_paged_attention_hopper.cuh"
+//  #include "hopper/ref.cuh"
  #include <cuda_runtime.h>
  #include <torch/extension.h>
  // create tma
@@ -488,7 +489,7 @@
  
    // printf("on wrapper, num_tokens*NUM_QO_HEADS: %d\n", num_tokens * NUM_QO_HEADS);
  
-   using TMA_Q = kernel::tma::tma<bfloat16, 0, 0, 0, num_tokens * NUM_QO_HEADS, HEAD_DIM, 16, HEAD_DIM, true>;
+   using TMA_Q = kernel::tma::tma<bfloat16, 0, 4, 3, num_tokens * NUM_QO_HEADS * 2, HEAD_DIM / 2, num_tokens * NUM_QO_HEADS * 2, HEAD_DIM / 2, true>;
    using TMA_KV = kernel::tma::tma<bfloat16, 0, 0, 0, num_tokens * NUM_KV_HEADS, HEAD_DIM, 16, HEAD_DIM, true>;
  
    using TMA_PAGED_KV_CACHE = kernel::tma::tma<bfloat16, 0, 0, 0, KV_TILE_SIZE, HEAD_DIM, KV_TILE_SIZE, HEAD_DIM, true>;

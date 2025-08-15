@@ -219,7 +219,7 @@
     // STensors' layouts
     using ZeroBufferSmem = smem_row<T, 0, 0, 0, 1, 8, 8>;
     using QOSmem =
-        smem_row<T, 3, 3, 3, MAX_TOKENS * NUM_QO_PER_KV, HEAD_DIM, HEAD_DIM>;
+        smem_row<T, 0, 4, 3, MAX_TOKENS * NUM_QO_PER_KV, HEAD_DIM, HEAD_DIM>;
     using KVSmem = smem_row<T, 3, 3, 3, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
   
     ZeroBufferSmem zero_buffer(zero_buf);
@@ -327,6 +327,14 @@
         cp_finished_seq_len += next_iter_len;
       } else {
         cp_async_wait<0>();
+      }
+
+      if (threadIdx.x == 0) {
+        for (int i = 0; i < num_tokens * NUM_QO_PER_KV; i++) {
+          for (int j = 0; j < HEAD_DIM; j++) {
+            printf("q_smem[%d][%d] = %f\n", i, j, (float)q_smem.at(i, j));
+          }
+        }
       }
   
       // rotate the buffers
