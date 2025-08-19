@@ -25,6 +25,7 @@
 #include "tma.cuh"
 #include "utils.cuh"
 #include "wgmma.cuh"
+#include "tma_general.cuh"
 namespace kernel {
 
 using namespace tma;
@@ -47,7 +48,7 @@ __device__ __forceinline__ void
                          const TMA_OUT &tma_out) {
 
   constexpr int chunk_size = 16 / sizeof(T);
-  constexpr int TILE_SIZE = 64;
+  constexpr int TILE_SIZE = 128;
   constexpr int THREADS_PER_WARPGROUP = 128;
   constexpr int CONSUMER_WARPGROUPS = 1;
   constexpr int PRODUCER_WARPGROUPS = 1;
@@ -222,6 +223,26 @@ __device__ __forceinline__ void
       input_smem.set_ptr(shared_input + (slot)*TMA_TRANS_BYTES_A / sizeof(T));
       input_weight_smem.set_ptr(shared_weight +
                                 (slot)*TMA_TRANS_BYTES_B / sizeof(T));
+
+       if (threadIdx.x == 0) {
+         printf("i: %d\n", i);
+         printf("input_smem ptr: %p\n", input_smem(0, 0));
+         printf("input_weight_smem ptr: %p\n", input_weight_smem(0, 0));
+         printf("input_smem\n");
+         for (int j = 0; j < BATCH_SIZE; j++) {
+           for (int k = 0; k < TILE_SIZE; k++) {
+             printf("%f ", (float)input_smem.at(j, k));
+           }
+           printf("\n");
+         }
+        //  printf("input_weight_smem\n");
+        //  for (int j = 0; j < TILE_SIZE; j++) {
+        //    for (int k = 0; k < OUTPUT_SIZE; k++) {
+        //      printf("%f ", (float)input_weight_smem.at(j, k));
+        //    }
+        //    printf("\n");
+        //  }
+       }
 
       A_DESC a_desc(input_smem(0, 0));
       B_DESC b_desc(input_weight_smem(0, 0));

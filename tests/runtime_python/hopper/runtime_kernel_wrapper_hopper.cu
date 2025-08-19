@@ -59,26 +59,50 @@
    constexpr int M = 3;
    constexpr int S = 3;
  
-   constexpr int TILE_SIZE = 64;
+   constexpr int TMA_CP_ASYNC_SIZE = 64; 
+   constexpr int TILE_SIZE = 128;
+   constexpr int TMA_CP_ASYNC_REPEAT_COL = (TILE_SIZE + TMA_CP_ASYNC_SIZE - 1) / TMA_CP_ASYNC_SIZE;
  
-   using TMA_A = kernel::tma::tma<bfloat16,
-                                  B,
-                                  M,
-                                  S,
-                                  BATCH_SIZE,
-                                  REDUCTION_SIZE,
-                                  BATCH_SIZE,
-                                  TILE_SIZE,
-                                  true>;
-   using TMA_B = kernel::tma::tma<bfloat16,
-                                  B,
-                                  M,
-                                  S,
-                                  OUTPUT_SIZE,
-                                  REDUCTION_SIZE,
-                                  OUTPUT_SIZE,
-                                  TILE_SIZE,
-                                  true>;
+  //  using TMA_A = kernel::tma::tma<bfloat16,
+  //                                 B,
+  //                                 M,
+  //                                 S,
+  //                                 BATCH_SIZE,
+  //                                 REDUCTION_SIZE,
+  //                                 BATCH_SIZE,
+  //                                 TILE_SIZE,
+  //                                 true>;
+  //  using TMA_B = kernel::tma::tma<bfloat16,
+  //                                 B,
+  //                                 M,
+  //                                 S,
+  //                                 OUTPUT_SIZE,
+  //                                 REDUCTION_SIZE,
+  //                                 OUTPUT_SIZE,
+  //                                 TILE_SIZE,
+  //                                 true>;
+   using TMA_A = kernel::tma::tma_general<bfloat16,
+                                          B,
+                                          M,
+                                          S,
+                                          BATCH_SIZE,
+                                          REDUCTION_SIZE,
+                                          BATCH_SIZE,
+                                          TMA_CP_ASYNC_SIZE,
+                                          1,
+                                          TMA_CP_ASYNC_REPEAT_COL,
+                                          true>;
+   using TMA_B = kernel::tma::tma_general<bfloat16,
+                                          B,
+                                          M,
+                                          S,
+                                          OUTPUT_SIZE,
+                                          REDUCTION_SIZE,
+                                          OUTPUT_SIZE,
+                                          TMA_CP_ASYNC_SIZE,
+                                          1,
+                                          TMA_CP_ASYNC_REPEAT_COL,
+                                          true>;
    using TMA_RESIDUAL = kernel::tma::tma<bfloat16,
                                          0,
                                          0,
@@ -179,9 +203,10 @@
    void *output_ptr = output.data_ptr();
  
    switch (input.size(0)) {
+    //  DISPATCH_LINEAR_HOPPER_BATCH_SIZE_CASE(16)
      DISPATCH_LINEAR_HOPPER_BATCH_SIZE_CASE(64)
      default:
-       printf("Unsupported output size in test: %zu\n", output.size(0));
+       printf("Unsupported batch size in test: %zu\n", output.size(0));
        break;
    }
  
@@ -489,8 +514,9 @@
  
    // printf("on wrapper, num_tokens*NUM_QO_HEADS: %d\n", num_tokens * NUM_QO_HEADS);
  
-   using TMA_Q = kernel::tma::tma<bfloat16, 3, 3, 3, num_tokens * NUM_QO_HEADS, HEAD_DIM, num_tokens * NUM_QO_HEADS, KV_TILE_SIZE, true>;
-   using TMA_KV = kernel::tma::tma<bfloat16, 3, 3, 3, num_tokens * NUM_KV_HEADS, HEAD_DIM, num_tokens * NUM_KV_HEADS, KV_TILE_SIZE, true>;
+  //  using TMA_Q = kernel::tma::tma<bfloat16, 3, 3, 3, num_tokens * NUM_QO_HEADS, HEAD_DIM, num_tokens * NUM_QO_HEADS, KV_TILE_SIZE, true>;
+  using TMA_Q = kernel::tma::tma_general<bfloat16, 3, 3, 3, num_tokens * NUM_QO_HEADS, HEAD_DIM, num_tokens * NUM_QO_HEADS, KV_TILE_SIZE, 1, (HEAD_DIM + KV_TILE_SIZE - 1) / KV_TILE_SIZE, true>;
+  using TMA_KV = kernel::tma::tma_general<bfloat16, 3, 3, 3, num_tokens * NUM_KV_HEADS, HEAD_DIM, num_tokens * NUM_KV_HEADS, KV_TILE_SIZE, 1, (HEAD_DIM + KV_TILE_SIZE - 1) / KV_TILE_SIZE, true>;
  
    using TMA_PAGED_KV_CACHE = kernel::tma::tma<bfloat16, 3, 3, 3, KV_TILE_SIZE, HEAD_DIM, KV_TILE_SIZE, HEAD_DIM, true>;
    using TMA_OUTPUT = kernel::tma::tma<bfloat16, 3, 3, 3, MAX_TOKENS * NUM_QO_HEADS, HEAD_DIM, MAX_TOKENS * NUM_QO_HEADS, HEAD_DIM, true>;
