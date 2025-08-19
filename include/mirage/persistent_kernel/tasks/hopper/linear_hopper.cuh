@@ -26,6 +26,7 @@
 #include "utils.cuh"
 #include "wgmma.cuh"
 #include "tma_general.cuh"
+#include "smem_layout_tma.cuh"
 namespace kernel {
 
 using namespace tma;
@@ -48,7 +49,7 @@ __device__ __forceinline__ void
                          const TMA_OUT &tma_out) {
 
   constexpr int chunk_size = 16 / sizeof(T);
-  constexpr int TILE_SIZE = 128;
+  constexpr int TILE_SIZE = REDUCTION_SIZE < 128 ? REDUCTION_SIZE : 128;
   constexpr int THREADS_PER_WARPGROUP = 128;
   constexpr int CONSUMER_WARPGROUPS = 1;
   constexpr int PRODUCER_WARPGROUPS = 1;
@@ -112,7 +113,7 @@ __device__ __forceinline__ void
 
   // define the swizzle mode
   using InputSmem =
-      smem_row<T, B, M, S, BATCH_SIZE, TILE_SIZE, TILE_SIZE>;
+      smem_tma<T, B, M, S, BATCH_SIZE, 64, TILE_SIZE / 64>;
   InputSmem input_smem(shared_input);
   InputSmem input_smem_buffer(shared_input);
 
