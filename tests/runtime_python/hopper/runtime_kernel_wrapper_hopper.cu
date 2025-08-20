@@ -59,8 +59,8 @@ void launch_linear_hopper(void *input_ptr,
   constexpr int M = 3;
   constexpr int S = 3;
 
-  constexpr int TMA_CP_ASYNC_SIZE = 128;
-  constexpr int TILE_SIZE = 64;
+  constexpr int TMA_CP_ASYNC_SIZE = 64; // note that if swizzle 128 is used, 64 is maximal cp size
+  constexpr int TILE_SIZE = 128; // we should modify this param if we want larger tile size
   constexpr int TMA_CP_ASYNC_REPEAT_COL =
       (TILE_SIZE + TMA_CP_ASYNC_SIZE - 1) / TMA_CP_ASYNC_SIZE;
   constexpr int OUTPUT_REPEAT_COL =

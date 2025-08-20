@@ -6,8 +6,8 @@ torch.set_printoptions(sci_mode=False)
 
 g = torch.Generator(device="cuda").manual_seed(1234)
 
-reduction_sizes = [128]
-output_sizes = [64]
+reduction_sizes = [4096]
+output_sizes = [16, 32, 64]
 batch_size = 64
 
 for reduction_size in reduction_sizes:
