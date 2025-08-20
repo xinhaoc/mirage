@@ -23,16 +23,24 @@ template <typename T,
           int B,
           int M,
           int S,
-          size_t GMEM_ROW,
-          size_t GMEM_COL,
-          size_t SMEM_ROW,
-          size_t SMEM_COL,
-          size_t SMEM_REPEAT_ROW = 1,
-          size_t SMEM_REPEAT_COL = 1,
+          size_t GMEM_ROW_,
+          size_t GMEM_COL_,
+          size_t SMEM_ROW_,
+          size_t SMEM_COL_,
+          size_t SMEM_REPEAT_ROW_ = 1,
+          size_t SMEM_REPEAT_COL_ = 1,
           bool ROW_MAJOR = true>
 struct tma_general {
 
   CUtensorMap *desc_ptr;
+
+  static constexpr size_t GMEM_ROW = GMEM_ROW_;
+  static constexpr size_t GMEM_COL = GMEM_COL_;
+  static constexpr size_t SMEM_ROW = SMEM_ROW_;
+  static constexpr size_t SMEM_COL = SMEM_COL_;
+
+  static constexpr size_t SMEM_REPEAT_COL = SMEM_REPEAT_COL_;
+  static constexpr size_t SMEM_REPEAT_ROW = SMEM_REPEAT_ROW_;
 
   __host__ inline tma_general(void *src) {
     CUtensorMap host_desc;

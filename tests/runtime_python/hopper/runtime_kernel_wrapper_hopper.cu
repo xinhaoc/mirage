@@ -59,10 +59,14 @@ void launch_linear_hopper(void *input_ptr,
   constexpr int M = 3;
   constexpr int S = 3;
 
-  constexpr int TMA_CP_ASYNC_SIZE = 64;
-  constexpr int TILE_SIZE = 128;
+  constexpr int TMA_CP_ASYNC_SIZE = 128;
+  constexpr int TILE_SIZE = 64;
   constexpr int TMA_CP_ASYNC_REPEAT_COL =
       (TILE_SIZE + TMA_CP_ASYNC_SIZE - 1) / TMA_CP_ASYNC_SIZE;
+  constexpr int OUTPUT_REPEAT_COL =
+      (OUTPUT_SIZE + TMA_CP_ASYNC_SIZE - 1) / TMA_CP_ASYNC_SIZE;
+
+  constexpr int OUTPUT_TMA_CP_SIZE = OUTPUT_SIZE < 64 ? OUTPUT_SIZE : 64;
 
   //  using TMA_A = kernel::tma::tma<bfloat16,
   //                                 B,
@@ -104,24 +108,28 @@ void launch_linear_hopper(void *input_ptr,
                                          1,
                                          TMA_CP_ASYNC_REPEAT_COL,
                                          true>;
-  using TMA_RESIDUAL = kernel::tma::tma<bfloat16,
+  using TMA_RESIDUAL = kernel::tma::tma_general<bfloat16,
                                         0,
                                         0,
                                         0,
                                         BATCH_SIZE,
                                         OUTPUT_SIZE,
                                         BATCH_SIZE,
-                                        OUTPUT_SIZE,
+                                        OUTPUT_TMA_CP_SIZE,
+                                        1,
+                                        OUTPUT_REPEAT_COL,
                                         true>;
 
-  using TMA_OUT = kernel::tma::tma<bfloat16,
+  using TMA_OUT = kernel::tma::tma_general<bfloat16,
                                    0,
                                    0,
                                    0,
                                    BATCH_SIZE,
                                    OUTPUT_SIZE,
                                    BATCH_SIZE,
-                                   OUTPUT_SIZE,
+                                   OUTPUT_TMA_CP_SIZE,
+                                   1,
+                                   OUTPUT_REPEAT_COL,
                                    true>;
   TMA_A tma_a(input_ptr);
   TMA_B tma_b(weight_ptr);
@@ -211,13 +219,7 @@ void launch_linear_hopper(void *input_ptr,
          BATCH_SIZE,
          OUTPUT_SIZE,
          REDUCTION_SIZE);
-  printf("  Grid: (%d,%d,%d), Block: (%d,%d,%d)\n",
-         grid_dim.x,
-         grid_dim.y,
-         grid_dim.z,
-         block_dim.x,
-         block_dim.y,
-         block_dim.z);
+  printf(" TILE SIZE: %d\n", TILE_SIZE);
   printf("  Average: %.3f ms\n", avg_time_ms);
 
   printf("===============================\n");

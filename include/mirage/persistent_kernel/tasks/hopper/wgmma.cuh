@@ -14,9 +14,6 @@
  */
 
 #pragma once
-
-#include <type_traits>
-
 // A reg
 // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#wgmma-64n16-a
 // reference

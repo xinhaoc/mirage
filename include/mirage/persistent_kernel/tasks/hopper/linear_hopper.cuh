@@ -49,7 +49,7 @@ __device__ __forceinline__ void
                          const TMA_OUT &tma_out) {
 
   constexpr int chunk_size = 16 / sizeof(T);
-  constexpr int TILE_SIZE = REDUCTION_SIZE < 128 ? REDUCTION_SIZE : 128;
+  constexpr int TILE_SIZE = REDUCTION_SIZE < TMA_A::SMEM_COL * TMA_A::SMEM_REPEAT_COL ? REDUCTION_SIZE : TMA_A::SMEM_COL * TMA_A::SMEM_REPEAT_COL;
   constexpr int THREADS_PER_WARPGROUP = 128;
   constexpr int CONSUMER_WARPGROUPS = 1;
   constexpr int PRODUCER_WARPGROUPS = 1;
@@ -301,8 +301,6 @@ __device__ __forceinline__ void
 
     // asm volatile("" ::: "memory");
 
-    wait(residual_barrier[0], 0);
-
 #pragma unroll 1
     for (uint32_t i = 0; i < (OUTPUT_SIZE / 4); i++) {
       int row = (warp_idx % 4) * 16 + (i % 2) * 8 + idx_in_warp / 4;
@@ -325,7 +323,6 @@ __device__ __forceinline__ void
       tma_out.tma_store_async(mm_output_smem(0, 0), {0, 0});
       store_commit_group();
     }
-    store_async_wait<0>();
   }
 }
 
