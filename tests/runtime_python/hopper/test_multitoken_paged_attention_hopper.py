@@ -104,9 +104,9 @@ def torch_multitoken_paged_attention(
     mask = torch.tril(torch.ones((num_tokens, num_tokens), device=device, dtype=dtype))
     mask = torch.cat((torch.ones((num_tokens, prompt_len), device=device, dtype=dtype), mask), dim=-1)
     mask = mask.repeat_interleave(qo_heads, dim=0).repeat_interleave(kv_heads, dim=1)
-    print("scores.shape", scores.shape)
-    print("mask.shape", mask.shape)
-    print(mask)
+    # print("scores.shape", scores.shape)
+    # print("mask.shape", mask.shape)
+    # print(mask)
 
     scores = scores.masked_fill(mask == 0, float("-inf"))
     attn = F.softmax(scores / np.sqrt(head_dim), dim=-1)
@@ -145,11 +145,13 @@ qkv = torch.randn(
     (max_tokens, (qo_heads + 2 * kv_heads) * head_dim), device=device, dtype=dtype
 )
 
-# for i in range(qkv.shape[0]):
-#     for j in range(qkv.shape[1]):
-#         qkv[i, j] = 0.1 + 0.1 * (i * qkv.shape[1] + j)
+for i in range(qkv.shape[0]):
+    for j in range(qkv.shape[1]):
+        qkv[i, j] = 0.1 + 0.1 * (i * qkv.shape[1] + j)
 
+print("qkv.shape", qkv.shape)
 print("qkv[:, :qo_heads * head_dim] is", qkv[:, :qo_heads * head_dim].shape)
+print("qkv[:, :qo_heads * head_dim] shape is", qkv[:, :qo_heads * head_dim].shape)
 print("q is", qkv[:, :qo_heads * head_dim])
 
 #qkv = torch.full(

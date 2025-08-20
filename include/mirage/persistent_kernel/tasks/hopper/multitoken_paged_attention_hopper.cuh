@@ -27,6 +27,7 @@
  #include "../utils.cuh"
  #include "rotary_embedding_wg.cuh"
  #include "norm_wg.cuh"
+ #include "smem_layout_tma.cuh"
  namespace kernel {
  
  // NOTE(Jinchen): this task implements the paged attention where a causal mask
@@ -234,17 +235,19 @@
   //  using QOSmem = smem_row<T, 0, 0, 0, 64, HEAD_DIM, HEAD_DIM>;
   //  using KVSmem = smem_row<T, 0, 0, 0, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
   using ZeroBufferSmem = smem_row<T, 0, 0, 0, 1, 8, 8>;
-  // using QOSmem =
-  //     smem_row<T, 0, 4, 3, MAX_TOKENS * NUM_QO_PER_KV, HEAD_DIM, HEAD_DIM>;
   using QOSmem =
-      smem_row<T, 0, 3, 3, QSMEM_ROW, HEAD_DIM, HEAD_DIM>;
-  using KVSmem = smem_row<T, 3, 3, 3, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
+      smem_tma<T, 3, 3, 3, MAX_TOKENS * NUM_QO_PER_KV, 64, (HEAD_DIM + 63) / 64>;
+  using KVSmem = smem_tma<T, 3, 3, 3, KV_TILE_SIZE, 64, (HEAD_DIM + 63) / 64>;
   
   using Q_DESC = wgmma::mma_descriptor<QOSmem>;
   using KV_DESC = wgmma::mma_descriptor<KVSmem>;
 
    ZeroBufferSmem zero_buffer(zero_buf);
    QOSmem q_smem(s_q), o_smem(s_o);
+   if (threadIdx.x == 0) {
+    printf("s_q::ROW, INNER_COL, OUTER_COL: %llu, %llu, %llu\n", QOSmem::ROW, QOSmem::INNER_COL, QOSmem::OUTER_COL);
+    printf("s_q::STRIDE_ROW, STRIDE_OUTER_COL: %llu, %llu\n", QOSmem::STRIDE_ROW, QOSmem::STRIDE_OUTER_COL);
+   }
    KVSmem k_smem(s_k), v_smem(s_v);
    KVSmem k_buffer_smem(s_k_buffer), v_buffer_smem(s_v_buffer);
  
@@ -260,8 +263,8 @@
  
    // 16*128 = 2048
  
-   const int TMA_TRANS_BYTES_Q = num_tokens * NUM_QO_PER_KV * HEAD_DIM * sizeof(T) / 2;
-   int TMA_TRANS_BYTES_KV = KV_TILE_SIZE * HEAD_DIM * sizeof(T);
+   const int TMA_TRANS_BYTES_Q = num_tokens * NUM_QO_PER_KV * HEAD_DIM * sizeof(T);
+   const int TMA_TRANS_BYTES_KV = KV_TILE_SIZE * HEAD_DIM * sizeof(T);
  
    //  define barries
    Barrier *q_barrier = reinterpret_cast<Barrier *>(smem + 170000);
@@ -278,309 +281,326 @@
    }
    __syncthreads();
  
-//    if (warpgroup_id == NUM_WARPGROUPS - 1) {
-//  // prefetch
-//  // load q
+   if (warpgroup_id == NUM_WARPGROUPS - 1) {
+ // prefetch
+ // load q
 
-//     if (lane_idx == 0 && warp_idx % 4 == 0) {
-//       set_barrier_transaction_bytes(q_barrier[0], TMA_TRANS_BYTES_Q);
-//       tma_q.tma_cp_async(q_barrier[0], q_smem(0, 0), {0, 0});
-//     }
+    if (lane_idx == 0 && warp_idx % 4 == 0) {
+      set_barrier_transaction_bytes(q_barrier[0], TMA_TRANS_BYTES_Q);
+      tma_q.tma_cp_async(q_barrier[0], q_smem(0, 0), {0, 0});
+    }
  
-//      wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
+     wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
  
-//      // load k and v
-//      int page_idx_0 = page_indices[0];
-//  #pragma unroll
-//      for (int chunk_idx = threadIdx.x;
-//           chunk_idx < curr_iter_len * HEAD_DIM / CP_CHUNK_SIZE;
-//           chunk_idx += NUM_THREADS) {
-//        int dst_row = chunk_idx / (HEAD_DIM / CP_CHUNK_SIZE);
-//        int col = (chunk_idx % (HEAD_DIM / CP_CHUNK_SIZE)) * CP_CHUNK_SIZE;
-//        if (dst_row + cp_finished_seq_len < seq_len - num_tokens) {
-//          // load from KV Cache
-//          // int page_idx = page_indices[(dst_row + cp_finished_seq_len) /
-//          // PAGE_SIZE];
-//          int page_offset = (dst_row + cp_finished_seq_len) % PAGE_SIZE;
-//          int src_row = page_idx_0 * PAGE_SIZE + page_offset;
-//          load_smem(k_buffer_smem(dst_row, col),
-//                    paged_k_cache_dmem(src_row, col));
-//          load_smem(v_buffer_smem(dst_row, col),
-//                    paged_v_cache_dmem(src_row, col));
-//        } else {
-//          // load from QKV
-//          int src_row = dst_row + cp_finished_seq_len - (seq_len - num_tokens);
-//          load_smem(k_buffer_smem(dst_row, col), k_dmem(src_row, col));
-//          load_smem(v_buffer_smem(dst_row, col), v_dmem(src_row, col));
-//        }
-//      }
-//      cp_async_fence();
-//      cp_finished_seq_len += curr_iter_len;
-//      if (threadIdx.x == 128) {
-//        printf("finish preloading k and v\n");
-//      }
+     // load k and v
+     int page_idx_0 = page_indices[0];
+ #pragma unroll
+     for (int chunk_idx = threadIdx.x;
+          chunk_idx < curr_iter_len * HEAD_DIM / CP_CHUNK_SIZE;
+          chunk_idx += NUM_THREADS) {
+       int dst_row = chunk_idx / (HEAD_DIM / CP_CHUNK_SIZE);
+       int col = (chunk_idx % (HEAD_DIM / CP_CHUNK_SIZE)) * CP_CHUNK_SIZE;
+       if (dst_row + cp_finished_seq_len < seq_len - num_tokens) {
+         // load from KV Cache
+         // int page_idx = page_indices[(dst_row + cp_finished_seq_len) /
+         // PAGE_SIZE];
+         int page_offset = (dst_row + cp_finished_seq_len) % PAGE_SIZE;
+         int src_row = page_idx_0 * PAGE_SIZE + page_offset;
+         load_smem(k_buffer_smem(dst_row, col),
+                   paged_k_cache_dmem(src_row, col));
+         load_smem(v_buffer_smem(dst_row, col),
+                   paged_v_cache_dmem(src_row, col));
+       } else {
+         // load from QKV
+         int src_row = dst_row + cp_finished_seq_len - (seq_len - num_tokens);
+         load_smem(k_buffer_smem(dst_row, col), k_dmem(src_row, col));
+         load_smem(v_buffer_smem(dst_row, col), v_dmem(src_row, col));
+       }
+     }
+     cp_async_fence();
+     cp_finished_seq_len += curr_iter_len;
+     if (threadIdx.x == 128) {
+       printf("finish preloading k and v\n");
+     }
  
-//      for (int iter = 0; iter < num_iters; iter++) {
-//        int phase = (iter / Kstages) % 2;
-//        int slot = iter % Kstages;
-//        // wait(compute_done[0], phase);
-//        if (threadIdx.x == 128) {
-//          printf("start loading iter %d\n", iter);
-//        }
+     for (int iter = 0; iter < num_iters; iter++) {
+       int phase = (iter / Kstages) % 2;
+       int slot = iter % Kstages;
+       // wait(compute_done[0], phase);
+       if (threadIdx.x == 128) {
+         printf("start loading iter %d\n", iter);
+       }
  
-//        int next_iter_len = iter + 1 < num_iters
-//                                ? min(seq_len - cp_finished_seq_len, KV_TILE_SIZE)
-//                                : 0;
-//        if (next_iter_len > 0) {
-//          int page_idx = page_indices[cp_finished_seq_len / PAGE_SIZE];
-//  #pragma unroll
-//          for (int chunk_idx = threadIdx.x;
-//               chunk_idx < curr_iter_len * HEAD_DIM / CP_CHUNK_SIZE;
-//               chunk_idx += NUM_THREADS) {
-//            int dst_row = chunk_idx / (HEAD_DIM / CP_CHUNK_SIZE);
-//            int col = (chunk_idx % (HEAD_DIM / CP_CHUNK_SIZE)) * CP_CHUNK_SIZE;
-//            if (dst_row + cp_finished_seq_len < seq_len - num_tokens) {
-//              // load from KV Cache
-//              // int page_idx =
-//              //    page_indices[(dst_row + cp_finished_seq_len) / PAGE_SIZE];
-//              int page_offset = (dst_row + cp_finished_seq_len) % PAGE_SIZE;
-//              int src_row = page_idx * PAGE_SIZE + page_offset;
-//              load_smem(k_smem(dst_row, col), paged_k_cache_dmem(src_row, col));
-//              load_smem(v_smem(dst_row, col), paged_v_cache_dmem(src_row, col));
-//            } else {
-//              // load from QKV
-//              int src_row =
-//                  dst_row + cp_finished_seq_len - (seq_len - num_tokens);
-//              load_smem(k_smem(dst_row, col), k_dmem(src_row, col));
-//              load_smem(v_smem(dst_row, col), v_dmem(src_row, col));
-//            }
-//          }
-//          cp_async_fence();
-//          cp_async_wait<1>();
-//          cp_finished_seq_len += next_iter_len;
+       int next_iter_len = iter + 1 < num_iters
+                               ? min(seq_len - cp_finished_seq_len, KV_TILE_SIZE)
+                               : 0;
+       if (next_iter_len > 0) {
+         int page_idx = page_indices[cp_finished_seq_len / PAGE_SIZE];
+ #pragma unroll
+         for (int chunk_idx = threadIdx.x;
+              chunk_idx < curr_iter_len * HEAD_DIM / CP_CHUNK_SIZE;
+              chunk_idx += NUM_THREADS) {
+           int dst_row = chunk_idx / (HEAD_DIM / CP_CHUNK_SIZE);
+           int col = (chunk_idx % (HEAD_DIM / CP_CHUNK_SIZE)) * CP_CHUNK_SIZE;
+           if (dst_row + cp_finished_seq_len < seq_len - num_tokens) {
+             // load from KV Cache
+             // int page_idx =
+             //    page_indices[(dst_row + cp_finished_seq_len) / PAGE_SIZE];
+             int page_offset = (dst_row + cp_finished_seq_len) % PAGE_SIZE;
+             int src_row = page_idx * PAGE_SIZE + page_offset;
+             load_smem(k_smem(dst_row, col), paged_k_cache_dmem(src_row, col));
+             load_smem(v_smem(dst_row, col), paged_v_cache_dmem(src_row, col));
+           } else {
+             // load from QKV
+             int src_row =
+                 dst_row + cp_finished_seq_len - (seq_len - num_tokens);
+             load_smem(k_smem(dst_row, col), k_dmem(src_row, col));
+             load_smem(v_smem(dst_row, col), v_dmem(src_row, col));
+           }
+         }
+         cp_async_fence();
+         cp_async_wait<1>();
+         cp_finished_seq_len += next_iter_len;
  
-//          // if (warp_idx == num_warpgroups - 4 && lane_idx == 0) {
-//          //   arrive(kv_barrier[0], 1);
-//          // }
-//        } else {
-//          cp_async_wait<0>();
-//          // if (warp_idx == num_warpgroups - 4 && lane_idx == 0) {
-//          //   arrive(kv_barrier[0], 1);
-//          // }
-//        }
+         // if (warp_idx == num_warpgroups - 4 && lane_idx == 0) {
+         //   arrive(kv_barrier[0], 1);
+         // }
+       } else {
+         cp_async_wait<0>();
+         // if (warp_idx == num_warpgroups - 4 && lane_idx == 0) {
+         //   arrive(kv_barrier[0], 1);
+         // }
+       }
  
-//        if (threadIdx.x == 128) {
-//          printf("finish loading iter %d\n", iter);
-//          printf("start waiting for compute iter,phase is %d\n", phase);
-//        }
+       if (threadIdx.x == 128) {
+         printf("finish loading iter %d\n", iter);
+         printf("start waiting for compute iter,phase is %d\n", phase);
+       }
  
-//        // arrive barrier
-//        if (lane_idx == 0 && warp_idx % 4 == 0) {
-//          arrive(kv_barrier[slot], 1);
-//        }
+       // arrive barrier
+       if (lane_idx == 0 && warp_idx % 4 == 0) {
+         arrive(kv_barrier[slot], 1);
+       }
  
-//        wait(compute_done[slot], phase);
-//        if (threadIdx.x == 128) {
-//          printf("finish waiting for compute iter, phase is %d\n", phase);
-//        }
+       wait(compute_done[slot], phase);
+       if (threadIdx.x == 128) {
+         printf("finish waiting for compute iter, phase is %d\n", phase);
+       }
  
-//        // rotate the buffers
-//        if ((iter & 0x1) == 0) {
-//          k_smem.set_ptr(s_k_buffer);
-//          k_buffer_smem.set_ptr(s_k);
-//          v_smem.set_ptr(s_v_buffer);
-//          v_buffer_smem.set_ptr(s_v);
-//        } else {
-//          k_smem.set_ptr(s_k);
-//          k_buffer_smem.set_ptr(s_k_buffer);
-//          v_smem.set_ptr(s_v);
-//          v_buffer_smem.set_ptr(s_v_buffer);
-//        }
-//        wg_sync<THREADS_PER_WARPGROUP * PRODUCER_WARPGROUPS>(8);
-//      }
+       // rotate the buffers
+       if ((iter & 0x1) == 0) {
+         k_smem.set_ptr(s_k_buffer);
+         k_buffer_smem.set_ptr(s_k);
+         v_smem.set_ptr(s_v_buffer);
+         v_buffer_smem.set_ptr(s_v);
+       } else {
+         k_smem.set_ptr(s_k);
+         k_buffer_smem.set_ptr(s_k_buffer);
+         v_smem.set_ptr(s_v);
+         v_buffer_smem.set_ptr(s_v_buffer);
+       }
+       wg_sync<THREADS_PER_WARPGROUP * PRODUCER_WARPGROUPS>(8);
+     }
  
-//    } else {
+   } else {
  
-//      float m_local[MMA_ITERS_M][2];
-//  #pragma unroll
-//      for (int m = 0; m < MMA_ITERS_M; m++) {
-//        m_local[m][0] = -inf;
-//        m_local[m][1] = -inf;
-//      }
-//      float d[MMA_ITERS_M][2];
-//  #pragma unroll
-//      for (int m = 0; m < MMA_ITERS_M; m++) {
-//        d[m][0] = 1.f;
-//        d[m][1] = 1.f;
-//      }
-//      float o[MMA_ITERS_M][HEAD_DIM / 16][8];
-//  #pragma unroll
-//      for (int m = 0; m < MMA_ITERS_M; m++) {
-//  #pragma unroll
-//        for (int n = 0; n < HEAD_DIM / 16; n++) {
-//          clear_8_floats(o[m][n]);
-//        }
-//      }
+     float m_local[MMA_ITERS_M][2];
+ #pragma unroll
+     for (int m = 0; m < MMA_ITERS_M; m++) {
+       m_local[m][0] = -inf;
+       m_local[m][1] = -inf;
+     }
+     float d[MMA_ITERS_M][2];
+ #pragma unroll
+     for (int m = 0; m < MMA_ITERS_M; m++) {
+       d[m][0] = 1.f;
+       d[m][1] = 1.f;
+     }
+     float o[MMA_ITERS_M][HEAD_DIM / 16][8];
+ #pragma unroll
+     for (int m = 0; m < MMA_ITERS_M; m++) {
+ #pragma unroll
+       for (int n = 0; n < HEAD_DIM / 16; n++) {
+         clear_8_floats(o[m][n]);
+       }
+     }
  
-//      wait(q_barrier[0], 0);
-//      // print all q
-//      for (int i = 0; i < num_tokens * NUM_QO_PER_KV; i++) {
-//        for (int j = 0; j < HEAD_DIM; j++) {
-//         if (threadIdx.x == 0) {
-//           printf("q_smem[%d][%d] = %f\n", i, j, (float)q_smem.at(i, j));
-//         }
-//        }
-//      }
+     wait(q_barrier[0], 0);
+     // print all q
+     if (threadIdx.x == 0) {
+      // for (int i = 0; i < num_tokens * NUM_QO_PER_KV; i++) {
+      //   for (int j = 0; j < HEAD_DIM; j++) {
+      //       printf("%f ", (float)q_smem.at(i, j));
+      //   }
+      //   printf("\n");
+      // }
+      for (int i = 0; i < num_tokens * NUM_QO_PER_KV * HEAD_DIM; i++) {
+        if (i % 64 == 0) {
+          printf("\n i / 64 = %d\n", i / 64);
+        }
+          printf("%f ", (float)q_smem.at(i));
+      }
+      printf("\n\n viewed as 16x128 matrix\n");
+      for (int i = 0; i < num_tokens * NUM_QO_PER_KV; i++) {
+        for (int j = 0; j < HEAD_DIM; j++) {
+          // if (i % 64 == 0) {
+          //   printf("\n i / 64 = %d\n", i / 64);
+          // }
+          printf("%f ", (float)q_smem.at(i, j));
+        }
+        printf("\n");
+      }
+     }
 
-//      for (int iter = 0; iter < num_iters; iter++) {
+     for (int iter = 0; iter < num_iters; iter++) {
        
-//        int next_iter_len = iter + 1 < num_iters
-//        ? min(seq_len - cp_finished_seq_len, KV_TILE_SIZE)
-//        : 0;
+       int next_iter_len = iter + 1 < num_iters
+       ? min(seq_len - cp_finished_seq_len, KV_TILE_SIZE)
+       : 0;
        
-//        int phase = (iter / Kstages) % 2;
-//        int slot = iter % Kstages;
-//        if (threadIdx.x == 0) {
-//          printf("start compute iter %d\n", iter);
-//          printf("consumer wait for kv barrier, phase is %d\n", phase);
-//        }
-//        wait(kv_barrier[slot], phase);
+       int phase = (iter / Kstages) % 2;
+       int slot = iter % Kstages;
+       if (threadIdx.x == 0) {
+         printf("start compute iter %d\n", iter);
+         printf("consumer wait for kv barrier, phase is %d\n", phase);
+       }
+       wait(kv_barrier[slot], phase);
 
-//         // rotate the buffers
-//         if ((iter & 0x1) == 0) {
-//           k_smem.set_ptr(s_k_buffer);
-//           k_buffer_smem.set_ptr(s_k);
-//           v_smem.set_ptr(s_v_buffer);
-//           v_buffer_smem.set_ptr(s_v);
-//         } else {
-//           k_smem.set_ptr(s_k);
-//           k_buffer_smem.set_ptr(s_k_buffer);
-//           v_smem.set_ptr(s_v);
-//           v_buffer_smem.set_ptr(s_v_buffer);
-//         }
+        // rotate the buffers
+        if ((iter & 0x1) == 0) {
+          k_smem.set_ptr(s_k_buffer);
+          k_buffer_smem.set_ptr(s_k);
+          v_smem.set_ptr(s_v_buffer);
+          v_buffer_smem.set_ptr(s_v);
+        } else {
+          k_smem.set_ptr(s_k);
+          k_buffer_smem.set_ptr(s_k_buffer);
+          v_smem.set_ptr(s_v);
+          v_buffer_smem.set_ptr(s_v_buffer);
+        }
  
  
-//        int kv_tokens_to_process = min(
-//            curr_iter_len,
-//            max(iter * KV_TILE_SIZE + curr_iter_len - (seq_len - num_tokens), 0));
-//        int first_kv_token_to_process =
-//            iter * KV_TILE_SIZE + curr_iter_len - kv_tokens_to_process;
-//        if (qk_norm) {
-//          // Q norm
-//          if (iter == 0) {
-//            rms_norm_wg<T, QOSmem, NUM_QO_PER_KV, HEAD_DIM, THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(
-//                q_smem,
-//                static_cast<T const *>(q_norm_weight_ptr),
-//                s_q_norm_sum,
-//                q_eps,
-//                num_tokens /*window_size*/,
-//                0 /*token_offset*/,
-//                rope,
-//                static_cast<T const *>(cos_ptr) +
-//                    (seq_len - num_tokens) * HEAD_DIM,
-//                static_cast<T const *>(sin_ptr) +
-//                    (seq_len - num_tokens) * HEAD_DIM,
-//                9);
-//          }
-//          // K norm
-//          if (kv_tokens_to_process > 0) {
-//            rms_norm_wg<T, KVSmem, 1, HEAD_DIM, THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(
-//                k_smem,
-//                static_cast<T const *>(k_norm_weight_ptr),
-//                s_k_norm_sum,
-//                k_eps,
-//                kv_tokens_to_process /*window_size*/,
-//                curr_iter_len - kv_tokens_to_process,
-//                rope,
-//                static_cast<T const *>(cos_ptr) +
-//                    first_kv_token_to_process * HEAD_DIM,
-//                static_cast<T const *>(sin_ptr) +
-//                    first_kv_token_to_process * HEAD_DIM,
-//                9);
-//          }
-//        } else if (rope) {
-//          if (iter == 0) {
+       int kv_tokens_to_process = min(
+           curr_iter_len,
+           max(iter * KV_TILE_SIZE + curr_iter_len - (seq_len - num_tokens), 0));
+       int first_kv_token_to_process =
+           iter * KV_TILE_SIZE + curr_iter_len - kv_tokens_to_process;
+       if (qk_norm) {
+         // Q norm
+         if (iter == 0) {
+           rms_norm_wg<T, QOSmem, NUM_QO_PER_KV, HEAD_DIM, THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(
+               q_smem,
+               static_cast<T const *>(q_norm_weight_ptr),
+               s_q_norm_sum,
+               q_eps,
+               num_tokens /*window_size*/,
+               0 /*token_offset*/,
+               rope,
+               static_cast<T const *>(cos_ptr) +
+                   (seq_len - num_tokens) * HEAD_DIM,
+               static_cast<T const *>(sin_ptr) +
+                   (seq_len - num_tokens) * HEAD_DIM,
+               9);
+         }
+         // K norm
+         if (kv_tokens_to_process > 0) {
+           rms_norm_wg<T, KVSmem, 1, HEAD_DIM, THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(
+               k_smem,
+               static_cast<T const *>(k_norm_weight_ptr),
+               s_k_norm_sum,
+               k_eps,
+               kv_tokens_to_process /*window_size*/,
+               curr_iter_len - kv_tokens_to_process,
+               rope,
+               static_cast<T const *>(cos_ptr) +
+                   first_kv_token_to_process * HEAD_DIM,
+               static_cast<T const *>(sin_ptr) +
+                   first_kv_token_to_process * HEAD_DIM,
+               9);
+         }
+       } else if (rope) {
+         if (iter == 0) {
+ #pragma unroll
+           for (int token_idx = 0; token_idx < num_tokens; token_idx++) {
+             // q rope
+             rotary_embedding_wg<T, QOSmem, NUM_QO_PER_KV, HEAD_DIM, THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(
+                 q_smem,
+                 static_cast<T const *>(cos_ptr) +
+                     (token_idx + seq_len - num_tokens) * HEAD_DIM,
+                 static_cast<T const *>(sin_ptr) +
+                     (token_idx + seq_len - num_tokens) * HEAD_DIM,
+                 token_idx * NUM_QO_PER_KV,
+                 9);
+           }
+         }
+         if (kv_tokens_to_process > 0) {
+           for (int token_idx = 0; token_idx < kv_tokens_to_process;
+                token_idx++) {
+             // k rope
+             rotary_embedding_wg<T, KVSmem, 1, HEAD_DIM, THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(
+                 k_smem,
+                 static_cast<T const *>(cos_ptr) +
+                     (token_idx + first_kv_token_to_process) * HEAD_DIM,
+                 static_cast<T const *>(sin_ptr) +
+                     (token_idx + first_kv_token_to_process) * HEAD_DIM,
+                 token_idx + curr_iter_len - kv_tokens_to_process,
+                 9);
+           }
+         }
+       }
+ 
+       // printf("finish update k and v\n");
+ 
+       wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(9);
+ 
+       // update the KV Cache
+       if (kv_tokens_to_process > 0) {
+         int page_idx = page_indices[first_kv_token_to_process / PAGE_SIZE];
+         for (int elem_idx = threadIdx.x;
+              elem_idx < kv_tokens_to_process * HEAD_DIM;
+              elem_idx += NUM_THREADS) {
+           int token_idx = elem_idx / HEAD_DIM;
+           int col = elem_idx % HEAD_DIM;
+           // int page_idx = page_indices[(token_idx + first_kv_token_to_process)
+           // / PAGE_SIZE];
+           int page_offset = (token_idx + first_kv_token_to_process) % PAGE_SIZE;
+           int src_row = (token_idx + first_kv_token_to_process) % KV_TILE_SIZE;
+           int dst_row = page_idx * PAGE_SIZE + page_offset;
+           paged_k_cache_dmem.at(dst_row, col) = k_smem.at(src_row, col);
+           paged_v_cache_dmem.at(dst_row, col) = v_smem.at(src_row, col);
+         }
+       }
+       // printf("finish update KV Cache\n");
+ 
+       // printf("start compute X = QK^T\n");
+       // compute X = QK^T
+       // NOTE(Jinchen): we use m16n16k16 mma, and let warp layout be
+       // 1x4x1, so mma iterates over m and k dimensions
+      //  float x_frag_f[MMA_ITERS_M][8];
 //  #pragma unroll
-//            for (int token_idx = 0; token_idx < num_tokens; token_idx++) {
-//              // q rope
-//              rotary_embedding_wg<T, QOSmem, NUM_QO_PER_KV, HEAD_DIM, THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(
-//                  q_smem,
-//                  static_cast<T const *>(cos_ptr) +
-//                      (token_idx + seq_len - num_tokens) * HEAD_DIM,
-//                  static_cast<T const *>(sin_ptr) +
-//                      (token_idx + seq_len - num_tokens) * HEAD_DIM,
-//                  token_idx * NUM_QO_PER_KV,
-//                  9);
-//            }
-//          }
-//          if (kv_tokens_to_process > 0) {
-//            for (int token_idx = 0; token_idx < kv_tokens_to_process;
-//                 token_idx++) {
-//              // k rope
-//              rotary_embedding_wg<T, KVSmem, 1, HEAD_DIM, THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(
-//                  k_smem,
-//                  static_cast<T const *>(cos_ptr) +
-//                      (token_idx + first_kv_token_to_process) * HEAD_DIM,
-//                  static_cast<T const *>(sin_ptr) +
-//                      (token_idx + first_kv_token_to_process) * HEAD_DIM,
-//                  token_idx + curr_iter_len - kv_tokens_to_process,
-//                  9);
-//            }
+//        for (int m = 0; m < MMA_ITERS_M; m++) {
+//          clear_8_floats(x_frag_f[m]);
+//        }
+//        uint32_t q_frag[4], kt_frag[4];
+ 
+//        int kt_col = (warp_idx << 4) + ((lane_idx >> 4) << 3) + (lane_idx & 0x7);
+//  #pragma unroll
+//        for (int m = 0; m < MMA_ITERS_M; m++) {
+//          int q_row = (m << 4) + (lane_idx & 0xF);
+//  #pragma unroll
+//          for (int k = 0; k < HEAD_DIM / 16; k++) {
+//            int q_col = (k << 4) + ((lane_idx >> 4) << 3);
+//            int kt_row = (k << 4) + (((lane_idx & 0xF) >> 3) << 3);
+//            T *src_ptr_Q = q_row < num_tokens * NUM_QO_PER_KV
+//                               ? q_smem(q_row, q_col)
+//                               : zero_buffer(0, 0);
+//            T *src_ptr_KT = kt_col < curr_iter_len ? k_smem(kt_col, kt_row)
+//                                                   : zero_buffer(0, 0);
+//            ldsm(src_ptr_Q, q_frag);
+//            ldsm(src_ptr_KT, kt_frag);
+//            mma_m16n16k16_bf16bf16bf32(x_frag_f[m], q_frag, kt_frag, x_frag_f[m]);
 //          }
 //        }
- 
-//        // printf("finish update k and v\n");
- 
-//        wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(9);
- 
-//        // update the KV Cache
-//        if (kv_tokens_to_process > 0) {
-//          int page_idx = page_indices[first_kv_token_to_process / PAGE_SIZE];
-//          for (int elem_idx = threadIdx.x;
-//               elem_idx < kv_tokens_to_process * HEAD_DIM;
-//               elem_idx += NUM_THREADS) {
-//            int token_idx = elem_idx / HEAD_DIM;
-//            int col = elem_idx % HEAD_DIM;
-//            // int page_idx = page_indices[(token_idx + first_kv_token_to_process)
-//            // / PAGE_SIZE];
-//            int page_offset = (token_idx + first_kv_token_to_process) % PAGE_SIZE;
-//            int src_row = (token_idx + first_kv_token_to_process) % KV_TILE_SIZE;
-//            int dst_row = page_idx * PAGE_SIZE + page_offset;
-//            paged_k_cache_dmem.at(dst_row, col) = k_smem.at(src_row, col);
-//            paged_v_cache_dmem.at(dst_row, col) = v_smem.at(src_row, col);
-//          }
-//        }
-//        // printf("finish update KV Cache\n");
- 
-//        // printf("start compute X = QK^T\n");
-//        // compute X = QK^T
-//        // NOTE(Jinchen): we use m16n16k16 mma, and let warp layout be
-//        // 1x4x1, so mma iterates over m and k dimensions
-//       //  float x_frag_f[MMA_ITERS_M][8];
-// //  #pragma unroll
-// //        for (int m = 0; m < MMA_ITERS_M; m++) {
-// //          clear_8_floats(x_frag_f[m]);
-// //        }
-// //        uint32_t q_frag[4], kt_frag[4];
- 
-// //        int kt_col = (warp_idx << 4) + ((lane_idx >> 4) << 3) + (lane_idx & 0x7);
-// //  #pragma unroll
-// //        for (int m = 0; m < MMA_ITERS_M; m++) {
-// //          int q_row = (m << 4) + (lane_idx & 0xF);
-// //  #pragma unroll
-// //          for (int k = 0; k < HEAD_DIM / 16; k++) {
-// //            int q_col = (k << 4) + ((lane_idx >> 4) << 3);
-// //            int kt_row = (k << 4) + (((lane_idx & 0xF) >> 3) << 3);
-// //            T *src_ptr_Q = q_row < num_tokens * NUM_QO_PER_KV
-// //                               ? q_smem(q_row, q_col)
-// //                               : zero_buffer(0, 0);
-// //            T *src_ptr_KT = kt_col < curr_iter_len ? k_smem(kt_col, kt_row)
-// //                                                   : zero_buffer(0, 0);
-// //            ldsm(src_ptr_Q, q_frag);
-// //            ldsm(src_ptr_KT, kt_frag);
-// //            mma_m16n16k16_bf16bf16bf32(x_frag_f[m], q_frag, kt_frag, x_frag_f[m]);
-// //          }
-// //        }
 
 // float x_frag_f[MMA_ITERS_M][8];
 // #pragma unroll
@@ -599,7 +619,7 @@
 //       }
 //     }
 
-//        //  __syncthreads();
+       //  __syncthreads();
 //        wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(9);
  
 //        // update m_local: get partial max
@@ -630,8 +650,8 @@
 //                max(m_local[m][(frag_idx & 0x3) >> 1], x_frag_f[m][frag_idx]);
 //          }
 //        }
-//  // printf("start update m_local\n");
-//  // update m_local: get local max across 4 threads in a row
+ // printf("start update m_local\n");
+ // update m_local: get local max across 4 threads in a row
 //  #pragma unroll
 //        for (int m = 0; m < MMA_ITERS_M; m++) {
 //          m_local[m][0] = max(m_local[m][0], shfl_xor_sync(m_local[m][0], 0x1));
@@ -649,7 +669,7 @@
 //              expf(m_prev[m][1] * sm_scale - m_local[m][1] * sm_scale);
 //        }
  
-//        // update d: get partial sum
+       // update d: get partial sum
 //        float d_partial[MMA_ITERS_M][2];
 //  #pragma unroll
 //        for (int m = 0; m < MMA_ITERS_M; m++) {
@@ -690,24 +710,24 @@
 //          }
 //        }
  
-//        // printf("start compute o\n");
+       // printf("start compute o\n");
  
-//        // update o: compute O = exp(X - m) * V and accumulate
-//        // use m16n16k16 mma to compute and let warp layout be 1x1x4
-// //        uint32_t x_frag[MMA_ITERS_M][4], v_frag[4];
-// //  #pragma unroll
-// //        for (int m = 0; m < MMA_ITERS_M; m++) {
-// //          convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
-// //          int v_row = (warp_idx << 4) + (lane_idx & 0xF);
-// //  #pragma unroll
-// //          for (int n = 0; n < HEAD_DIM / 16; n++) {
-// //            int v_col = (n << 4) + ((lane_idx >> 4) << 3);
-// //            T *src_ptr_V =
-// //                v_row < curr_iter_len ? v_smem(v_row, v_col) : zero_buffer(0, 0);
-// //            ldsm_t(src_ptr_V, v_frag);
-// //            mma_m16n16k16_bf16bf16bf32(o[m][n], x_frag[m], v_frag, o[m][n]);
-// //          }
-// //        }
+       // update o: compute O = exp(X - m) * V and accumulate
+       // use m16n16k16 mma to compute and let warp layout be 1x1x4
+//        uint32_t x_frag[MMA_ITERS_M][4], v_frag[4];
+//  #pragma unroll
+//        for (int m = 0; m < MMA_ITERS_M; m++) {
+//          convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
+//          int v_row = (warp_idx << 4) + (lane_idx & 0xF);
+//  #pragma unroll
+//          for (int n = 0; n < HEAD_DIM / 16; n++) {
+//            int v_col = (n << 4) + ((lane_idx >> 4) << 3);
+//            T *src_ptr_V =
+//                v_row < curr_iter_len ? v_smem(v_row, v_col) : zero_buffer(0, 0);
+//            ldsm_t(src_ptr_V, v_frag);
+//            mma_m16n16k16_bf16bf16bf32(o[m][n], x_frag[m], v_frag, o[m][n]);
+//          }
+//        }
 
 //        uint32_t x_frag[MMA_ITERS_M][4], v_frag[4];
 //        for (int m = 0; m < MMA_ITERS_M; m++) {
@@ -724,15 +744,15 @@
 //        wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(9);
  
 //        curr_iter_len = next_iter_len;
-//        // printf("arrive compute_done\n");
-//        if (warp_idx == 0 && lane_idx == 0) {
-//          arrive(compute_done[slot], 1);
-//        }
+       printf("arrive compute_done\n");
+       if (warp_idx == 0 && lane_idx == 0) {
+         arrive(compute_done[slot], 1);
+       }
  
 
-//        if (threadIdx.x == 0) {
-//          printf("finish compute, arrive compute_done\n");
-//        }
+       if (threadIdx.x == 0) {
+         printf("finish compute, arrive compute_done\n");
+       }
 //      }
  
 //      // write intermediate results to buffer in shared memory
@@ -832,10 +852,10 @@
 //        int dst_row = src_row / NUM_QO_PER_KV;
 //        int dst_col = src_col + (src_row % NUM_QO_PER_KV) * HEAD_DIM;
 //        o_dmem.at(dst_row, dst_col) = o_smem.at(src_row, src_col);
-//      }
+     }
  
  
-//    }
+   }
  }
  
  // if (warp_idx == 0 && lane_idx == 0) {

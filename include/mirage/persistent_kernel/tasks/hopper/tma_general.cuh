@@ -67,7 +67,7 @@ public:
         int smem_offset = (i * SMEM_REPEAT_COL + j) * SMEM_COL * SMEM_ROW;
         int const tma_coords_local[NDIM] = {tma_coords[0] + j * SMEM_COL,
                                             tma_coords[1] + i * SMEM_ROW};
-#ifdef MIRAGE_DEBUG_HOPPER
+#if 1
         printf("tma_coords: %d, %d\n", tma_coords[0], tma_coords[1]);
         printf("tma_coords_local: %d, %d\n",
                tma_coords_local[0],
@@ -258,7 +258,7 @@ private:
     uint32_t const *smem_box_shape_ptr = &smem_box_shape[0];
     uint32_t const *smem_box_stride_ptr = &smem_box_stride[0];
 
-#ifdef MIRAGE_DEBUG_HOPPER
+#if 1
     printf("gmem_prob_shape: %lu, %lu, %lu, %lu, %lu\n",
            gmem_prob_shape[0],
            gmem_prob_shape[1],

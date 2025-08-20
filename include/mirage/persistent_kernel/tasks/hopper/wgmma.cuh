@@ -23,10 +23,10 @@ namespace kernel {
 namespace wgmma {
 
 template <typename T, typename = void>
-struct has_inner_col : std::false_type {};
+struct has_inner_col : ::std::false_type {};
 
 template <typename T>
-struct has_inner_col<T, std::void_t<decltype(T::INNER_COL)>> : std::true_type {
+struct has_inner_col<T, ::std::void_t<decltype(T::INNER_COL)>> : ::std::true_type {
 };
 
 // choose inner col if has, otherwise use col

@@ -586,6 +586,10 @@ void launch_linear_hopper(void *input_ptr,
     dim3 block_dim(256, 1, 1);
     size_t smem_size = 224 * 1024;
 
+    constexpr int B = 3;
+    constexpr int M = 3;
+    constexpr int S = 3;
+    constexpr int TMA_CP_SIZE = 64;
     constexpr int KV_TILE_SIZE = 64;
     constexpr int prompt_len = 8;
     constexpr int num_tokens = 4;
@@ -597,27 +601,40 @@ void launch_linear_hopper(void *input_ptr,
     //  NUM_QO_HEADS, HEAD_DIM, num_tokens * NUM_QO_HEADS, KV_TILE_SIZE, true>;
     using TMA_Q =
         kernel::tma::tma_general<bfloat16,
-                                 3,
-                                 3,
-                                 3,
+                                 B,
+                                 M,
+                                 S,
                                  num_tokens * NUM_QO_HEADS,
                                  HEAD_DIM,
                                  num_tokens * NUM_QO_HEADS,
-                                 KV_TILE_SIZE,
+                                 TMA_CP_SIZE,
                                  1,
-                                 (HEAD_DIM + KV_TILE_SIZE - 1) / KV_TILE_SIZE,
+                                 (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
                                  true>;
+
+    // using TMA_Q = kernel::tma::tma_general<bfloat16,
+    //                          B,
+    //                          M,
+    //                          S,
+    //                          num_tokens * NUM_QO_HEADS,
+    //                          HEAD_DIM,
+    //                          num_tokens * NUM_QO_HEADS,
+    //                          TMA_CP_SIZE,
+    //                          1,
+    //                          (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
+    //                          true>;
+
     using TMA_KV =
         kernel::tma::tma_general<bfloat16,
-                                 3,
-                                 3,
-                                 3,
+                                 B,
+                                 M,
+                                 S,
                                  num_tokens * NUM_KV_HEADS,
                                  HEAD_DIM,
                                  num_tokens * NUM_KV_HEADS,
-                                 KV_TILE_SIZE,
+                                 TMA_CP_SIZE,
                                  1,
-                                 (HEAD_DIM + KV_TILE_SIZE - 1) / KV_TILE_SIZE,
+                                 (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
                                  true>;
 
     using TMA_PAGED_KV_CACHE = kernel::tma::tma<bfloat16,
@@ -627,7 +644,7 @@ void launch_linear_hopper(void *input_ptr,
                                                 KV_TILE_SIZE,
                                                 HEAD_DIM,
                                                 KV_TILE_SIZE,
-                                                HEAD_DIM,
+                                                64,
                                                 true>;
     using TMA_OUTPUT = kernel::tma::tma<bfloat16,
                                         3,
@@ -636,7 +653,7 @@ void launch_linear_hopper(void *input_ptr,
                                         MAX_TOKENS * NUM_QO_HEADS,
                                         HEAD_DIM,
                                         MAX_TOKENS * NUM_QO_HEADS,
-                                        HEAD_DIM,
+                                        64,
                                         true>;
 
     bfloat16 *__restrict__ qkv_ptr_bf16 = static_cast<bfloat16 *>(qkv_ptr);
@@ -664,7 +681,7 @@ void launch_linear_hopper(void *input_ptr,
                                                   TMA_KV,
                                                   TMA_PAGED_KV_CACHE,
                                                   TMA_OUTPUT,
-                                                  MAX_TOKENS>,
+                                                  num_tokens>,
         cudaFuncAttributeMaxDynamicSharedMemorySize,
         smem_size);
 
@@ -681,7 +698,7 @@ void launch_linear_hopper(void *input_ptr,
                                               TMA_KV,
                                               TMA_PAGED_KV_CACHE,
                                               TMA_OUTPUT,
-                                              MAX_TOKENS>
+                                              num_tokens>
         <<<grid_dim, block_dim, smem_size>>>(tma_q,
                                              tma_k,
                                              tma_v,
