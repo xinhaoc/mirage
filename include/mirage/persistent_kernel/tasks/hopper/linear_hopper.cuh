@@ -1,18 +1,18 @@
 
 /* Copyright 2025 CMU
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*     http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
 
 #pragma once
 #include "../common.h"
@@ -44,9 +44,9 @@ template <typename T,
           int OUTPUT_STRIDE = OUTPUT_SIZE>
 __device__ __forceinline__ void
     linear_kernel_hopper(const TMA_A &tma_a,
-                         const TMA_B &tma_b,
-                         const TMA_RESIDUAL &tma_residual,
-                         const TMA_OUT &tma_out) {
+                        const TMA_B &tma_b,
+                        const TMA_RESIDUAL &tma_residual,
+                        const TMA_OUT &tma_out) {
 
   constexpr int chunk_size = 16 / sizeof(T);
   constexpr int TILE_SIZE = REDUCTION_SIZE < 128 ? REDUCTION_SIZE : 128;
@@ -54,6 +54,12 @@ __device__ __forceinline__ void
   constexpr int CONSUMER_WARPGROUPS = 1;
   constexpr int PRODUCER_WARPGROUPS = 1;
   constexpr int NUM_WARPGROUPS = CONSUMER_WARPGROUPS + PRODUCER_WARPGROUPS;
+
+  // The actual tma instructions are issued for each 64 cols when swizzle<3,3,3> is used
+  // large tile size is wrapped, but
+  constexpr int INPUT_TMA_TILE_SIZE = 64;
+  constexpr int WEIGHT_TMA_TILE_SIZE = INPUT_TMA_TILE_SIZE;
+  constexpr int OUTPUT_TMA_TILE_SIZE = OUTPUT_SIZE < 64 ? OUTPUT_SIZE : 64;
 
   constexpr int TMA_TRANS_BYTES_A = sizeof(T) * BATCH_SIZE * TILE_SIZE;
   constexpr int TMA_TRANS_BYTES_B = sizeof(T) * TILE_SIZE * OUTPUT_SIZE;
@@ -90,7 +96,7 @@ __device__ __forceinline__ void
 
   constexpr size_t SHARED_INPUT_BARRIER_OFFSET =
       (SHARED_MM_OUTPUT_BUFFER_OFFSET + sizeof(T) * BATCH_SIZE * OUTPUT_SIZE +
-       7) /
+      7) /
       8 * 8;
 
   constexpr size_t SHARED_WEIGHT_BARRIER_OFFSET =
@@ -113,26 +119,25 @@ __device__ __forceinline__ void
 
   // define the swizzle mode
   using InputSmem =
-      smem_tma<T, B, M, S, BATCH_SIZE, 64, TILE_SIZE / 64>;
+      smem_tma<T, B, M, S, BATCH_SIZE, INPUT_TMA_TILE_SIZE, TILE_SIZE / INPUT_TMA_TILE_SIZE>;
   InputSmem input_smem(shared_input);
   InputSmem input_smem_buffer(shared_input);
 
   using WeightSmem =
-      smem_col<T, B, M, S, TILE_SIZE, OUTPUT_SIZE, TILE_SIZE>;
+      smem_tma<T, B, M, S, OUTPUT_SIZE, WEIGHT_TMA_TILE_SIZE, TILE_SIZE / WEIGHT_TMA_TILE_SIZE>;
   WeightSmem input_weight_smem(shared_weight);
   WeightSmem input_weight_smem_buffer(shared_weight);
 
   using ResidualSmem =
-      smem_row<T, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE>;
+      smem_tma<T, 0, 0, 0, BATCH_SIZE, OUTPUT_TMA_TILE_SIZE, OUTPUT_SIZE / OUTPUT_TMA_TILE_SIZE>;
   ResidualSmem residual_smem(shared_residual);
 
   using A_DESC = wgmma::mma_descriptor<InputSmem>;
   using B_DESC = wgmma::mma_descriptor<WeightSmem>;
 
-  smem_row<T, 0, 0, 0, BATCH_SIZE, OUTPUT_SIZE, OUTPUT_SIZE>
-      mm_output_smem(mm_output);
+  using OutputSmem = smem_tma<T, 0, 0, 0, BATCH_SIZE, OUTPUT_TMA_TILE_SIZE, OUTPUT_SIZE / OUTPUT_TMA_TILE_SIZE>;
+  OutputSmem mm_output_smem(mm_output);
   float s_frag[32];
-
 #pragma unroll
   for (int i = 0; i < 4; i++) {
     clear_8_floats(s_frag + i * 8);
@@ -178,7 +183,7 @@ __device__ __forceinline__ void
             input_barrier[slot], input_smem_buffer(0, 0), tma_coords_A);
 
         input_weight_smem_buffer.set_ptr(shared_weight +
-                                         slot * TMA_TRANS_BYTES_B / sizeof(T));
+                                        slot * TMA_TRANS_BYTES_B / sizeof(T));
         set_barrier_transaction_bytes(weight_barrier[slot], TMA_TRANS_BYTES_B);
         tma_b.tma_cp_async(
             weight_barrier[slot], input_weight_smem_buffer(0, 0), tma_coords_B);
@@ -205,7 +210,7 @@ __device__ __forceinline__ void
             input_barrier[slot], input_smem_buffer(0, 0), tma_coords_A);
 
         input_weight_smem_buffer.set_ptr(shared_weight +
-                                         slot * TMA_TRANS_BYTES_B / sizeof(T));
+                                        slot * TMA_TRANS_BYTES_B / sizeof(T));
         set_barrier_transaction_bytes(weight_barrier[slot], TMA_TRANS_BYTES_B);
         tma_b.tma_cp_async(
             weight_barrier[slot], input_weight_smem_buffer(0, 0), tma_coords_B);
@@ -225,17 +230,17 @@ __device__ __forceinline__ void
       input_weight_smem.set_ptr(shared_weight +
                                 (slot)*TMA_TRANS_BYTES_B / sizeof(T));
 
-       if (threadIdx.x == 0) {
-         printf("i: %d\n", i);
-         printf("input_smem ptr: %p\n", input_smem(0, 0));
-         printf("input_weight_smem ptr: %p\n", input_weight_smem(0, 0));
-         printf("input_smem\n");
-         for (int j = 0; j < BATCH_SIZE; j++) {
-           for (int k = 0; k < TILE_SIZE; k++) {
-             printf("%f ", (float)input_smem.at(j, k));
-           }
-           printf("\n");
-         }
+      //  if (threadIdx.x == 0) {
+      //    printf("i: %d\n", i);
+      //    printf("input_smem ptr: %p\n", input_smem(0, 0));
+      //    printf("input_weight_smem ptr: %p\n", input_weight_smem(0, 0));
+      //    printf("input_smem\n");
+      //    for (int j = 0; j < BATCH_SIZE; j++) {
+      //      for (int k = 0; k < TILE_SIZE; k++) {
+      //        printf("%f ", (float)input_smem.at(j, k));
+      //      }
+      //      printf("\n");
+      //    }
         //  printf("input_weight_smem\n");
         //  for (int j = 0; j < TILE_SIZE; j++) {
         //    for (int k = 0; k < OUTPUT_SIZE; k++) {
@@ -243,7 +248,7 @@ __device__ __forceinline__ void
         //    }
         //    printf("\n");
         //  }
-       }
+      //  }
 
       A_DESC a_desc(input_smem(0, 0));
       B_DESC b_desc(input_weight_smem(0, 0));
@@ -252,15 +257,15 @@ __device__ __forceinline__ void
       wgmma::warpgroup_arrive();
       // wgmma
       wgmma::mma<bfloat16,
-                 64,
-                 OUTPUT_SIZE,
-                 16,
-                 InputSmem,
-                 WeightSmem,
-                 A_DESC,
-                 B_DESC,
-                 false,
-                 false>(s_frag, a_desc, b_desc);
+                64,
+                OUTPUT_SIZE,
+                16,
+                InputSmem,
+                WeightSmem,
+                A_DESC,
+                B_DESC,
+                false,
+                false>(s_frag, a_desc, b_desc);
       wgmma::mma_commit_group();
       wgmma::mma_async_wait();
       //   wgmma::warpgroup_fence_fragment(s_frag);
