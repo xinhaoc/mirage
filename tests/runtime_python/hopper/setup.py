@@ -38,6 +38,7 @@ setup(
                     '-O3',
                     '-gencode=arch=compute_90a,code=sm_90a',
                     '-DMIRAGE_GRACE_HOPPER',
+                    '-DMIRAGE_PROFILE_HOPPER',
                 ]
             }
         )
