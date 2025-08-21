@@ -599,17 +599,18 @@ void launch_linear_hopper(void *input_ptr,
 
     //  using TMA_Q = kernel::tma::tma<bfloat16, 3, 3, 3, num_tokens *
     //  NUM_QO_HEADS, HEAD_DIM, num_tokens * NUM_QO_HEADS, KV_TILE_SIZE, true>;
-    using TMA_Q =
-        kernel::tma::tma_general<bfloat16,
+
+    using TMA_Q = kernel::tma::tma_3d<bfloat16,
                                  B,
                                  M,
                                  S,
-                                 num_tokens * NUM_QO_HEADS,
+                                 num_tokens,
+                                 NUM_QO_HEADS,
                                  HEAD_DIM,
                                  num_tokens * NUM_QO_HEADS,
                                  TMA_CP_SIZE,
                                  1,
-                                 (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
+                                 (NUM_QO_HEADS * HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
                                  true>;
 
     // using TMA_Q = kernel::tma::tma_general<bfloat16,

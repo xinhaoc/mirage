@@ -28,6 +28,7 @@
  #include "rotary_embedding_wg.cuh"
  #include "norm_wg.cuh"
  #include "smem_layout_tma.cuh"
+ #include "tma_3d.cuh"
  namespace kernel {
  
  // NOTE(Jinchen): this task implements the paged attention where a causal mask
