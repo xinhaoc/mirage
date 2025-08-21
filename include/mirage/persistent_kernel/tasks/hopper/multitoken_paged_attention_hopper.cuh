@@ -237,8 +237,8 @@
   //  using KVSmem = smem_row<T, 0, 0, 0, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
   using ZeroBufferSmem = smem_row<T, 0, 0, 0, 1, 8, 8>;
   using QOSmem =
-      smem_tma<T, 3, 3, 3, MAX_TOKENS * NUM_QO_PER_KV, 64, (HEAD_DIM + 63) / 64>;
-  using KVSmem = smem_tma<T, 3, 3, 3, KV_TILE_SIZE, 64, (HEAD_DIM + 63) / 64>;
+      smem_tma<T, 0, 0, 0, MAX_TOKENS * NUM_QO_PER_KV, 64, (HEAD_DIM + 63) / 64>;
+  using KVSmem = smem_tma<T, 0, 0, 0, KV_TILE_SIZE, 64, (HEAD_DIM + 63) / 64>;
   
   using Q_DESC = wgmma::mma_descriptor<QOSmem>;
   using KV_DESC = wgmma::mma_descriptor<KVSmem>;
@@ -442,12 +442,10 @@
           printf("%f ", (float)q_smem.at(i));
       }
       printf("\n\n viewed as 16x128 matrix\n");
-      for (int i = 0; i < num_tokens * NUM_QO_PER_KV; i++) {
-        for (int j = 0; j < HEAD_DIM; j++) {
-          // if (i % 64 == 0) {
-          //   printf("\n i / 64 = %d\n", i / 64);
-          // }
-          printf("%f ", (float)q_smem.at(i, j));
+      for (int i = 0; i < num_tokens; i++) {
+        for (int j = 0; j < NUM_QO_PER_KV * HEAD_DIM; j++) {
+            printf("%f ", (float)q_smem.at(i, j));
+          
         }
         printf("\n");
       }

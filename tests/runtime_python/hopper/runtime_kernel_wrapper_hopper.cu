@@ -586,13 +586,14 @@ void launch_linear_hopper(void *input_ptr,
     dim3 block_dim(256, 1, 1);
     size_t smem_size = 224 * 1024;
 
-    constexpr int B = 3;
-    constexpr int M = 3;
-    constexpr int S = 3;
+    constexpr int B = 0;
+    constexpr int M = 0;
+    constexpr int S = 0;
     constexpr int TMA_CP_SIZE = 64;
     constexpr int KV_TILE_SIZE = 64;
     constexpr int prompt_len = 8;
     constexpr int num_tokens = 4;
+
 
     // printf("on wrapper, num_tokens*NUM_QO_HEADS: %d\n", num_tokens *
     // NUM_QO_HEADS);
@@ -600,30 +601,32 @@ void launch_linear_hopper(void *input_ptr,
     //  using TMA_Q = kernel::tma::tma<bfloat16, 3, 3, 3, num_tokens *
     //  NUM_QO_HEADS, HEAD_DIM, num_tokens * NUM_QO_HEADS, KV_TILE_SIZE, true>;
 
-    using TMA_Q = kernel::tma::tma_3d<bfloat16,
-                                 B,
-                                 M,
-                                 S,
-                                 num_tokens,
-                                 NUM_QO_HEADS,
-                                 HEAD_DIM,
-                                 num_tokens * NUM_QO_HEADS,
-                                 TMA_CP_SIZE,
-                                 1,
-                                 (NUM_QO_HEADS * HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
-                                 true>;
-
     // using TMA_Q = kernel::tma::tma_general<bfloat16,
-    //                          B,
-    //                          M,
-    //                          S,
-    //                          num_tokens * NUM_QO_HEADS,
-    //                          HEAD_DIM,
-    //                          num_tokens * NUM_QO_HEADS,
-    //                          TMA_CP_SIZE,
-    //                          1,
-    //                          (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
-    //                          true>;
+    //                              B,
+    //                              M,
+    //                              S,
+    //                              num_tokens,
+    //                              (NUM_QO_HEADS + 2 * NUM_KV_HEADS) * HEAD_DIM,
+    //                              num_tokens,
+    //                              TMA_CP_SIZE,
+    //                              1,
+    //                              (NUM_QO_HEADS * HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
+    //                              true>;
+
+    using TMA_Q = kernel::tma::tma_general<bfloat16,
+                                            B,
+                                            M,
+                                            S,
+                                            num_tokens * NUM_QO_HEADS,
+                                            HEAD_DIM,
+                                            NUM_QO_HEADS,
+                                            TMA_CP_SIZE,
+                                            1,
+                                            (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
+                                            true>;
+
+
+
 
     using TMA_KV =
         kernel::tma::tma_general<bfloat16,
