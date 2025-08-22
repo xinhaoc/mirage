@@ -288,13 +288,21 @@
 
     if (lane_idx == 0 && warp_idx % 4 == 0) {
       set_barrier_transaction_bytes(q_barrier[0], TMA_TRANS_BYTES_Q);
-      tma_q.tma_cp_async(q_barrier[0], q_smem(0, 0), {0, 0});
+      printf("q_smem(0, 0) = %p\n", q_smem(0, 0));
+      for (int token_idx = 0; token_idx < num_tokens; token_idx++) {
+          int g_row = token_idx * (NUM_QO_PER_KV + 2 * NUM_KV_HEADS);
+          // qsmem (4, 0) gmem(0, )
+          // 4 * 128 * 2
+          printf("q_smem(token_idx * NUM_QO_PER_KV, 0) = %p\n", q_smem(token_idx * NUM_QO_PER_KV, 0));
+          tma_q.tma_cp_async(q_barrier[0], q_smem(token_idx * NUM_QO_PER_KV, 0), {0, g_row});
+      }
     }
  
      wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
  
      // load k and v
      int page_idx_0 = page_indices[0];
+
  #pragma unroll
      for (int chunk_idx = threadIdx.x;
           chunk_idx < curr_iter_len * HEAD_DIM / CP_CHUNK_SIZE;
@@ -318,6 +326,7 @@
          load_smem(v_buffer_smem(dst_row, col), v_dmem(src_row, col));
        }
      }
+
      cp_async_fence();
      cp_finished_seq_len += curr_iter_len;
      if (threadIdx.x == 128) {
@@ -427,30 +436,25 @@
      }
  
      wait(q_barrier[0], 0);
-     // print all q
+
+#if 0
      if (threadIdx.x == 0) {
-      // for (int i = 0; i < num_tokens * NUM_QO_PER_KV; i++) {
-      //   for (int j = 0; j < HEAD_DIM; j++) {
-      //       printf("%f ", (float)q_smem.at(i, j));
-      //   }
-      //   printf("\n");
-      // }
       for (int i = 0; i < num_tokens * NUM_QO_PER_KV * HEAD_DIM; i++) {
         if (i % 64 == 0) {
           printf("\n i / 64 = %d\n", i / 64);
         }
           printf("%f ", (float)q_smem.at(i));
       }
-      printf("\n\n viewed as 16x128 matrix\n");
-      for (int i = 0; i < num_tokens; i++) {
-        for (int j = 0; j < NUM_QO_PER_KV * HEAD_DIM; j++) {
+      printf("\n\nviewed as 16x128 matrix\n");
+      for (int i = 0; i < num_tokens * NUM_QO_PER_KV; i++) {
+        for (int j = 0; j < HEAD_DIM; j++) {
             printf("%f ", (float)q_smem.at(i, j));
           
         }
         printf("\n");
       }
      }
-
+#endif
      for (int iter = 0; iter < num_iters; iter++) {
        
        int next_iter_len = iter + 1 < num_iters

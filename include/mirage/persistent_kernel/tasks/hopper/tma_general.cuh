@@ -62,11 +62,11 @@ public:
                                       T *smem_ptr,
                                       int const (&tma_coords)[NDIM]) const {
 #pragma unroll
-    for (size_t i = 0; i < SMEM_REPEAT_ROW; i++) {
+    // for (size_t i = 0; i < SMEM_REPEAT_ROW; i++) {
       for (size_t j = 0; j < SMEM_REPEAT_COL; j++) {
-        int smem_offset = (i * SMEM_REPEAT_COL + j) * SMEM_COL * SMEM_ROW;
+        int smem_offset = 4 * j * SMEM_COL * SMEM_ROW; // 4 should be num_tokens
         int const tma_coords_local[NDIM] = {tma_coords[0] + j * SMEM_COL,
-                                            tma_coords[1] + i * SMEM_ROW};
+                                            tma_coords[1]};
 #if 1
         printf("tma_coords: %d, %d\n", tma_coords[0], tma_coords[1]);
         printf("tma_coords_local: %d, %d\n",
@@ -76,7 +76,7 @@ public:
 #endif
         launch_tma_cp_async(mbar, smem_ptr + smem_offset, tma_coords_local);
       }
-    }
+    // }
   }
 
   template <int NDIM>

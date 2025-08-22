@@ -595,12 +595,6 @@ void launch_linear_hopper(void *input_ptr,
     constexpr int num_tokens = 4;
 
 
-    // printf("on wrapper, num_tokens*NUM_QO_HEADS: %d\n", num_tokens *
-    // NUM_QO_HEADS);
-
-    //  using TMA_Q = kernel::tma::tma<bfloat16, 3, 3, 3, num_tokens *
-    //  NUM_QO_HEADS, HEAD_DIM, num_tokens * NUM_QO_HEADS, KV_TILE_SIZE, true>;
-
     // using TMA_Q = kernel::tma::tma_general<bfloat16,
     //                              B,
     //                              M,
@@ -617,7 +611,7 @@ void launch_linear_hopper(void *input_ptr,
                                             B,
                                             M,
                                             S,
-                                            num_tokens * NUM_QO_HEADS,
+                                            num_tokens * (NUM_QO_HEADS + 2 * NUM_KV_HEADS),
                                             HEAD_DIM,
                                             NUM_QO_HEADS,
                                             TMA_CP_SIZE,
@@ -628,20 +622,19 @@ void launch_linear_hopper(void *input_ptr,
 
 
 
-    using TMA_KV =
-        kernel::tma::tma_general<bfloat16,
+    using TMA_KV = kernel::tma::tma_general<bfloat16,
                                  B,
                                  M,
                                  S,
-                                 num_tokens * NUM_KV_HEADS,
+                                 num_tokens * (NUM_QO_HEADS + 2 * NUM_KV_HEADS),
                                  HEAD_DIM,
-                                 num_tokens * NUM_KV_HEADS,
+                                 NUM_KV_HEADS,
                                  TMA_CP_SIZE,
                                  1,
                                  (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
                                  true>;
 
-    using TMA_PAGED_KV_CACHE = kernel::tma::tma<bfloat16,
+    using TMA_PAGED_KV_CACHE = kernel::tma::tma_3d<bfloat16,
                                                 3,
                                                 3,
                                                 3,
@@ -651,9 +644,9 @@ void launch_linear_hopper(void *input_ptr,
                                                 64,
                                                 true>;
     using TMA_OUTPUT = kernel::tma::tma<bfloat16,
-                                        3,
-                                        3,
-                                        3,
+                                        0,
+                                        0,  
+                                        0,
                                         MAX_TOKENS * NUM_QO_HEADS,
                                         HEAD_DIM,
                                         MAX_TOKENS * NUM_QO_HEADS,
