@@ -29,6 +29,7 @@ template <typename T,
           size_t SMEM_COL_,
           size_t SMEM_REPEAT_ROW_ = 1,
           size_t SMEM_REPEAT_COL_ = 1,
+          size_t SMEM_STRIDE_ = 1, // used for num_tokens, since each token's heads are contiguous in smem
           bool ROW_MAJOR = true>
 struct tma_general {
 

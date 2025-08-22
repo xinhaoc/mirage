@@ -303,29 +303,56 @@
      // load k and v
      int page_idx_0 = page_indices[0];
 
- #pragma unroll
-     for (int chunk_idx = threadIdx.x;
-          chunk_idx < curr_iter_len * HEAD_DIM / CP_CHUNK_SIZE;
-          chunk_idx += NUM_THREADS) {
-       int dst_row = chunk_idx / (HEAD_DIM / CP_CHUNK_SIZE);
-       int col = (chunk_idx % (HEAD_DIM / CP_CHUNK_SIZE)) * CP_CHUNK_SIZE;
-       if (dst_row + cp_finished_seq_len < seq_len - num_tokens) {
-         // load from KV Cache
-         // int page_idx = page_indices[(dst_row + cp_finished_seq_len) /
-         // PAGE_SIZE];
-         int page_offset = (dst_row + cp_finished_seq_len) % PAGE_SIZE;
-         int src_row = page_idx_0 * PAGE_SIZE + page_offset;
-         load_smem(k_buffer_smem(dst_row, col),
-                   paged_k_cache_dmem(src_row, col));
-         load_smem(v_buffer_smem(dst_row, col),
-                   paged_v_cache_dmem(src_row, col));
-       } else {
-         // load from QKV
-         int src_row = dst_row + cp_finished_seq_len - (seq_len - num_tokens);
-         load_smem(k_buffer_smem(dst_row, col), k_dmem(src_row, col));
-         load_smem(v_buffer_smem(dst_row, col), v_dmem(src_row, col));
-       }
+     if (lane_idx == 0 && warp_idx % 4 == 0) {
+      int begin = cp_finished_seq_len;
+      int end = begin + curr_iter_len;
+      int boundary = seq_len - num_tokens;
+      int cache_rows =
+        (begin >= boundary) ? 0 :
+        (end   <= boundary) ? (end - begin)
+                            : (boundary - begin);
+
+      int qkv_rows   = next_iter_len - cache_rows;
+
+      if (cache_rows > 0) {
+        int page     = page_indices[ begin / PAGE_SIZE ];
+        int row_in   = begin % PAGE_SIZE;
+        int coords[3]= {0, row_in, page};
+        tma_paged_k_cache.tma_cp_async(kv_barrier[slot], k_smem(0,0), coords);
+        tma_paged_v_cache.tma_cp_async(kv_barrier[slot], v_smem(0,0), coords);
+      }
+
+      if (qkv_rows > 0) {
+        int src_row   = begin + cache_rows - boundary;
+        int coords2D[2] = {0, src_row};
+        tma_k.tma_cp_async(kv_barrier[slot], k_smem(cache_rows, 0), coords2D);
+        tma_v.tma_cp_async(kv_barrier[slot], v_smem(cache_rows, 0), coords2D);
+      }
+
      }
+//  #pragma unroll
+//      for (int chunk_idx = threadIdx.x;
+//           chunk_idx < curr_iter_len * HEAD_DIM / CP_CHUNK_SIZE;
+//           chunk_idx += NUM_THREADS) {
+//        int dst_row = chunk_idx / (HEAD_DIM / CP_CHUNK_SIZE);
+//        int col = (chunk_idx % (HEAD_DIM / CP_CHUNK_SIZE)) * CP_CHUNK_SIZE;
+//        if (dst_row + cp_finished_seq_len < seq_len - num_tokens) {
+//          // load from KV Cache
+//          // int page_idx = page_indices[(dst_row + cp_finished_seq_len) /
+//          // PAGE_SIZE];
+//          int page_offset = (dst_row + cp_finished_seq_len) % PAGE_SIZE;
+//          int src_row = page_idx_0 * PAGE_SIZE + page_offset;
+//          load_smem(k_buffer_smem(dst_row, col),
+//                    paged_k_cache_dmem(src_row, col));
+//          load_smem(v_buffer_smem(dst_row, col),
+//                    paged_v_cache_dmem(src_row, col));
+//        } else {
+//          // load from QKV
+//          int src_row = dst_row + cp_finished_seq_len - (seq_len - num_tokens);
+//          load_smem(k_buffer_smem(dst_row, col), k_dmem(src_row, col));
+//          load_smem(v_buffer_smem(dst_row, col), v_dmem(src_row, col));
+//        }
+//      }
 
      cp_async_fence();
      cp_finished_seq_len += curr_iter_len;

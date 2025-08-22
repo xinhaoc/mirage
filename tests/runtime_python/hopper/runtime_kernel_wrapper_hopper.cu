@@ -594,6 +594,8 @@ void launch_linear_hopper(void *input_ptr,
     constexpr int prompt_len = 8;
     constexpr int num_tokens = 4;
 
+    constexpr int NUM_PAGES = 100;
+
 
     // using TMA_Q = kernel::tma::tma_general<bfloat16,
     //                              B,
@@ -617,6 +619,7 @@ void launch_linear_hopper(void *input_ptr,
                                             TMA_CP_SIZE,
                                             1,
                                             (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
+                                            num_tokens,
                                             true>;
 
 
@@ -632,16 +635,21 @@ void launch_linear_hopper(void *input_ptr,
                                  TMA_CP_SIZE,
                                  1,
                                  (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
+                                 num_tokens,
                                  true>;
 
     using TMA_PAGED_KV_CACHE = kernel::tma::tma_3d<bfloat16,
                                                 3,
                                                 3,
                                                 3,
-                                                KV_TILE_SIZE,
+                                                NUM_PAGES,
+                                                PAGE_SIZE,
                                                 HEAD_DIM,
                                                 KV_TILE_SIZE,
-                                                64,
+                                                TMA_CP_SIZE,
+                                                1,
+                                                (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
+                                                num_tokens,
                                                 true>;
     using TMA_OUTPUT = kernel::tma::tma<bfloat16,
                                         0,
