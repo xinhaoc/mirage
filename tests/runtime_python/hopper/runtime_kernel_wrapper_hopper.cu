@@ -486,6 +486,7 @@ void launch_linear_hopper(void *input_ptr,
             typename TMA_Q,
             typename TMA_KV,
             typename TMA_PAGED_KV,
+            typename TMA_PAGED_KV_CACHE_TAIL_PAGE,
             typename TMA_OUTPUT,
             int MAX_TOKENS = 8>
   __global__ void multitoken_paged_attention_wrapper_hopper(
@@ -494,6 +495,8 @@ void launch_linear_hopper(void *input_ptr,
       const __grid_constant__ TMA_KV tma_v,
       const __grid_constant__ TMA_PAGED_KV tma_paged_k_cache,
       const __grid_constant__ TMA_PAGED_KV tma_paged_v_cache,
+      const __grid_constant__ TMA_PAGED_KV_CACHE_TAIL_PAGE tma_paged_k_cache_tail_page,
+      const __grid_constant__ TMA_PAGED_KV_CACHE_TAIL_PAGE tma_paged_v_cache_tail_page,
       const __grid_constant__ TMA_OUTPUT tma_output,
       // old arguments
       void *qkv_ptr,
@@ -526,6 +529,7 @@ void launch_linear_hopper(void *input_ptr,
                                            TMA_Q,
                                            TMA_KV,
                                            TMA_PAGED_KV,
+                                           TMA_PAGED_KV_CACHE_TAIL_PAGE,
                                            TMA_OUTPUT,
                                            MAX_TOKENS>(
         tma_q,
@@ -533,6 +537,8 @@ void launch_linear_hopper(void *input_ptr,
         tma_v,
         tma_paged_k_cache,
         tma_paged_v_cache,
+        tma_paged_k_cache_tail_page,
+        tma_paged_v_cache_tail_page,
         tma_output,
         // old arguments
         qkv_ptr,
@@ -595,7 +601,7 @@ void launch_linear_hopper(void *input_ptr,
     constexpr int num_tokens = 4;
 
     constexpr int NUM_PAGES = 100;
-
+    constexpr int TAIL_PAGE_SIZE = prompt_len % PAGE_SIZE;
 
     // using TMA_Q = kernel::tma::tma_general<bfloat16,
     //                              B,
@@ -639,9 +645,9 @@ void launch_linear_hopper(void *input_ptr,
                                  true>;
 
     using TMA_PAGED_KV_CACHE = kernel::tma::tma_3d<bfloat16,
-                                                3,
-                                                3,
-                                                3,
+                                                B,
+                                                M,
+                                                S,
                                                 NUM_PAGES,
                                                 PAGE_SIZE,
                                                 HEAD_DIM,
@@ -651,6 +657,21 @@ void launch_linear_hopper(void *input_ptr,
                                                 (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
                                                 num_tokens,
                                                 true>;
+
+    using TMA_PAGED_KV_CACHE_TAIL_PAGE = kernel::tma::tma_3d<bfloat16,
+                                                B,
+                                                M,
+                                                S,
+                                                NUM_PAGES,
+                                                PAGE_SIZE,
+                                                HEAD_DIM,
+                                                TAIL_PAGE_SIZE,
+                                                TMA_CP_SIZE,
+                                                1,
+                                                (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
+                                                num_tokens,
+                                                true>;
+
     using TMA_OUTPUT = kernel::tma::tma<bfloat16,
                                         0,
                                         0,  
@@ -670,6 +691,8 @@ void launch_linear_hopper(void *input_ptr,
         qkv_ptr_bf16 + num_tokens * (NUM_QO_HEADS + NUM_KV_HEADS) * HEAD_DIM));
     TMA_PAGED_KV_CACHE tma_paged_k_cache(paged_k_cache_ptr);
     TMA_PAGED_KV_CACHE tma_paged_v_cache(paged_v_cache_ptr);
+    TMA_PAGED_KV_CACHE_TAIL_PAGE tma_paged_k_cache_tail_page(paged_k_cache_ptr);
+    TMA_PAGED_KV_CACHE_TAIL_PAGE tma_paged_v_cache_tail_page(paged_v_cache_ptr);
     TMA_OUTPUT tma_output(output_ptr);
 
     cudaFuncSetAttribute(
@@ -685,6 +708,7 @@ void launch_linear_hopper(void *input_ptr,
                                                   TMA_Q,
                                                   TMA_KV,
                                                   TMA_PAGED_KV_CACHE,
+                                                  TMA_PAGED_KV_CACHE_TAIL_PAGE,
                                                   TMA_OUTPUT,
                                                   num_tokens>,
         cudaFuncAttributeMaxDynamicSharedMemorySize,
@@ -702,6 +726,7 @@ void launch_linear_hopper(void *input_ptr,
                                               TMA_Q,
                                               TMA_KV,
                                               TMA_PAGED_KV_CACHE,
+                                              TMA_PAGED_KV_CACHE_TAIL_PAGE,
                                               TMA_OUTPUT,
                                               num_tokens>
         <<<grid_dim, block_dim, smem_size>>>(tma_q,
@@ -709,6 +734,8 @@ void launch_linear_hopper(void *input_ptr,
                                              tma_v,
                                              tma_paged_k_cache,
                                              tma_paged_v_cache,
+                                             tma_paged_k_cache_tail_page,
+                                             tma_paged_v_cache_tail_page,
                                              tma_output,
                                              // old arguments
                                              qkv_ptr,

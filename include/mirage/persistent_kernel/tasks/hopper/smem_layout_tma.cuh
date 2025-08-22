@@ -59,7 +59,7 @@ struct smem_tma {
     size_t offset_in_bank = in_block_idx & ((1 << M) - 1);
     size_t phy_offset = (block_idx << (M + S + B)) + (irow << (M + S)) +
                         (icol << M) + offset_in_bank;
-#if 1
+#if 0
     if (logical_idx == 0 && threadIdx.x == 0) {
       printf("block_idx: %llu\n", block_idx);
       printf("in_block_idx: %llu\n", in_block_idx);
