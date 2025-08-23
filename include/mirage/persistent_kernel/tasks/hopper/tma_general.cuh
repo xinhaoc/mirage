@@ -1,17 +1,17 @@
 /* Copyright 2025 CMU
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*     http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
 #pragma once
 #include "../common.h"
 #include "barrier.cuh"
@@ -65,14 +65,14 @@ public:
 #pragma unroll
     // for (size_t i = 0; i < SMEM_REPEAT_ROW; i++) {
       for (size_t j = 0; j < SMEM_REPEAT_COL; j++) {
-        int smem_offset = 4 * j * SMEM_COL * SMEM_ROW; // 4 should be num_tokens
+        int smem_offset = SMEM_STRIDE_ * j * SMEM_COL * SMEM_ROW; // 4 should be num_tokens
         int const tma_coords_local[NDIM] = {tma_coords[0] + j * SMEM_COL,
                                             tma_coords[1]};
 #if 0
         printf("tma_coords: %d, %d\n", tma_coords[0], tma_coords[1]);
         printf("tma_coords_local: %d, %d\n",
-               tma_coords_local[0],
-               tma_coords_local[1]);
+              tma_coords_local[0],
+              tma_coords_local[1]);
         printf("smem_offset: %d\n", smem_offset);
 #endif
         launch_tma_cp_async(mbar, smem_ptr + smem_offset, tma_coords_local);
@@ -108,18 +108,18 @@ public:
     }
 
     asm volatile("cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier:"
-                 ":complete_tx::bytes"
-                 " [%0], [%1, {%3, %4, %5, %6, %7}], [%2];"
-                 :
-                 : "r"(smem_int_ptr),
-                   "l"(gmem_int_desc),
-                   "r"(smem_int_mbar),
-                   "r"(c0),
-                   "r"(c1),
-                   "r"(c2),
-                   "r"(c3),
-                   "r"(c4)
-                 : "memory");
+                ":complete_tx::bytes"
+                " [%0], [%1, {%3, %4, %5, %6, %7}], [%2];"
+                :
+                : "r"(smem_int_ptr),
+                  "l"(gmem_int_desc),
+                  "r"(smem_int_mbar),
+                  "r"(c0),
+                  "r"(c1),
+                  "r"(c2),
+                  "r"(c3),
+                  "r"(c4)
+                : "memory");
 #elif defined(__CUDA_ARCH__)
     asm volatile("brkpt;\n" ::);
 #endif
@@ -127,7 +127,7 @@ public:
 
   template <int NDIM>
   __device__ inline void tma_store_async(void *smem_ptr,
-                                         int const (&tma_coords)[NDIM]) const {
+                                        int const (&tma_coords)[NDIM]) const {
 #ifdef MIRAGE_GRACE_HOPPER
     uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(desc_ptr);
     uint32_t smem_int_ptr =
@@ -152,16 +152,16 @@ public:
     }
 
     asm volatile("cp.async.bulk.tensor.5d.global.shared::cta.bulk_group [%0, "
-                 "{%2, %3, %4, %5, %6}], [%1];"
-                 :
-                 : "l"(gmem_int_desc),
-                   "r"(smem_int_ptr),
-                   "r"(c0),
-                   "r"(c1),
-                   "r"(c2),
-                   "r"(c3),
-                   "r"(c4)
-                 : "memory");
+                "{%2, %3, %4, %5, %6}], [%1];"
+                :
+                : "l"(gmem_int_desc),
+                  "r"(smem_int_ptr),
+                  "r"(c0),
+                  "r"(c1),
+                  "r"(c2),
+                  "r"(c3),
+                  "r"(c4)
+                : "memory");
 #elif defined(__CUDA_ARCH__)
     asm volatile("brkpt;\n" ::);
 #endif
@@ -185,15 +185,15 @@ private:
         CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE;
     constexpr CUtensorMapSwizzle tma_swizzle =
         (B == 1   ? CU_TENSOR_MAP_SWIZZLE_32B
-         : B == 2 ? CU_TENSOR_MAP_SWIZZLE_64B
-         : B == 3 ? CU_TENSOR_MAP_SWIZZLE_128B
+        : B == 2 ? CU_TENSOR_MAP_SWIZZLE_64B
+        : B == 3 ? CU_TENSOR_MAP_SWIZZLE_128B
                   : CU_TENSOR_MAP_SWIZZLE_NONE);
 
     uint64_t gmem_prob_shape[5] = {GMEM_COL, GMEM_ROW, 1, 1, 1};
     uint64_t gmem_prob_stride[5] = {sizeof(T), GMEM_COL * sizeof(T), 0, 0, 0};
 
     assert((reinterpret_cast<uint64_t>(global_addr) & 0b1111) ==
-           0); // Address must be 16B-aligned
+          0); // Address must be 16B-aligned
 
     assert(gmem_prob_shape[0] >= (uint64_t(1)));       // Size must be min 1
     assert(gmem_prob_shape[0] <= (uint64_t(1) << 32)); // Size must be max 2^32
@@ -208,40 +208,40 @@ private:
 
     // Assert the byte strides. Tma Descriptor uses byte strides
     assert((gmem_prob_stride[1]) <
-           (uint64_t(1) << 40)); // Stride must be max 2^40
+          (uint64_t(1) << 40)); // Stride must be max 2^40
     assert((gmem_prob_stride[1] & 0b1111) ==
-           0); // Stride must be multiple of 16B (128b)
+          0); // Stride must be multiple of 16B (128b)
     assert((gmem_prob_stride[2]) <
-           (uint64_t(1) << 40)); // Stride must be max 2^40
+          (uint64_t(1) << 40)); // Stride must be max 2^40
     assert((gmem_prob_stride[2] & 0b1111) ==
-           0); // Stride must be multiple of 16B (128b)
+          0); // Stride must be multiple of 16B (128b)
     assert((gmem_prob_stride[3]) <
-           (uint64_t(1) << 40)); // Stride must be max 2^40
+          (uint64_t(1) << 40)); // Stride must be max 2^40
     assert((gmem_prob_stride[3] & 0b1111) ==
-           0); // Stride must be multiple of 16B (128b)
+          0); // Stride must be multiple of 16B (128b)
     assert((gmem_prob_stride[4]) <
-           (uint64_t(1) << 40)); // Stride must be max 2^40
+          (uint64_t(1) << 40)); // Stride must be max 2^40
     assert((gmem_prob_stride[4] & 0b1111) ==
-           0); // Stride must be multiple of 16B (128b)
+          0); // Stride must be multiple of 16B (128b)
 
     uint32_t smem_box_shape[5] = {SMEM_COL, SMEM_ROW, 1, 1, 1};
     uint32_t smem_box_stride[5] = {1, 1, 1, 1, 1};
 
     assert(smem_box_shape[0] >= (uint32_t(1))); // Size must be min 1
     assert(smem_box_shape[0] <=
-           (uint32_t(1) << 8));                 // Size must be max 2^8 = 256
+          (uint32_t(1) << 8));                 // Size must be max 2^8 = 256
     assert(smem_box_shape[1] >= (uint32_t(1))); // Size must be min 1
     assert(smem_box_shape[1] <=
-           (uint32_t(1) << 8));                 // Size must be max 2^8 = 256
+          (uint32_t(1) << 8));                 // Size must be max 2^8 = 256
     assert(smem_box_shape[2] >= (uint32_t(1))); // Size must be min 1
     assert(smem_box_shape[2] <=
-           (uint32_t(1) << 8));                 // Size must be max 2^8 = 256
+          (uint32_t(1) << 8));                 // Size must be max 2^8 = 256
     assert(smem_box_shape[3] >= (uint32_t(1))); // Size must be min 1
     assert(smem_box_shape[3] <=
-           (uint32_t(1) << 8));                 // Size must be max 2^8 = 256
+          (uint32_t(1) << 8));                 // Size must be max 2^8 = 256
     assert(smem_box_shape[4] >= (uint32_t(1))); // Size must be min 1
     assert(smem_box_shape[4] <=
-           (uint32_t(1) << 8)); // Size must be max 2^8 = 256
+          (uint32_t(1) << 8)); // Size must be max 2^8 = 256
 
     assert(smem_box_stride[0] >= (uint32_t(1))); // Stride must be min 1
     assert(smem_box_stride[0] <= (uint32_t(8))); // Stride must be max 2^3 = 8
@@ -261,43 +261,43 @@ private:
 
 #if 0
     printf("gmem_prob_shape: %lu, %lu, %lu, %lu, %lu\n",
-           gmem_prob_shape[0],
-           gmem_prob_shape[1],
-           gmem_prob_shape[2],
-           gmem_prob_shape[3],
-           gmem_prob_shape[4]);
+          gmem_prob_shape[0],
+          gmem_prob_shape[1],
+          gmem_prob_shape[2],
+          gmem_prob_shape[3],
+          gmem_prob_shape[4]);
     printf("gmem_prob_stride: %lu, %lu, %lu, %lu, %lu\n",
-           gmem_prob_stride[0],
-           gmem_prob_stride[1],
-           gmem_prob_stride[2],
-           gmem_prob_stride[3],
-           gmem_prob_stride[4]);
+          gmem_prob_stride[0],
+          gmem_prob_stride[1],
+          gmem_prob_stride[2],
+          gmem_prob_stride[3],
+          gmem_prob_stride[4]);
     printf("smem_box_shape: %d, %d, %d, %d, %d\n",
-           smem_box_shape[0],
-           smem_box_shape[1],
-           smem_box_shape[2],
-           smem_box_shape[3],
-           smem_box_shape[4]);
+          smem_box_shape[0],
+          smem_box_shape[1],
+          smem_box_shape[2],
+          smem_box_shape[3],
+          smem_box_shape[4]);
     printf("smem_box_stride: %d, %d, %d, %d, %d\n",
-           smem_box_stride[0],
-           smem_box_stride[1],
-           smem_box_stride[2],
-           smem_box_stride[3],
-           smem_box_stride[4]);
+          smem_box_stride[0],
+          smem_box_stride[1],
+          smem_box_stride[2],
+          smem_box_stride[3],
+          smem_box_stride[4]);
 #endif
 
     CUresult result = cuTensorMapEncodeTiled(tma_desc,
-                                             tma_format,
-                                             tma_dim,
-                                             global_addr,
-                                             gmem_shape_ptr,
-                                             gmem_stride_ptr + 1,
-                                             smem_box_shape_ptr,
-                                             smem_box_stride_ptr,
-                                             CU_TENSOR_MAP_INTERLEAVE_NONE,
-                                             tma_swizzle,
-                                             CU_TENSOR_MAP_L2_PROMOTION_NONE,
-                                             CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);
+                                            tma_format,
+                                            tma_dim,
+                                            global_addr,
+                                            gmem_shape_ptr,
+                                            gmem_stride_ptr + 1,
+                                            smem_box_shape_ptr,
+                                            smem_box_stride_ptr,
+                                            CU_TENSOR_MAP_INTERLEAVE_NONE,
+                                            tma_swizzle,
+                                            CU_TENSOR_MAP_L2_PROMOTION_NONE,
+                                            CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);
 
     char const *error_string;
     CUresult res = cuGetErrorString(result, &error_string);
