@@ -592,9 +592,9 @@ void launch_linear_hopper(void *input_ptr,
     dim3 block_dim(256, 1, 1);
     size_t smem_size = 224 * 1024;
 
-    constexpr int B = 0;
-    constexpr int M = 0;
-    constexpr int S = 0;
+    constexpr int B = 3;
+    constexpr int M = 3;
+    constexpr int S = 3;
     constexpr int TMA_CP_SIZE = 64;
     constexpr int KV_TILE_SIZE = 64;
     constexpr int prompt_len = 8;
@@ -615,21 +615,36 @@ void launch_linear_hopper(void *input_ptr,
     //                              (NUM_QO_HEADS * HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
     //                              true>;
 
-    using TMA_Q = kernel::tma::tma_general<bfloat16,
+    // using TMA_Q = kernel::tma::tma_general<bfloat16,
+    //                                         B,
+    //                                         M,
+    //                                         S,
+    //                                         num_tokens * (NUM_QO_HEADS + 2 * NUM_KV_HEADS),
+    //                                         HEAD_DIM,
+    //                                         NUM_QO_HEADS,
+    //                                         TMA_CP_SIZE,
+    //                                         1,
+    //                                         (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
+    //                                         num_tokens * NUM_QO_HEADS / NUM_QO_HEADS, // 4 is num tokens
+    //                                         true>;
+
+
+    using TMA_Q = kernel::tma::tma_3d<bfloat16,
                                             B,
                                             M,
                                             S,
-                                            num_tokens * (NUM_QO_HEADS + 2 * NUM_KV_HEADS),
+                                            num_tokens,
+                                            (NUM_QO_HEADS + 2 * NUM_KV_HEADS),
                                             HEAD_DIM,
-                                            NUM_QO_HEADS,
+                                            num_tokens * NUM_QO_HEADS,
                                             TMA_CP_SIZE,
                                             1,
                                             (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
                                             num_tokens * NUM_QO_HEADS / NUM_QO_HEADS, // 4 is num tokens
+                                            (NUM_QO_HEADS + 2 * NUM_KV_HEADS) * HEAD_DIM,
+                                            HEAD_DIM,
+                                            1,
                                             true>;
-
-
-
 
     using TMA_KV = kernel::tma::tma_general<bfloat16,
                                 B,
@@ -656,6 +671,9 @@ void launch_linear_hopper(void *input_ptr,
                                                 1,
                                                 (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
                                                 num_tokens,
+                                                PAGE_SIZE * HEAD_DIM,
+                                                HEAD_DIM,
+                                                1,
                                                 true>;
 
     using TMA_PAGED_KV_CACHE_TAIL_PAGE = kernel::tma::tma_3d<bfloat16,
@@ -670,6 +688,9 @@ void launch_linear_hopper(void *input_ptr,
                                                 1,
                                                 (HEAD_DIM + TMA_CP_SIZE - 1) / TMA_CP_SIZE,
                                                 num_tokens,
+                                                PAGE_SIZE * HEAD_DIM,
+                                                HEAD_DIM,
+                                                1,
                                                 true>;
 
     using TMA_OUTPUT = kernel::tma::tma<bfloat16,

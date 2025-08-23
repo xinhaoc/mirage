@@ -31,6 +31,9 @@
            size_t SMEM_REPEAT_ROW_ = 1,
            size_t SMEM_REPEAT_COL_ = 1,
            size_t SMEM_STRIDE_ = 1, // used for num_tokens, since each token's heads are contiguous in smem
+           size_t GMEM_STRIDE_DEPTH_ = 1,
+           size_t GMEM_STRIDE_ROW_ = 1,
+           size_t GMEM_STRIDE_COL_ = 1,
            bool ROW_MAJOR = true>
  struct tma_3d {
  
@@ -69,7 +72,7 @@
          int smem_offset = SMEM_STRIDE_ * j * SMEM_COL * SMEM_ROW; // 4 should be num_tokens
          int const tma_coords_local[NDIM] = {tma_coords[0] + j * SMEM_COL,
                                              tma_coords[1]};
- #if 0
+ #if 1
          printf("tma_coords: %d, %d\n", tma_coords[0], tma_coords[1]);
          printf("tma_coords_local: %d, %d\n",
                 tma_coords_local[0],
@@ -191,8 +194,8 @@
                    : CU_TENSOR_MAP_SWIZZLE_NONE);
  
      uint64_t gmem_prob_shape[5] = {GMEM_COL, GMEM_ROW, GMEM_DEPTH_, 1, 1};
-     uint64_t gmem_prob_stride[5] = {sizeof(T), GMEM_COL * sizeof(T), GMEM_ROW * GMEM_COL * sizeof(T), 0, 0};
- 
+    //  uint64_t gmem_prob_stride[5] = {sizeof(T), GMEM_COL * sizeof(T), GMEM_ROW * GMEM_COL * sizeof(T), 0, 0};
+     uint64_t gmem_prob_stride[5] = {sizeof(T), GMEM_STRIDE_ROW_ * sizeof(T), GMEM_STRIDE_DEPTH_ * sizeof(T), 0, 0};
      assert((reinterpret_cast<uint64_t>(global_addr) & 0b1111) ==
             0); // Address must be 16B-aligned
  
