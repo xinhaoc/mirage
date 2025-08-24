@@ -26,8 +26,8 @@ template <typename T, typename = void>
 struct has_inner_col : ::std::false_type {};
 
 template <typename T>
-struct has_inner_col<T, ::std::void_t<decltype(T::INNER_COL)>> : ::std::true_type {
-};
+struct has_inner_col<T, ::std::void_t<decltype(T::INNER_COL)>>
+    : ::std::true_type {};
 
 // choose inner col if has, otherwise use col
 template <typename SMEM>
@@ -290,10 +290,9 @@ template <typename T,
           bool tnspA,
           bool tnspB>
 __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
-  // static_assert(SMEM_A::ROW == M);
-  // static_assert(SMEM_B::COL == N);
-  if constexpr (M == 64 && K == 16 && std::is_same<T, bfloat16>::value &&
-                tnspA == false && tnspB == false) {
+  // static_assert(SMEM_A::ROW == 64);
+  // static_assert(SMEM_B::COL == 64);
+  if constexpr (M == 64 && K == 16 && std::is_same<T, bfloat16>::value) {
     for (int k = 0; k < (SMEM_A::COL / K); k++) {
       constexpr size_t a_col_param = get_col_param<SMEM_A>();
       constexpr size_t b_col_param = get_col_param<SMEM_B>();
@@ -379,72 +378,229 @@ __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
   }
 }
 
-// __device__ static inline void wgmma_m64n64k16_bf16bf16bf32_rs(uint32_t const&
-// a0, uint32_t const& a1, uint32_t const& a2, uint32_t const& a3,
-//   uint64_t const& desc_b,
-//   float         & d0, float         & d1, float         & d2, float         &
-//   d3, float         & d4, float         & d5, float         & d6, float & d7)
-// {
-// #ifdef MIRAGE_GRACE_HOPPER
-// asm volatile(
-// "{\n"
-//   ".reg .pred p;\n"
-//   "setp.ne.b32 p, %13, 0;\n"
-//   "wgmma.mma_async.sync.aligned.m64n16k16.f32.bf16.bf16 "
-//   "{%0,  %1,  %2,  %3,  %4,  %5,  %6,  %7},"
-//   "{%8,  %9,  %10, %11},"
-//   " %12,"
-//   " p,   %14, %15, %16;\n"
-// "}\n"
-//   : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3),
-//     "+f"(d4), "+f"(d5), "+f"(d6), "+f"(d7)
-//   :  "r"(a0),  "r"(a1),  "r"(a2),  "r"(a3),
-//      "l"(desc_b),
-//      "r"(int32_t(1)), "n"(int32_t(1)), "n"(int32_t(1)), "n"(int32_t(tnspB)));
-// #else
-//   asm volatile("brkpt;\n" ::);
-// #endif
-// }
+template <int tnspB>
+__device__ static inline void
+    wgmma_m64n16k16_bf16bf16bf32_rs(uint32_t const &a0,
+                                    uint32_t const &a1,
+                                    uint32_t const &a2,
+                                    uint32_t const &a3,
+                                    uint64_t const &desc_b,
+                                    float &d0,
+                                    float &d1,
+                                    float &d2,
+                                    float &d3,
+                                    float &d4,
+                                    float &d5,
+                                    float &d6,
+                                    float &d7) {
+#ifdef MIRAGE_GRACE_HOPPER
+  asm volatile("{\n"
+               ".reg .pred p;\n"
+               "setp.ne.b32 p, %13, 0;\n"
+               "wgmma.mma_async.sync.aligned.m64n16k16.f32.bf16.bf16 "
+               "{%0,  %1,  %2,  %3,  %4,  %5,  %6,  %7},"
+               "{%8,  %9,  %10, %11},"
+               " %12,"
+               " p,   %14, %15, %16;\n"
+               "}\n"
+               : "+f"(d0),
+                 "+f"(d1),
+                 "+f"(d2),
+                 "+f"(d3),
+                 "+f"(d4),
+                 "+f"(d5),
+                 "+f"(d6),
+                 "+f"(d7)
+               : "r"(a0),
+                 "r"(a1),
+                 "r"(a2),
+                 "r"(a3),
+                 "l"(desc_b),
+                 "r"(int32_t(1)),
+                 "n"(int32_t(1)),
+                 "n"(int32_t(1)),
+                 "n"(int32_t(tnspB)));
+#else
+  asm volatile("brkpt;\n" ::);
+#endif
+}
 
-// template <typename T,
-//           int M,
-//           int N,
-//           int K,
-//           typename SMEM_B,
-//           typename B_DESC,
-//           bool tnspB>
-// __device__ static inline void mma_rs(float *frag, uint32_t *a_frag, B_DESC
-// b_desc) {
-//   // static_assert(SMEM_B::COL == N);
-//   if constexpr (M == 64 && K == 16 && std::is_same<T, bfloat16>::value &&
-//                 tnspB == false) {
-//     for (int k = 0; k < (SMEM_B::COL / K); k++) {
-//       // static_assert(SMEM_A::b == 3);
-//       // static_assert(SMEM_B::b == 3);
-//       int k_offset = (k % 4) * 32 + (k / 4) * 8 * 2048;
-//       switch (N) {
-//         case 64:
-//           wgmma_m64n64k16_bf16bf16bf32_rs<tnspB>(a_frag[0], a_frag[1],
-//           a_frag[2], a_frag[3],
-//                                                      b_desc.at(k_offset),
-//                                                      frag[0],
-//                                                      frag[1],
-//                                                      frag[2],
-//                                                      frag[3],
-//                                                      frag[4],
-//                                                      frag[5],
-//                                                      frag[6],
-//                                                      frag[7]);
-//           break;
-//         default:
-//           assert("false");
-//           break;
-//       }
-//     }
-//   } else {
-//     assert(false);
-//   }
-// }
+template <int tnspB>
+__device__ static inline void
+    wgmma_m64n64k16_bf16bf16bf32_rs(uint32_t const &a00,
+                                    uint32_t const &a01,
+                                    uint32_t const &a02,
+                                    uint32_t const &a03,
+                                    uint64_t const &desc_b,
+                                    float &d00,
+                                    float &d01,
+                                    float &d02,
+                                    float &d03,
+                                    float &d04,
+                                    float &d05,
+                                    float &d06,
+                                    float &d07,
+                                    float &d08,
+                                    float &d09,
+                                    float &d10,
+                                    float &d11,
+                                    float &d12,
+                                    float &d13,
+                                    float &d14,
+                                    float &d15,
+                                    float &d16,
+                                    float &d17,
+                                    float &d18,
+                                    float &d19,
+                                    float &d20,
+                                    float &d21,
+                                    float &d22,
+                                    float &d23,
+                                    float &d24,
+                                    float &d25,
+                                    float &d26,
+                                    float &d27,
+                                    float &d28,
+                                    float &d29,
+                                    float &d30,
+                                    float &d31) {
+#ifdef MIRAGE_GRACE_HOPPER
+  asm volatile("{\n"
+               ".reg .pred p;\n"
+               "setp.ne.b32 p, %37, 0;\n"
+               "wgmma.mma_async.sync.aligned.m64n64k16.f32.bf16.bf16 "
+               "{%0,  %1,  %2,  %3,  %4,  %5,  %6,  %7,  "
+               " %8,  %9,  %10, %11, %12, %13, %14, %15, "
+               " %16, %17, %18, %19, %20, %21, %22, %23, "
+               " %24, %25, %26, %27, %28, %29, %30, %31},"
+               "{%32, %33, %34, %35},"
+               " %36,"
+               " p,   %38, %39, %40;\n"
+               "}\n"
+               : "+f"(d00),
+                 "+f"(d01),
+                 "+f"(d02),
+                 "+f"(d03),
+                 "+f"(d04),
+                 "+f"(d05),
+                 "+f"(d06),
+                 "+f"(d07),
+                 "+f"(d08),
+                 "+f"(d09),
+                 "+f"(d10),
+                 "+f"(d11),
+                 "+f"(d12),
+                 "+f"(d13),
+                 "+f"(d14),
+                 "+f"(d15),
+                 "+f"(d16),
+                 "+f"(d17),
+                 "+f"(d18),
+                 "+f"(d19),
+                 "+f"(d20),
+                 "+f"(d21),
+                 "+f"(d22),
+                 "+f"(d23),
+                 "+f"(d24),
+                 "+f"(d25),
+                 "+f"(d26),
+                 "+f"(d27),
+                 "+f"(d28),
+                 "+f"(d29),
+                 "+f"(d30),
+                 "+f"(d31)
+               : "r"(a00),
+                 "r"(a01),
+                 "r"(a02),
+                 "r"(a03),
+                 "l"(desc_b),
+                 "r"(int32_t(1)),
+                 "n"(int32_t(1)),
+                 "n"(int32_t(1)),
+                 "n"(int32_t(tnspB)));
+#elif defined(__CUDA_ARCH__)
+  asm volatile("brkpt;\n" ::);
+#endif
+}
+
+template <typename T,
+          int M,
+          int N,
+          int K,
+          typename SMEM_B,
+          typename B_DESC,
+          bool tnspB>
+__device__ static inline void
+    mma_rs(float *frag, uint32_t *a_frag, B_DESC b_desc) {
+  if constexpr (M == 64 && K == 16 && std::is_same<T, bfloat16>::value) {
+    for (int k = 0; k < (SMEM_B::COL / K); k++) {
+      constexpr size_t b_col_param = get_col_param<SMEM_B>();
+
+      size_t b_offset = (k % 4) * 32 + (k / 4) * 2 * SMEM_B::ROW * b_col_param;
+      switch (N) {
+        case 16:
+          wgmma_m64n16k16_bf16bf16bf32_rs<tnspB>(a_frag[0],
+                                                 a_frag[1],
+                                                 a_frag[2],
+                                                 a_frag[3],
+                                                 b_desc.at(b_offset),
+                                                 frag[0],
+                                                 frag[1],
+                                                 frag[2],
+                                                 frag[3],
+                                                 frag[4],
+                                                 frag[5],
+                                                 frag[6],
+                                                 frag[7]);
+          break;
+        case 64:
+          wgmma_m64n64k16_bf16bf16bf32_rs<tnspB>(a_frag[0],
+                                                 a_frag[1],
+                                                 a_frag[2],
+                                                 a_frag[3],
+                                                 b_desc.at(b_offset),
+                                                 frag[0],
+                                                 frag[1],
+                                                 frag[2],
+                                                 frag[3],
+                                                 frag[4],
+                                                 frag[5],
+                                                 frag[6],
+                                                 frag[7],
+                                                 frag[8],
+                                                 frag[9],
+                                                 frag[10],
+                                                 frag[11],
+                                                 frag[12],
+                                                 frag[13],
+                                                 frag[14],
+                                                 frag[15],
+                                                 frag[16],
+                                                 frag[17],
+                                                 frag[18],
+                                                 frag[19],
+                                                 frag[20],
+                                                 frag[21],
+                                                 frag[22],
+                                                 frag[23],
+                                                 frag[24],
+                                                 frag[25],
+                                                 frag[26],
+                                                 frag[27],
+                                                 frag[28],
+                                                 frag[29],
+                                                 frag[30],
+                                                 frag[31]);
+          break;
+        default:
+          assert("false");
+          break;
+      }
+    }
+  } else {
+    assert(false);
+  }
+}
 
 __device__ static inline void warpgroup_arrive() {
   asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");

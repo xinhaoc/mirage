@@ -137,8 +137,8 @@ paged_kv_last_page_len_buffer = torch.tensor(
 torch_paged_k_cache = paged_k_cache.clone()
 torch_paged_v_cache = paged_v_cache.clone()
 
-all_cos = torch.randn((513, head_dim), device=device, dtype=dtype)
-all_sin = torch.randn((513, head_dim), device=device, dtype=dtype)
+all_cos = torch.ones((513, head_dim), device=device, dtype=dtype)
+all_sin = torch.ones((513, head_dim), device=device, dtype=dtype)
 #all_cos = torch.full((513, head_dim), 0.1, device=device, dtype=dtype)
 #all_sin = torch.full((513, head_dim), 0.1, device=device, dtype=dtype)
 qkv = torch.randn(
@@ -149,10 +149,10 @@ for i in range(qkv.shape[0]):
     for j in range(qkv.shape[1]):
         qkv[i, j] = 0.1 + 0.1 * (i * qkv.shape[1] + j)
 
-print("qkv.shape", qkv.shape)
-print("qkv[:, :qo_heads * head_dim] is", qkv[:, :qo_heads * head_dim].shape)
-print("qkv[:, :qo_heads * head_dim] shape is", qkv[:, :qo_heads * head_dim].shape)
-print("q is", qkv[:, :qo_heads * head_dim])
+# print("qkv.shape", qkv.shape)
+# print("qkv[:, :qo_heads * head_dim] is", qkv[:, :qo_heads * head_dim].shape)
+# print("qkv[:, :qo_heads * head_dim] shape is", qkv[:, :qo_heads * head_dim].shape)
+# print("q is", qkv[:, :qo_heads * head_dim])
 
 #qkv = torch.full(
 #    (max_tokens, (qo_heads + 2 * kv_heads) * head_dim), 0.1, device=device, dtype=dtype
@@ -172,8 +172,8 @@ torch_paged_v_cache[page_idx, page_offset : page_offset + max_tokens] = v
 
 mirage_qkv = qkv.clone()
 
-q_norm_weight = torch.randn((1, head_dim), device=device, dtype=dtype)
-k_norm_weight = torch.randn((1, head_dim), device=device, dtype=dtype)
+q_norm_weight = torch.ones((1, head_dim), device=device, dtype=dtype)
+k_norm_weight = torch.ones((1, head_dim), device=device, dtype=dtype)
 
 torch_cos = all_cos[0 : max_tokens + prompt_len + 1, :]
 torch_sin = all_sin[0 : max_tokens + prompt_len + 1, :]
