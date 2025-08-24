@@ -69,10 +69,10 @@
  #pragma unroll
      // for (size_t i = 0; i < SMEM_REPEAT_ROW; i++) {
        for (size_t j = 0; j < SMEM_REPEAT_COL; j++) {
-         int smem_offset = SMEM_STRIDE_ * j * SMEM_COL * SMEM_ROW; // 4 should be num_tokens
+         int smem_offset = SMEM_STRIDE_ * j; // 4 should be num_tokens
          int const tma_coords_local[NDIM] = {tma_coords[0] + j * SMEM_COL,
                                              tma_coords[1]};
- #if 1
+ #if 0
          printf("tma_coords: %d, %d\n", tma_coords[0], tma_coords[1]);
          printf("tma_coords_local: %d, %d\n",
                 tma_coords_local[0],
