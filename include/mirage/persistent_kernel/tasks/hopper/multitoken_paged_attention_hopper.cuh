@@ -301,7 +301,6 @@
 
     if (lane_idx == 0 && warp_idx % 4 == 0) {
       set_barrier_transaction_bytes(q_barrier[0], TMA_TRANS_BYTES_Q);
-      
       tma_q.tma_cp_async(q_barrier[0], q_smem(0, 0), {0, 0});
 
     }
@@ -518,7 +517,7 @@
  
      wait(q_barrier[0], 0);
 
-#if 1
+#if 0
      if (threadIdx.x == 0) {
       for (int i = 0; i < num_tokens * NUM_QO_PER_KV * HEAD_DIM; i++) {
         if (i % 64 == 0) {
@@ -564,7 +563,7 @@
           v_buffer_smem.set_ptr(s_v_buffer);
         }
 
-    #if 1
+    #if 0
         if (threadIdx.x == 0) {
           for (int i = 0; i < KV_TILE_SIZE * HEAD_DIM; i++) {
             if (i % 64 == 0) {

@@ -26,6 +26,7 @@
            size_t GMEM_DEPTH_, // page number in paged attention
            size_t GMEM_ROW_, // head number in one page
            size_t GMEM_COL_, // head dimension
+           size_t SMEM_DEPTH_,
            size_t SMEM_ROW_,
            size_t SMEM_COL_,
            size_t SMEM_REPEAT_ROW_ = 1,
@@ -41,6 +42,7 @@
  
    static constexpr size_t GMEM_ROW = GMEM_ROW_;
    static constexpr size_t GMEM_COL = GMEM_COL_;
+   static constexpr size_t SMEM_DEPTH = SMEM_DEPTH_;
    static constexpr size_t SMEM_ROW = SMEM_ROW_;
    static constexpr size_t SMEM_COL = SMEM_COL_;
  
@@ -228,7 +230,7 @@
      assert((gmem_prob_stride[4] & 0b1111) ==
             0); // Stride must be multiple of 16B (128b)
  
-     uint32_t smem_box_shape[5] = {SMEM_COL, SMEM_ROW, 1, 1, 1};
+     uint32_t smem_box_shape[5] = {SMEM_COL, SMEM_ROW, SMEM_DEPTH, 1, 1};
      uint32_t smem_box_stride[5] = {1, 1, 1, 1, 1};
  
      assert(smem_box_shape[0] >= (uint32_t(1))); // Size must be min 1
