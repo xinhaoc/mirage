@@ -252,7 +252,8 @@
   using KVSmem = smem_tma<T, 3, 3, 3, KV_TILE_SIZE, 64, (HEAD_DIM + 63) / 64>;
   
   using Q_DESC = wgmma::mma_descriptor<QOSmem>;
-  using KV_DESC = wgmma::mma_descriptor<KVSmem>;
+  using K_DESC = wgmma::mma_descriptor<KVSmem, false>;
+  using V_DESC = wgmma::mma_descriptor<KVSmem, true>;
 
    ZeroBufferSmem zero_buffer(zero_buf);
    QOSmem q_smem(s_q), o_smem(s_o);
@@ -709,10 +710,10 @@ float x_frag_f[MMA_ITERS_M][8];
     }
     for (int m = 0; m < MMA_ITERS_M; m++) {
       Q_DESC q_desc(q_smem(m * 64, 0));
-      KV_DESC k_desc(k_smem(0, 0));
+      K_DESC k_desc(k_smem(0, 0));
 
       wgmma::warpgroup_arrive();
-      wgmma::mma<T, 64, 64, 16, QOSmem, KVSmem, Q_DESC, KV_DESC, false, false>(x_frag_f[m], q_desc, k_desc);
+      wgmma::mma<T, 64, 64, 16, QOSmem, KVSmem, Q_DESC, K_DESC, false, false>(x_frag_f[m], q_desc, k_desc);
       wgmma::mma_commit_group();
       wgmma::mma_async_wait();
     }
@@ -873,9 +874,9 @@ float x_frag_f[MMA_ITERS_M][8];
        for (int m = 0; m < MMA_ITERS_M; m++) {
           convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
           for (int n = 0; n < HEAD_DIM / 16; n++){
-            KV_DESC v_desc(v_smem(m * 64, n * 16));
+            V_DESC v_desc(v_smem(m * 64, n * 16));
             wgmma::warpgroup_arrive();
-            wgmma::mma_rs<T, 64, 16, 16, KVSmem, KV_DESC, true>(o[m][n], x_frag[m], v_desc);
+            wgmma::mma_rs<T, 64, 16, 16, KVSmem, V_DESC, true>(o[m][n], x_frag[m], v_desc);
             wgmma::mma_commit_group();
             wgmma::mma_async_wait();
           }
@@ -886,8 +887,10 @@ float x_frag_f[MMA_ITERS_M][8];
 
        if (threadIdx.x == 0) {
         for (int m = 0; m < MMA_ITERS_M; m++) {
-          for (int frag_idx = 0; frag_idx < 8; frag_idx++) {
-            printf("o[%d][%d] = %f, o_ref[%d][%d] = %f\n", m, frag_idx, o[m][0][frag_idx], m, frag_idx, o_ref[m][0][frag_idx]);
+          for (int n = 0; n < HEAD_DIM / 16; n++) {
+            for (int frag_idx = 0; frag_idx < 8; frag_idx++) {
+              printf("o[%d][%d][%d] = %f, o_ref[%d][%d][%d] = %f\n", m, n, frag_idx, o[m][n][frag_idx], m, n, frag_idx, o_ref[m][n][frag_idx]);
+            }
           }
         }
        }

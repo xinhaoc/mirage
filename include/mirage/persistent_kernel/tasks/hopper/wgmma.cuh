@@ -69,6 +69,21 @@ struct mma_descriptor {
         base_desc |= 0llu << 62; // set wgmma_swizzle mode
       }
     }
+    else {
+      if constexpr (SMEM::b == 3) {
+        base_desc |= matrix_descriptor_encode((uint64_t)2048) << 16;
+        base_desc |= matrix_descriptor_encode((uint64_t)1024) << 32;
+        base_desc |= 1llu << 62; // set wgmma_swizzle mode
+      } else if constexpr (SMEM::b == 2) {
+        base_desc |= matrix_descriptor_encode((uint64_t)1024) << 16;
+        base_desc |= matrix_descriptor_encode((uint64_t)512) << 32;
+        base_desc |= 2llu << 62; // set wgmma_swizzle mode
+      } else {
+        base_desc |= matrix_descriptor_encode((uint64_t)512) << 16;
+        base_desc |= matrix_descriptor_encode((uint64_t)256) << 32;
+        base_desc |= 3llu << 62; // set wgmma_swizzle mode
+      }
+    }
   }
 
   __device__ inline uint64_t at(size_t offset) {
@@ -537,7 +552,9 @@ __device__ static inline void
       for (int k = 0; k < (SMEM_B::ROW / K); k++) {
       constexpr size_t b_col_param = get_col_param<SMEM_B>();
 
-      size_t b_offset = (k % 4) * 32 + (k / 4) * 2 * SMEM_B::ROW * b_col_param;
+      // size_t b_offset = (k % 4) * 32 + (k / 4) * 2 * SMEM_B::ROW * b_col_param;
+      size_t b_offset = 2048;
+
       switch (N) {
         case 16:
           wgmma_m64n16k16_bf16bf16bf32_rs<tnspB>(a_frag[0],
