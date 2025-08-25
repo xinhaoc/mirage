@@ -29,6 +29,11 @@
  #include "norm_wg.cuh"
  #include "smem_layout_tma.cuh"
  #include "tma_3d.cuh"
+ #include "tma.cuh"
+ #include "tma_general.cuh"
+ #include "utils.cuh"
+ #include "wgmma.cuh"
+
  namespace kernel {
  
  // NOTE(Jinchen): this task implements the paged attention where a causal mask
@@ -507,15 +512,24 @@
        d[m][0] = 1.f;
        d[m][1] = 1.f;
      }
-     float o[MMA_ITERS_M][HEAD_DIM / 16][8];
- #pragma unroll
-     for (int m = 0; m < MMA_ITERS_M; m++) {
- #pragma unroll
-       for (int n = 0; n < HEAD_DIM / 16; n++) {
-         clear_8_floats(o[m][n]);
-       }
-     }
+//      float o[MMA_ITERS_M][HEAD_DIM / 16][8];
+//  #pragma unroll
+//      for (int m = 0; m < MMA_ITERS_M; m++) {
+//  #pragma unroll
+//        for (int n = 0; n < HEAD_DIM / 16; n++) {
+//          clear_8_floats(o[m][n]);
+//        }
+//      }
  
+  float o[MMA_ITERS_M][HEAD_DIM / 16][8];
+  #pragma unroll
+      for (int m = 0; m < MMA_ITERS_M; m++) {
+  #pragma unroll
+        for (int n = 0; n < HEAD_DIM / 64; n++) {
+          clear_8_floats(o[m][n]);
+        }
+      }
+
      wait(q_barrier[0], 0);
 
 #if 0
@@ -653,8 +667,6 @@
          }
        }
  
-       printf("finish update k and v\n");
- 
        wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(9);
  
        // update the KV Cache
@@ -684,29 +696,32 @@
        }
        uint32_t q_frag[4], kt_frag[4];
  
-       int kt_col = (warp_idx << 4) + ((lane_idx >> 4) << 3) + (lane_idx & 0x7);
- #pragma unroll
-       for (int m = 0; m < MMA_ITERS_M; m++) {
-         int q_row = (m << 4) + (lane_idx & 0xF);
- #pragma unroll
-         for (int k = 0; k < HEAD_DIM / 16; k++) {
-           int q_col = (k << 4) + ((lane_idx >> 4) << 3);
-           int kt_row = (k << 4) + (((lane_idx & 0xF) >> 3) << 3);
-           T *src_ptr_Q = q_row < num_tokens * NUM_QO_PER_KV
-                              ? q_smem(q_row, q_col)
-                              : zero_buffer(0, 0);
-           T *src_ptr_KT = kt_col < curr_iter_len ? k_smem(kt_col, kt_row)
-                                                  : zero_buffer(0, 0);
-           ldsm(src_ptr_Q, q_frag);
-           ldsm(src_ptr_KT, kt_frag);
-           mma_m16n16k16_bf16bf16bf32(x_frag_f_ref[m], q_frag, kt_frag, x_frag_f_ref[m]);
-         }
-       }
+//        int kt_col = (warp_idx << 4) + ((lane_idx >> 4) << 3) + (lane_idx & 0x7);
+//  #pragma unroll
+//        for (int m = 0; m < MMA_ITERS_M; m++) {
+//          int q_row = (m << 4) + (lane_idx & 0xF);
+//  #pragma unroll
+//          for (int k = 0; k < HEAD_DIM / 16; k++) {
+//            int q_col = (k << 4) + ((lane_idx >> 4) << 3);
+//            int kt_row = (k << 4) + (((lane_idx & 0xF) >> 3) << 3);
+//            T *src_ptr_Q = q_row < num_tokens * NUM_QO_PER_KV
+//                               ? q_smem(q_row, q_col)
+//                               : zero_buffer(0, 0);
+//            T *src_ptr_KT = kt_col < curr_iter_len ? k_smem(kt_col, kt_row)
+//                                                   : zero_buffer(0, 0);
+//            ldsm(src_ptr_Q, q_frag);
+//            ldsm(src_ptr_KT, kt_frag);
+//            mma_m16n16k16_bf16bf16bf32(x_frag_f_ref[m], q_frag, kt_frag, x_frag_f_ref[m]);
+//          }
+//        }
 
-float x_frag_f[MMA_ITERS_M][8];
+float x_frag_f[MMA_ITERS_M][32];
 #pragma unroll
     for (int m = 0; m < MMA_ITERS_M; m++) {
-       clear_8_floats(x_frag_f[m]);
+#pragma unroll
+      for (int k = 0; k < 4; k++) {
+        clear_8_floats(x_frag_f[m] + k * 8);
+      }
     }
     for (int m = 0; m < MMA_ITERS_M; m++) {
       Q_DESC q_desc(q_smem(m * 64, 0));
@@ -720,16 +735,16 @@ float x_frag_f[MMA_ITERS_M][8];
 
        wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(9);
 
-       // printf difference between x_frag_f and x_frag_f_ref
-      //  if (threadIdx.x == 0) {
-      //   for (int m = 0; m < MMA_ITERS_M; m++) {
-      //     for (int k = 0; k < 8; k++) {
-      //       printf("x_frag_f[%d][%d] = %f, x_frag_f_ref[%d][%d] = %f\n", m, k, x_frag_f[m][k], m, k, x_frag_f_ref[m][k]);
-      //     }
-      //   }
-
-      //  }
-
+      //  printf difference between x_frag_f and x_frag_f_ref
+  #if 0
+       if (threadIdx.x == 0) {
+        for (int m = 0; m < MMA_ITERS_M; m++) {
+          for (int k = 0; k < 32; k++) {
+            printf("x_frag_f[%d][%d] = %f\n", m, k, x_frag_f[m][k]);
+          }
+        }
+       }
+  #endif
 
 
 
@@ -826,14 +841,14 @@ float x_frag_f[MMA_ITERS_M][8];
 //        update o: compute O = exp(X - m) * V and accumulate
 //        use m16n16k16 mma to compute and let warp layout be 1x1x4
        // copy o to o_ref
-       float o_ref[MMA_ITERS_M][HEAD_DIM / 16][8];
-       for (int m = 0; m < MMA_ITERS_M; m++) {
-        for (int n = 0; n < HEAD_DIM / 16; n++) {
-         for (int frag_idx = 0; frag_idx < 8; frag_idx++) {
-           o_ref[m][n][frag_idx] = o[m][n][frag_idx];
-         }
-         }
-       }
+      //  float o_ref[MMA_ITERS_M][HEAD_DIM / 16][8];
+      //  for (int m = 0; m < MMA_ITERS_M; m++) {
+      //   for (int n = 0; n < HEAD_DIM / 16; n++) {
+      //    for (int frag_idx = 0; frag_idx < 8; frag_idx++) {
+      //      o_ref[m][n][frag_idx] = o[m][n][frag_idx];
+      //    }
+      //    }
+      //  }
 
        wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(9);
 
@@ -853,47 +868,47 @@ float x_frag_f[MMA_ITERS_M][8];
       //          }
       //        }
 
-//        uint32_t x_frag[MMA_ITERS_M][4], v_frag[4];
-//  #pragma unroll
-//        for (int m = 0; m < MMA_ITERS_M; m++) {
-//          convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
-//          int v_row = (warp_idx << 4) + (lane_idx & 0xF);
-//  #pragma unroll
-//          for (int n = 0; n < HEAD_DIM / 16; n++) {
-//            int v_col = (n << 4) + ((lane_idx >> 4) << 3);
-//            T *src_ptr_V =
-//                v_row < curr_iter_len ? v_smem(v_row, v_col) : zero_buffer(0, 0);
-//            ldsm_t(src_ptr_V, v_frag);
-//           //  mma_m16n16k16_bf16bf16bf32(o_ref[m][n], x_frag_ref[m], v_frag_ref, o_ref[m][n]);
-//           mma_m16n16k16_bf16bf16bf32(o[m][n], x_frag[m], v_frag, o[m][n]);
-//          }
-//        }
-
-
        uint32_t x_frag[MMA_ITERS_M][4], v_frag[4];
+ #pragma unroll
        for (int m = 0; m < MMA_ITERS_M; m++) {
-          convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
-          for (int n = 0; n < HEAD_DIM / 16; n++){
-            V_DESC v_desc(v_smem(m * 64, n * 16));
-            wgmma::warpgroup_arrive();
-            wgmma::mma_rs<T, 64, 16, 16, KVSmem, V_DESC, true>(o[m][n], x_frag[m], v_desc);
-            wgmma::mma_commit_group();
-            wgmma::mma_async_wait();
-          }
+         convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
+         int v_row = (warp_idx << 4) + (lane_idx & 0xF);
+ #pragma unroll
+         for (int n = 0; n < HEAD_DIM / 16; n++) {
+           int v_col = (n << 4) + ((lane_idx >> 4) << 3);
+           T *src_ptr_V =
+               v_row < curr_iter_len ? v_smem(v_row, v_col) : zero_buffer(0, 0);
+           ldsm_t(src_ptr_V, v_frag);
+          //  mma_m16n16k16_bf16bf16bf32(o_ref[m][n], x_frag_ref[m], v_frag_ref, o_ref[m][n]);
+          mma_m16n16k16_bf16bf16bf32(o[m][n], x_frag[m], v_frag, o[m][n]);
+         }
        }
+
+
+      //  uint32_t x_frag[MMA_ITERS_M][4], v_frag[4];
+      //  for (int m = 0; m < MMA_ITERS_M; m++) {
+      //     convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
+      //     for (int n = 0; n < HEAD_DIM / 64; n++){
+      //       V_DESC v_desc(v_smem(m * 64, n * 64));
+      //       wgmma::warpgroup_arrive();
+      //       wgmma::mma_rs<T, 64, 64, 16, KVSmem, V_DESC, true>(o[m][n], x_frag[m], v_desc);
+      //       wgmma::mma_commit_group();
+      //       wgmma::mma_async_wait();
+      //     }
+      //  }
 
        //  __syncthreads();
        wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(9);
 
-       if (threadIdx.x == 0) {
-        for (int m = 0; m < MMA_ITERS_M; m++) {
-          for (int n = 0; n < HEAD_DIM / 16; n++) {
-            for (int frag_idx = 0; frag_idx < 8; frag_idx++) {
-              printf("o[%d][%d][%d] = %f, o_ref[%d][%d][%d] = %f\n", m, n, frag_idx, o[m][n][frag_idx], m, n, frag_idx, o_ref[m][n][frag_idx]);
-            }
-          }
-        }
-       }
+      //  if (threadIdx.x == 0) {
+      //   for (int m = 0; m < MMA_ITERS_M; m++) {
+      //     for (int n = 0; n < HEAD_DIM / 16; n++) {
+      //       for (int frag_idx = 0; frag_idx < 8; frag_idx++) {
+      //         printf("o[%d][%d][%d] = %f, o_ref[%d][%d][%d] = %f\n", m, n, frag_idx, o[m][n][frag_idx], m, n, frag_idx, o_ref[m][n][frag_idx]);
+      //       }
+      //     }
+      //   }
+      //  }
  
        curr_iter_len = next_iter_len;
 

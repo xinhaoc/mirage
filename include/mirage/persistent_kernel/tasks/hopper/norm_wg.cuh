@@ -16,6 +16,7 @@
  #pragma once
  #include "../common.h"
  #include "../utils.cuh"
+ #include "utils.cuh"
  namespace kernel {
  template <typename T, typename InputSmem, int NUM_HEAD, int HEAD_DIM, int NUM_THREADS>
  __device__ __forceinline__ void rms_norm_wg(InputSmem smem_input,
