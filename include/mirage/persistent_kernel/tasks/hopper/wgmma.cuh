@@ -533,7 +533,8 @@ template <typename T,
 __device__ static inline void
     mma_rs(float *frag, uint32_t *a_frag, B_DESC b_desc) {
   if constexpr (M == 64 && K == 16 && std::is_same<T, bfloat16>::value) {
-    for (int k = 0; k < (SMEM_B::COL / K); k++) {
+    // for (int k = 0; k < (SMEM_B::COL / K); k++) {
+      for (int k = 0; k < (SMEM_B::ROW / K); k++) {
       constexpr size_t b_col_param = get_col_param<SMEM_B>();
 
       size_t b_offset = (k % 4) * 32 + (k / 4) * 2 * SMEM_B::ROW * b_col_param;

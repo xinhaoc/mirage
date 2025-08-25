@@ -852,33 +852,34 @@ float x_frag_f[MMA_ITERS_M][8];
       //          }
       //        }
 
+//        uint32_t x_frag[MMA_ITERS_M][4], v_frag[4];
+//  #pragma unroll
+//        for (int m = 0; m < MMA_ITERS_M; m++) {
+//          convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
+//          int v_row = (warp_idx << 4) + (lane_idx & 0xF);
+//  #pragma unroll
+//          for (int n = 0; n < HEAD_DIM / 16; n++) {
+//            int v_col = (n << 4) + ((lane_idx >> 4) << 3);
+//            T *src_ptr_V =
+//                v_row < curr_iter_len ? v_smem(v_row, v_col) : zero_buffer(0, 0);
+//            ldsm_t(src_ptr_V, v_frag);
+//           //  mma_m16n16k16_bf16bf16bf32(o_ref[m][n], x_frag_ref[m], v_frag_ref, o_ref[m][n]);
+//           mma_m16n16k16_bf16bf16bf32(o[m][n], x_frag[m], v_frag, o[m][n]);
+//          }
+//        }
+
+
        uint32_t x_frag[MMA_ITERS_M][4], v_frag[4];
- #pragma unroll
        for (int m = 0; m < MMA_ITERS_M; m++) {
-         convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
-         int v_row = (warp_idx << 4) + (lane_idx & 0xF);
- #pragma unroll
-         for (int n = 0; n < HEAD_DIM / 16; n++) {
-           int v_col = (n << 4) + ((lane_idx >> 4) << 3);
-           T *src_ptr_V =
-               v_row < curr_iter_len ? v_smem(v_row, v_col) : zero_buffer(0, 0);
-           ldsm_t(src_ptr_V, v_frag);
-          //  mma_m16n16k16_bf16bf16bf32(o_ref[m][n], x_frag_ref[m], v_frag_ref, o_ref[m][n]);
-          mma_m16n16k16_bf16bf16bf32(o[m][n], x_frag[m], v_frag, o[m][n]);
-         }
+          convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
+          for (int n = 0; n < HEAD_DIM / 16; n++){
+            KV_DESC v_desc(v_smem(m * 64, n * 16));
+            wgmma::warpgroup_arrive();
+            wgmma::mma_rs<T, 64, 16, 16, KVSmem, KV_DESC, true>(o[m][n], x_frag[m], v_desc);
+            wgmma::mma_commit_group();
+            wgmma::mma_async_wait();
+          }
        }
-
-
-      //  uint32_t x_frag[MMA_ITERS_M][4], v_frag[4];
-      //  for (int m = 0; m < MMA_ITERS_M; m++) {
-      //     convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
-      //     KV_DESC v_desc(v_smem(0, 0));
-      //     wgmma::warpgroup_arrive();
-      //     wgmma::mma_rs<T, 64, 64, 16, KVSmem, KV_DESC, false>(o[m][0], x_frag[m], v_desc);
-      //     wgmma::mma_commit_group();
-      //     wgmma::mma_async_wait();
-        
-      //  }
 
        //  __syncthreads();
        wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(9);
