@@ -885,7 +885,7 @@ float x_frag_f[MMA_ITERS_M][32];
 //        }
 
 
-       uint32_t x_frag[MMA_ITERS_M][16], v_frag[16];
+       uint32_t x_frag[MMA_ITERS_M][16];
        for (int m = 0; m < MMA_ITERS_M; m++) {
         #pragma unroll
           convert_32_f32_to_16_bf16_uint32(x_frag_f[m], x_frag[m]);
@@ -916,9 +916,6 @@ float x_frag_f[MMA_ITERS_M][32];
        if (warp_idx == 0 && lane_idx == 0) {
          arrive(compute_done[slot], 1);
        }
- 
-
-
      }
  
      // write intermediate results to buffer in shared memory

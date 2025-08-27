@@ -68,8 +68,7 @@ struct mma_descriptor {
         base_desc |= matrix_descriptor_encode((uint64_t)256) << 32;
         base_desc |= 0llu << 62; // set wgmma_swizzle mode
       }
-    }
-    else {
+    } else {
       if constexpr (SMEM::b == 3) {
         base_desc |= matrix_descriptor_encode((uint64_t)2048) << 16;
         base_desc |= matrix_descriptor_encode((uint64_t)1024) << 32;
@@ -538,109 +537,347 @@ __device__ static inline void
 #endif
 }
 
-template <typename T,
-          int M,
-          int N,
-          int K,
-          typename SMEM_B,
-          typename B_DESC,
-          bool tnspB>
+template <int tnspB>
 __device__ static inline void
-    mma_rs(float *frag, uint32_t *a_frag, B_DESC b_desc) {
-  if constexpr (M == 64 && K == 16 && std::is_same<T, bfloat16>::value) {
-    // assume tnspB=true, i.e. B is of shape KxN 
-    // for (int n_iter = 0; n_iter < (SMEM_B::ROW + N - 1) / N; n_iter++) {
-    for (int k_iter = 0; k_iter < (SMEM_B::ROW + K - 1) / K; k_iter++) {
-      constexpr size_t b_col_param = get_col_param<SMEM_B>();
-      uint32_t *a_frag_k = a_frag + k_iter * 4;
+    wgmma_m64n128k16_bf16bf16bf32_rs(uint32_t const &a00,
+                                     uint32_t const &a01,
+                                     uint32_t const &a02,
+                                     uint32_t const &a03,
+                                     uint64_t const &desc_b,
+                                     float &d00,
+                                     float &d01,
+                                     float &d02,
+                                     float &d03,
+                                     float &d04,
+                                     float &d05,
+                                     float &d06,
+                                     float &d07,
+                                     float &d08,
+                                     float &d09,
+                                     float &d10,
+                                     float &d11,
+                                     float &d12,
+                                     float &d13,
+                                     float &d14,
+                                     float &d15,
+                                     float &d16,
+                                     float &d17,
+                                     float &d18,
+                                     float &d19,
+                                     float &d20,
+                                     float &d21,
+                                     float &d22,
+                                     float &d23,
+                                     float &d24,
+                                     float &d25,
+                                     float &d26,
+                                     float &d27,
+                                     float &d28,
+                                     float &d29,
+                                     float &d30,
+                                     float &d31,
+                                     float &d32,
+                                     float &d33,
+                                     float &d34,
+                                     float &d35,
+                                     float &d36,
+                                     float &d37,
+                                     float &d38,
+                                     float &d39,
+                                     float &d40,
+                                     float &d41,
+                                     float &d42,
+                                     float &d43,
+                                     float &d44,
+                                     float &d45,
+                                     float &d46,
+                                     float &d47,
+                                     float &d48,
+                                     float &d49,
+                                     float &d50,
+                                     float &d51,
+                                     float &d52,
+                                     float &d53,
+                                     float &d54,
+                                     float &d55,
+                                     float &d56,
+                                     float &d57,
+                                     float &d58,
+                                     float &d59,
+                                     float &d60,
+                                     float &d61,
+                                     float &d62,
+                                     float &d63) {
+#ifdef MIRAGE_GRACE_HOPPER
+    asm volatile("{\n"
+                 ".reg .pred p;\n"
+                 "setp.ne.b32 p, %69, 0;\n"
+                 "wgmma.mma_async.sync.aligned.m64n128k16.f32.bf16.bf16 "
+                 "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
+                 " %8,   %9,   %10,  %11,  %12,  %13,  %14,  %15,  "
+                 " %16,  %17,  %18,  %19,  %20,  %21,  %22,  %23,  "
+                 " %24,  %25,  %26,  %27,  %28,  %29,  %30,  %31,  "
+                 " %32,  %33,  %34,  %35,  %36,  %37,  %38,  %39,  "
+                 " %40,  %41,  %42,  %43,  %44,  %45,  %46,  %47,  "
+                 " %48,  %49,  %50,  %51,  %52,  %53,  %54,  %55,  "
+                 " %56,  %57,  %58,  %59,  %60,  %61,  %62,  %63},"
+                 "{%64,  %65,  %66,  %67},"
+                 " %68,"
+                 " p,    %70,  %71,  %72;\n"
+                 "}\n"
+                 : "+f"(d00),
+                   "+f"(d01),
+                   "+f"(d02),
+                   "+f"(d03),
+                   "+f"(d04),
+                   "+f"(d05),
+                   "+f"(d06),
+                   "+f"(d07),
+                   "+f"(d08),
+                   "+f"(d09),
+                   "+f"(d10),
+                   "+f"(d11),
+                   "+f"(d12),
+                   "+f"(d13),
+                   "+f"(d14),
+                   "+f"(d15),
+                   "+f"(d16),
+                   "+f"(d17),
+                   "+f"(d18),
+                   "+f"(d19),
+                   "+f"(d20),
+                   "+f"(d21),
+                   "+f"(d22),
+                   "+f"(d23),
+                   "+f"(d24),
+                   "+f"(d25),
+                   "+f"(d26),
+                   "+f"(d27),
+                   "+f"(d28),
+                   "+f"(d29),
+                   "+f"(d30),
+                   "+f"(d31),
+                   "+f"(d32),
+                   "+f"(d33),
+                   "+f"(d34),
+                   "+f"(d35),
+                   "+f"(d36),
+                   "+f"(d37),
+                   "+f"(d38),
+                   "+f"(d39),
+                   "+f"(d40),
+                   "+f"(d41),
+                   "+f"(d42),
+                   "+f"(d43),
+                   "+f"(d44),
+                   "+f"(d45),
+                   "+f"(d46),
+                   "+f"(d47),
+                   "+f"(d48),
+                   "+f"(d49),
+                   "+f"(d50),
+                   "+f"(d51),
+                   "+f"(d52),
+                   "+f"(d53),
+                   "+f"(d54),
+                   "+f"(d55),
+                   "+f"(d56),
+                   "+f"(d57),
+                   "+f"(d58),
+                   "+f"(d59),
+                   "+f"(d60),
+                   "+f"(d61),
+                   "+f"(d62),
+                   "+f"(d63)
+                 : "r"(a00),
+                   "r"(a01),
+                   "r"(a02),
+                   "r"(a03),
+                   "l"(desc_b),
+                   "r"(int32_t(1)),
+                   "n"(int32_t(1)),
+                   "n"(int32_t(1)),
+                   "n"(int32_t(tnspB)));
+#else
+    asm volatile("brkpt;\n" ::);
+#endif
+  }
 
-      // size_t b_offset = (k % 4) * 32 + (k / 4) * 2 * SMEM_B::ROW * b_col_param;
-      size_t b_offset = k_iter * 2048;
+  template <typename T,
+            int M,
+            int N,
+            int K,
+            typename SMEM_B,
+            typename B_DESC,
+            bool tnspB>
+  __device__ static inline void mma_rs(
+      float *frag, uint32_t *a_frag, B_DESC b_desc) {
+    if constexpr (M == 64 && K == 16 && std::is_same<T, bfloat16>::value) {
+      // assume tnspB=true, i.e. B is of shape KxN
+      // for (int n_iter = 0; n_iter < (SMEM_B::ROW + N - 1) / N; n_iter++) {
+      for (int k_iter = 0; k_iter < (SMEM_B::ROW + K - 1) / K; k_iter++) {
+        constexpr size_t b_col_param = get_col_param<SMEM_B>();
+        uint32_t *a_frag_k = a_frag + k_iter * 4;
 
-      switch (N) {
-        case 16:
-          wgmma_m64n16k16_bf16bf16bf32_rs<tnspB>(a_frag_k[0],
-                                                 a_frag_k[1],
-                                                 a_frag_k[2],
-                                                 a_frag_k[3],
-                                                 b_desc.at(b_offset),
-                                                 frag[0],
-                                                 frag[1],
-                                                 frag[2],
-                                                 frag[3],
-                                                 frag[4],
-                                                 frag[5],
-                                                 frag[6],
-                                                 frag[7]);
-          break;
-        case 64:
-          wgmma_m64n64k16_bf16bf16bf32_rs<tnspB>(a_frag_k[0],
-                                                 a_frag_k[1],
-                                                 a_frag_k[2],
-                                                 a_frag_k[3],
-                                                 b_desc.at(b_offset),
-                                                 frag[0],
-                                                 frag[1],
-                                                 frag[2],
-                                                 frag[3],
-                                                 frag[4],
-                                                 frag[5],
-                                                 frag[6],
-                                                 frag[7],
-                                                 frag[8],
-                                                 frag[9],
-                                                 frag[10],
-                                                 frag[11],
-                                                 frag[12],
-                                                 frag[13],
-                                                 frag[14],
-                                                 frag[15],
-                                                 frag[16],
-                                                 frag[17],
-                                                 frag[18],
-                                                 frag[19],
-                                                 frag[20],
-                                                 frag[21],
-                                                 frag[22],
-                                                 frag[23],
-                                                 frag[24],
-                                                 frag[25],
-                                                 frag[26],
-                                                 frag[27],
-                                                 frag[28],
-                                                 frag[29],
-                                                 frag[30],
-                                                 frag[31]);
-          break;
-        default:
-          assert("false");
-          break;
+        // size_t b_offset = (k % 4) * 32 + (k / 4) * 2 * SMEM_B::ROW *
+        // b_col_param;
+        size_t b_offset = k_iter * 2048;
+
+        switch (N) {
+          case 16:
+            wgmma_m64n16k16_bf16bf16bf32_rs<tnspB>(a_frag_k[0],
+                                                   a_frag_k[1],
+                                                   a_frag_k[2],
+                                                   a_frag_k[3],
+                                                   b_desc.at(b_offset),
+                                                   frag[0],
+                                                   frag[1],
+                                                   frag[2],
+                                                   frag[3],
+                                                   frag[4],
+                                                   frag[5],
+                                                   frag[6],
+                                                   frag[7]);
+            break;
+          case 64:
+            wgmma_m64n64k16_bf16bf16bf32_rs<tnspB>(a_frag_k[0],
+                                                   a_frag_k[1],
+                                                   a_frag_k[2],
+                                                   a_frag_k[3],
+                                                   b_desc.at(b_offset),
+                                                   frag[0],
+                                                   frag[1],
+                                                   frag[2],
+                                                   frag[3],
+                                                   frag[4],
+                                                   frag[5],
+                                                   frag[6],
+                                                   frag[7],
+                                                   frag[8],
+                                                   frag[9],
+                                                   frag[10],
+                                                   frag[11],
+                                                   frag[12],
+                                                   frag[13],
+                                                   frag[14],
+                                                   frag[15],
+                                                   frag[16],
+                                                   frag[17],
+                                                   frag[18],
+                                                   frag[19],
+                                                   frag[20],
+                                                   frag[21],
+                                                   frag[22],
+                                                   frag[23],
+                                                   frag[24],
+                                                   frag[25],
+                                                   frag[26],
+                                                   frag[27],
+                                                   frag[28],
+                                                   frag[29],
+                                                   frag[30],
+                                                   frag[31]);
+            break;
+          case 128:
+            wgmma_m64n128k16_bf16bf16bf32_rs<tnspB>(a_frag_k[0],
+                                                    a_frag_k[1],
+                                                    a_frag_k[2],
+                                                    a_frag_k[3],
+                                                    b_desc.at(b_offset),
+                                                    frag[0],
+                                                    frag[1],
+                                                    frag[2],
+                                                    frag[3],
+                                                    frag[4],
+                                                    frag[5],
+                                                    frag[6],
+                                                    frag[7],
+                                                    frag[8],
+                                                    frag[9],
+                                                    frag[10],
+                                                    frag[11],
+                                                    frag[12],
+                                                    frag[13],
+                                                    frag[14],
+                                                    frag[15],
+                                                    frag[16],
+                                                    frag[17],
+                                                    frag[18],
+                                                    frag[19],
+                                                    frag[20],
+                                                    frag[21],
+                                                    frag[22],
+                                                    frag[23],
+                                                    frag[24],
+                                                    frag[25],
+                                                    frag[26],
+                                                    frag[27],
+                                                    frag[28],
+                                                    frag[29],
+                                                    frag[30],
+                                                    frag[31],
+                                                    frag[32],
+                                                    frag[33],
+                                                    frag[34],
+                                                    frag[35],
+                                                    frag[36],
+                                                    frag[37],
+                                                    frag[38],
+                                                    frag[39],
+                                                    frag[40],
+                                                    frag[41],
+                                                    frag[42],
+                                                    frag[43],
+                                                    frag[44],
+                                                    frag[45],
+                                                    frag[46],
+                                                    frag[47],
+                                                    frag[48],
+                                                    frag[49],
+                                                    frag[50],
+                                                    frag[51],
+                                                    frag[52],
+                                                    frag[53],
+                                                    frag[54],
+                                                    frag[55],
+                                                    frag[56],
+                                                    frag[57],
+                                                    frag[58],
+                                                    frag[59],
+                                                    frag[60],
+                                                    frag[61],
+                                                    frag[62],
+                                                    frag[63]);
+            break;
+          default:
+            assert("false");
+            break;
+        }
       }
+    } else {
+      assert(false);
     }
-  } else {
-    assert(false);
   }
-}
 
-__device__ static inline void warpgroup_arrive() {
-  asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");
-}
+  __device__ static inline void warpgroup_arrive() {
+    asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");
+  }
 
-__device__ static inline void mma_commit_group() {
-  asm volatile("wgmma.commit_group.sync.aligned;\n" ::: "memory");
-}
+  __device__ static inline void mma_commit_group() {
+    asm volatile("wgmma.commit_group.sync.aligned;\n" ::: "memory");
+  }
 
-__device__ static inline void mma_async_wait() {
-  asm volatile("wgmma.wait_group.sync.aligned %0;" : : "n"(0) : "memory");
-}
+  __device__ static inline void mma_async_wait() {
+    asm volatile("wgmma.wait_group.sync.aligned %0;" : : "n"(0) : "memory");
+  }
 
-template <int N>
-__device__ inline void warpgroup_fence_fragment(float (&frag)[N]) {
+  template <int N>
+  __device__ inline void warpgroup_fence_fragment(float(&frag)[N]) {
 #pragma unroll
-  for (int i = 0; i < N; ++i) {
-    asm volatile("" : "+f"(frag[i])::"memory");
+    for (int i = 0; i < N; ++i) {
+      asm volatile("" : "+f"(frag[i])::"memory");
+    }
   }
-}
 
 } // namespace wgmma
 } // namespace kernel
