@@ -749,23 +749,24 @@ float x_frag_f[MMA_ITERS_M][32];
 
 
        // update m_local: get partial max
-       // NOTE(Jinchen): each thread maintains MMA_ITERS_M * 2 partial max
-       // values. For a given m, the first value is the maximum of
-       // x_frag_f[m][0, 1, 4, 5], and the second value is the maximum of
-       // x_frag_f[m][2, 3, 6, 7]
+       // NOTE(Yu): We do 64x64x16 mma, and each thread saves 32 register values,
+       // each thread maintains MMA_ITERS_M * 2 partial max values. For a given m,
+       // the first value is the maximum of x_frag_f[m][0, 1, 4, 5, 8, 9, 12, 13, 16, 17, 20, 21, 24, 25, 28, 29],
+       // and the second value is the maximum of x_frag_f[m][2, 3, 6, 7, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31]
+       // https://docs.nvidia.com/cuda/parallel-thread-execution/#:~:text=Figure%20149%20WGMMA%20.m64nNk16%20register%20fragment%20layout%20for%20accumulator%20matrix%20D.
        float m_prev[MMA_ITERS_M][2];
  #pragma unroll
        for (int m = 0; m < MMA_ITERS_M; m++) {
          m_prev[m][0] = m_local[m][0];
          m_prev[m][1] = m_local[m][1];
  #pragma unroll
-         for (int frag_idx = 0; frag_idx < 8; frag_idx++) {
+         for (int frag_idx = 0; frag_idx < 32; frag_idx++) {
            // row_base = (m * 16) + (lane_idx / 4)
            // col_base = (warp_idx * 16) + ((lane_idx % 4) * 2)
            // row_offset = ((frag_idx % 4) / 2) * 8
            // col_offset = ((frag_idx / 4) * 8) + (frag_idx % 2)
-           int row = (m << 4) + (lane_idx >> 2) + (((frag_idx & 0x3) >> 1) << 3);
-           int col = (warp_idx << 4) + ((lane_idx & 0x3) << 1) +
+           int row = (m << 6) + (warp_idx << 4) + (lane_idx >> 2) + (((frag_idx & 0x3) >> 1) << 3);
+           int col = ((lane_idx & 0x3) << 1) +
                      ((frag_idx >> 2) << 3) + (frag_idx & 0x1);
            int token_idx = row / NUM_QO_PER_KV;
            bool is_valid =
@@ -776,7 +777,6 @@ float x_frag_f[MMA_ITERS_M][32];
                max(m_local[m][(frag_idx & 0x3) >> 1], x_frag_f[m][frag_idx]);
          }
        }
- // printf("start update m_local\n");
  // update m_local: get local max across 4 threads in a row
  #pragma unroll
        for (int m = 0; m < MMA_ITERS_M; m++) {
@@ -802,7 +802,7 @@ float x_frag_f[MMA_ITERS_M][32];
          d_partial[m][0] = 0.f;
          d_partial[m][1] = 0.f;
  #pragma unroll
-         for (int frag_idx = 0; frag_idx < 8; frag_idx++) {
+         for (int frag_idx = 0; frag_idx < 32; frag_idx++) {
            x_frag_f[m][frag_idx] =
                x_frag_f[m][frag_idx] != -inf
                    ? expf(x_frag_f[m][frag_idx] * sm_scale -
@@ -828,9 +828,9 @@ float x_frag_f[MMA_ITERS_M][32];
  #pragma unroll
        for (int m = 0; m < MMA_ITERS_M; m++) {
  #pragma unroll
-         for (int n = 0; n < HEAD_DIM / 16; n++) {
+         for (int n = 0; n < HEAD_DIM / 64; n++) {
  #pragma unroll
-           for (int frag_idx = 0; frag_idx < 8; frag_idx++) {
+           for (int frag_idx = 0; frag_idx < 32; frag_idx++) {
              o[m][n][frag_idx] *= rescale[m][(frag_idx & 0x3) >> 1];
            }
          }
@@ -868,34 +868,35 @@ float x_frag_f[MMA_ITERS_M][32];
       //          }
       //        }
 
-       uint32_t x_frag[MMA_ITERS_M][4], v_frag[4];
- #pragma unroll
+//        uint32_t x_frag[MMA_ITERS_M][4], v_frag[4];
+//  #pragma unroll
+//        for (int m = 0; m < MMA_ITERS_M; m++) {
+//          convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
+//          int v_row = (warp_idx << 4) + (lane_idx & 0xF);
+//  #pragma unroll
+//          for (int n = 0; n < HEAD_DIM / 16; n++) {
+//            int v_col = (n << 4) + ((lane_idx >> 4) << 3);
+//            T *src_ptr_V =
+//                v_row < curr_iter_len ? v_smem(v_row, v_col) : zero_buffer(0, 0);
+//            ldsm_t(src_ptr_V, v_frag);
+//           //  mma_m16n16k16_bf16bf16bf32(o_ref[m][n], x_frag_ref[m], v_frag_ref, o_ref[m][n]);
+//           mma_m16n16k16_bf16bf16bf32(o[m][n], x_frag[m], v_frag, o[m][n]);
+//          }
+//        }
+
+
+       uint32_t x_frag[MMA_ITERS_M][16], v_frag[16];
        for (int m = 0; m < MMA_ITERS_M; m++) {
-         convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
-         int v_row = (warp_idx << 4) + (lane_idx & 0xF);
- #pragma unroll
-         for (int n = 0; n < HEAD_DIM / 16; n++) {
-           int v_col = (n << 4) + ((lane_idx >> 4) << 3);
-           T *src_ptr_V =
-               v_row < curr_iter_len ? v_smem(v_row, v_col) : zero_buffer(0, 0);
-           ldsm_t(src_ptr_V, v_frag);
-          //  mma_m16n16k16_bf16bf16bf32(o_ref[m][n], x_frag_ref[m], v_frag_ref, o_ref[m][n]);
-          mma_m16n16k16_bf16bf16bf32(o[m][n], x_frag[m], v_frag, o[m][n]);
-         }
+        #pragma unroll
+          convert_32_f32_to_16_bf16_uint32(x_frag_f[m], x_frag[m]);
+          for (int n = 0; n < HEAD_DIM / 64; n++){
+            V_DESC v_desc(v_smem(m * 64, n * 64));
+            wgmma::warpgroup_arrive();
+            wgmma::mma_rs<T, 64, 64, 16, KVSmem, V_DESC, true>(o[m][n], x_frag[m], v_desc);
+            wgmma::mma_commit_group();
+            wgmma::mma_async_wait();
+          }
        }
-
-
-      //  uint32_t x_frag[MMA_ITERS_M][4], v_frag[4];
-      //  for (int m = 0; m < MMA_ITERS_M; m++) {
-      //     convert_f32_to_bf16_uint32(x_frag_f[m], x_frag[m]);
-      //     for (int n = 0; n < HEAD_DIM / 64; n++){
-      //       V_DESC v_desc(v_smem(m * 64, n * 64));
-      //       wgmma::warpgroup_arrive();
-      //       wgmma::mma_rs<T, 64, 64, 16, KVSmem, V_DESC, true>(o[m][n], x_frag[m], v_desc);
-      //       wgmma::mma_commit_group();
-      //       wgmma::mma_async_wait();
-      //     }
-      //  }
 
        //  __syncthreads();
        wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(9);

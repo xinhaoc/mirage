@@ -548,19 +548,21 @@ template <typename T,
 __device__ static inline void
     mma_rs(float *frag, uint32_t *a_frag, B_DESC b_desc) {
   if constexpr (M == 64 && K == 16 && std::is_same<T, bfloat16>::value) {
-    // for (int k = 0; k < (SMEM_B::COL / K); k++) {
-      for (int k = 0; k < (SMEM_B::ROW / K); k++) {
+    // assume tnspB=true, i.e. B is of shape KxN 
+    // for (int n_iter = 0; n_iter < (SMEM_B::ROW + N - 1) / N; n_iter++) {
+    for (int k_iter = 0; k_iter < (SMEM_B::ROW + K - 1) / K; k_iter++) {
       constexpr size_t b_col_param = get_col_param<SMEM_B>();
+      uint32_t *a_frag_k = a_frag + k_iter * 4;
 
       // size_t b_offset = (k % 4) * 32 + (k / 4) * 2 * SMEM_B::ROW * b_col_param;
-      size_t b_offset = 2048;
+      size_t b_offset = k_iter * 2048;
 
       switch (N) {
         case 16:
-          wgmma_m64n16k16_bf16bf16bf32_rs<tnspB>(a_frag[0],
-                                                 a_frag[1],
-                                                 a_frag[2],
-                                                 a_frag[3],
+          wgmma_m64n16k16_bf16bf16bf32_rs<tnspB>(a_frag_k[0],
+                                                 a_frag_k[1],
+                                                 a_frag_k[2],
+                                                 a_frag_k[3],
                                                  b_desc.at(b_offset),
                                                  frag[0],
                                                  frag[1],
@@ -572,10 +574,10 @@ __device__ static inline void
                                                  frag[7]);
           break;
         case 64:
-          wgmma_m64n64k16_bf16bf16bf32_rs<tnspB>(a_frag[0],
-                                                 a_frag[1],
-                                                 a_frag[2],
-                                                 a_frag[3],
+          wgmma_m64n64k16_bf16bf16bf32_rs<tnspB>(a_frag_k[0],
+                                                 a_frag_k[1],
+                                                 a_frag_k[2],
+                                                 a_frag_k[3],
                                                  b_desc.at(b_offset),
                                                  frag[0],
                                                  frag[1],
