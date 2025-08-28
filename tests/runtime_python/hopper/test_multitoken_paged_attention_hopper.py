@@ -101,8 +101,8 @@ def torch_multitoken_paged_attention(
     scores = torch.matmul(norm_q, k.transpose(-2, -1))
     #scores = scores.reshape(num_tokens * qo_heads, (num_tokens + prompt_len)* kv_heads)
     assert scores.shape==(num_tokens * qo_heads, seq_len * kv_heads)
-    mask = torch.tril(torch.ones((num_tokens, num_tokens), device=device, dtype=dtype))
-    mask = torch.cat((torch.ones((num_tokens, prompt_len), device=device, dtype=dtype), mask), dim=-1)
+    mask = torch.tril(torch.randn((num_tokens, num_tokens), device=device, dtype=dtype))
+    mask = torch.cat((torch.randn((num_tokens, prompt_len), device=device, dtype=dtype), mask), dim=-1)
     mask = mask.repeat_interleave(qo_heads, dim=0).repeat_interleave(kv_heads, dim=1)
     # print("scores.shape", scores.shape)
     # print("mask.shape", mask.shape)
@@ -137,17 +137,17 @@ paged_kv_last_page_len_buffer = torch.tensor(
 torch_paged_k_cache = paged_k_cache.clone()
 torch_paged_v_cache = paged_v_cache.clone()
 
-all_cos = torch.ones((513, head_dim), device=device, dtype=dtype)
-all_sin = torch.ones((513, head_dim), device=device, dtype=dtype)
+all_cos = torch.randn((513, head_dim), device=device, dtype=dtype)
+all_sin = torch.randn((513, head_dim), device=device, dtype=dtype)
 #all_cos = torch.full((513, head_dim), 0.1, device=device, dtype=dtype)
 #all_sin = torch.full((513, head_dim), 0.1, device=device, dtype=dtype)
 qkv = torch.randn(
     (max_tokens, (qo_heads + 2 * kv_heads) * head_dim), device=device, dtype=dtype
 )
 
-for i in range(qkv.shape[0]):
-    for j in range(qkv.shape[1]):
-        qkv[i, j] = 0.1 + 0.1 * (i * qkv.shape[1] + j)
+# for i in range(qkv.shape[0]):
+#     for j in range(qkv.shape[1]):
+#         qkv[i, j] = 0.1 + 0.1 * (i * qkv.shape[1] + j)
 
 # print("qkv.shape", qkv.shape)
 # print("qkv[:, :qo_heads * head_dim] is", qkv[:, :qo_heads * head_dim].shape)
@@ -172,8 +172,8 @@ torch_paged_v_cache[page_idx, page_offset : page_offset + max_tokens] = v
 
 mirage_qkv = qkv.clone()
 
-q_norm_weight = torch.ones((1, head_dim), device=device, dtype=dtype)
-k_norm_weight = torch.ones((1, head_dim), device=device, dtype=dtype)
+q_norm_weight = torch.randn((1, head_dim), device=device, dtype=dtype)
+k_norm_weight = torch.randn((1, head_dim), device=device, dtype=dtype)
 
 torch_cos = all_cos[0 : max_tokens + prompt_len + 1, :]
 torch_sin = all_sin[0 : max_tokens + prompt_len + 1, :]

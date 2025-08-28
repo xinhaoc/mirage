@@ -19,6 +19,7 @@
 namespace kernel {
 namespace tma {
 
+
 template <typename T,
           int B,
           int M,
@@ -29,9 +30,9 @@ template <typename T,
           size_t SMEM_COL_,
           size_t SMEM_REPEAT_ROW_ = 1,
           size_t SMEM_REPEAT_COL_ = 1,
-          size_t SMEM_STRIDE_ = 1, // used for num_tokens, since each token's heads are contiguous in smem
+          size_t SMEM_STRIDE_ = 1,
           bool ROW_MAJOR = true>
-struct tma_general {
+struct tma_2d {
 
   CUtensorMap *desc_ptr;
 
@@ -43,7 +44,7 @@ struct tma_general {
   static constexpr size_t SMEM_REPEAT_COL = SMEM_REPEAT_COL_;
   static constexpr size_t SMEM_REPEAT_ROW = SMEM_REPEAT_ROW_;
 
-  __host__ inline tma_general(void *src) {
+  __host__ inline tma_2d(void *src) {
     CUtensorMap host_desc;
     create_tma_desc(&host_desc, src); // host-only function
     cudaMalloc(&desc_ptr, sizeof(CUtensorMap));
@@ -63,7 +64,7 @@ public:
                                       T *smem_ptr,
                                       int const (&tma_coords)[NDIM]) const {
 #pragma unroll
-    // for (size_t i = 0; i < SMEM_REPEAT_ROW; i++) {
+    for (size_t i = 0; i < SMEM_REPEAT_ROW; i++) {
       for (size_t j = 0; j < SMEM_REPEAT_COL; j++) {
         int smem_offset = SMEM_STRIDE_ * j;
         int const tma_coords_local[NDIM] = {tma_coords[0] + j * SMEM_COL,
@@ -79,7 +80,7 @@ public:
 #endif
         launch_tma_cp_async(mbar, smem_ptr + smem_offset, tma_coords_local);
       }
-    // }
+    }
   }
 
   template <int NDIM>
@@ -134,8 +135,6 @@ public:
     uint64_t gmem_int_desc = reinterpret_cast<uint64_t>(desc_ptr);
     uint32_t smem_int_ptr =
         static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
-    // not sure what this line means
-    //  cutlass::arch::synclog_emit_tma_load(
     int c0 = 0, c1 = 0, c2 = 0, c3 = 0, c4 = 0;
     if constexpr (NDIM > 0) {
       c0 = tma_coords[0];

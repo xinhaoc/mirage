@@ -24,7 +24,6 @@
 #include "../utils.cuh"
 #include "smem_layout_tma.cuh"
 #include "tma.cuh"
-#include "tma_general.cuh"
 #include "utils.cuh"
 #include "wgmma.cuh"
 namespace kernel {
