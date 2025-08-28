@@ -313,8 +313,7 @@ __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
 
       size_t a_offset = (k % 4) * 32 + (k / 4) * 2 * SMEM_A::ROW * a_col_param;
       size_t b_offset = (k % 4) * 32 + (k / 4) * 2 * SMEM_B::ROW * b_col_param;
-      switch (N) {
-        case 16:
+      if constexpr (N == 16) {
           wgmma_m64n16k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(a_offset),
                                                      b_desc.at(b_offset),
                                                      frag[0],
@@ -325,8 +324,7 @@ __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
                                                      frag[5],
                                                      frag[6],
                                                      frag[7]);
-          break;
-        case 32:
+      } else if constexpr (N == 32) {
           wgmma_m64n32k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(a_offset),
                                                      b_desc.at(b_offset),
                                                      frag[0],
@@ -345,8 +343,7 @@ __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
                                                      frag[13],
                                                      frag[14],
                                                      frag[15]);
-          break;
-        case 64:
+      } else if constexpr (N == 64) {
           wgmma_m64n64k16_bf16bf16bf32<tnspA, tnspB>(a_desc.at(a_offset),
                                                      b_desc.at(b_offset),
                                                      frag[0],
@@ -381,10 +378,8 @@ __device__ static inline void mma(float *frag, A_DESC a_desc, B_DESC b_desc) {
                                                      frag[29],
                                                      frag[30],
                                                      frag[31]);
-          break;
-        default:
-          assert("false");
-          break;
+      } else {
+        assert(false);
       }
     }
   } else {
@@ -728,139 +723,134 @@ __device__ static inline void
             (k_iter % 4) * 32 + (k_iter / 4) * 2 * SMEM_B::ROW * b_col_param;
       }
 
-      switch (N) {
-        float *frag_k;
-        case 16:
-          frag_k = frag + k_iter * 8;
-          wgmma_m64n16k16_bf16bf16bf32_rs<tnspB>(a_frag_k[0],
-                                                 a_frag_k[1],
-                                                 a_frag_k[2],
-                                                 a_frag_k[3],
-                                                 b_desc.at(b_offset),
-                                                 frag_k[0],
-                                                 frag_k[1],
-                                                 frag_k[2],
-                                                 frag_k[3],
-                                                 frag_k[4],
-                                                 frag_k[5],
-                                                 frag_k[6],
-                                                 frag_k[7]);
-          break;
-        case 64:
-          frag_k = frag + k_iter * 32;
-          wgmma_m64n64k16_bf16bf16bf32_rs<tnspB>(a_frag_k[0],
-                                                 a_frag_k[1],
-                                                 a_frag_k[2],
-                                                 a_frag_k[3],
-                                                 b_desc.at(b_offset),
-                                                 frag_k[0],
-                                                 frag_k[1],
-                                                 frag_k[2],
-                                                 frag_k[3],
-                                                 frag_k[4],
-                                                 frag_k[5],
-                                                 frag_k[6],
-                                                 frag_k[7],
-                                                 frag_k[8],
-                                                 frag_k[9],
-                                                 frag_k[10],
-                                                 frag_k[11],
-                                                 frag_k[12],
-                                                 frag_k[13],
-                                                 frag_k[14],
-                                                 frag_k[15],
-                                                 frag_k[16],
-                                                 frag_k[17],
-                                                 frag_k[18],
-                                                 frag_k[19],
-                                                 frag_k[20],
-                                                 frag_k[21],
-                                                 frag_k[22],
-                                                 frag_k[23],
-                                                 frag_k[24],
-                                                 frag_k[25],
-                                                 frag_k[26],
-                                                 frag_k[27],
-                                                 frag_k[28],
-                                                 frag_k[29],
-                                                 frag_k[30],
-                                                 frag_k[31]);
-          break;
-        case 128:
-          frag_k = frag + k_iter * 64;
-          wgmma_m64n128k16_bf16bf16bf32_rs<tnspB>(a_frag_k[0],
-                                                  a_frag_k[1],
-                                                  a_frag_k[2],
-                                                  a_frag_k[3],
-                                                  b_desc.at(b_offset),
-                                                  frag_k[0],
-                                                  frag_k[1],
-                                                  frag_k[2],
-                                                  frag_k[3],
-                                                  frag_k[4],
-                                                  frag_k[5],
-                                                  frag_k[6],
-                                                  frag_k[7],
-                                                  frag_k[8],
-                                                  frag_k[9],
-                                                  frag_k[10],
-                                                  frag_k[11],
-                                                  frag_k[12],
-                                                  frag_k[13],
-                                                  frag_k[14],
-                                                  frag_k[15],
-                                                  frag_k[16],
-                                                  frag_k[17],
-                                                  frag_k[18],
-                                                  frag_k[19],
-                                                  frag_k[20],
-                                                  frag_k[21],
-                                                  frag_k[22],
-                                                  frag_k[23],
-                                                  frag_k[24],
-                                                  frag_k[25],
-                                                  frag_k[26],
-                                                  frag_k[27],
-                                                  frag_k[28],
-                                                  frag_k[29],
-                                                  frag_k[30],
-                                                  frag_k[31],
-                                                  frag_k[32],
-                                                  frag_k[33],
-                                                  frag_k[34],
-                                                  frag_k[35],
-                                                  frag_k[36],
-                                                  frag_k[37],
-                                                  frag_k[38],
-                                                  frag_k[39],
-                                                  frag_k[40],
-                                                  frag_k[41],
-                                                  frag_k[42],
-                                                  frag_k[43],
-                                                  frag_k[44],
-                                                  frag_k[45],
-                                                  frag_k[46],
-                                                  frag_k[47],
-                                                  frag_k[48],
-                                                  frag_k[49],
-                                                  frag_k[50],
-                                                  frag_k[51],
-                                                  frag_k[52],
-                                                  frag_k[53],
-                                                  frag_k[54],
-                                                  frag_k[55],
-                                                  frag_k[56],
-                                                  frag_k[57],
-                                                  frag_k[58],
-                                                  frag_k[59],
-                                                  frag_k[60],
-                                                  frag_k[61],
-                                                  frag_k[62],
-                                                  frag_k[63]);
-          break;
-        default:
-          assert("false");
-          break;
+      float *frag_k;
+      if constexpr (N == 16) {
+        frag_k = frag + k_iter * 8;
+        wgmma_m64n16k16_bf16bf16bf32_rs<tnspB>(a_frag_k[0],
+                                               a_frag_k[1],
+                                               a_frag_k[2],
+                                               a_frag_k[3],
+                                               b_desc.at(b_offset),
+                                               frag_k[0],
+                                               frag_k[1],
+                                               frag_k[2],
+                                               frag_k[3],
+                                               frag_k[4],
+                                               frag_k[5],
+                                               frag_k[6],
+                                               frag_k[7]);
+      } else if constexpr (N == 64) {
+        frag_k = frag + k_iter * 32;
+        wgmma_m64n64k16_bf16bf16bf32_rs<tnspB>(a_frag_k[0],
+                                               a_frag_k[1],
+                                               a_frag_k[2],
+                                               a_frag_k[3],
+                                               b_desc.at(b_offset),
+                                               frag_k[0],
+                                               frag_k[1],
+                                               frag_k[2],
+                                               frag_k[3],
+                                               frag_k[4],
+                                               frag_k[5],
+                                               frag_k[6],
+                                               frag_k[7],
+                                               frag_k[8],
+                                               frag_k[9],
+                                               frag_k[10],
+                                               frag_k[11],
+                                               frag_k[12],
+                                               frag_k[13],
+                                               frag_k[14],
+                                               frag_k[15],
+                                               frag_k[16],
+                                               frag_k[17],
+                                               frag_k[18],
+                                               frag_k[19],
+                                               frag_k[20],
+                                               frag_k[21],
+                                               frag_k[22],
+                                               frag_k[23],
+                                               frag_k[24],
+                                               frag_k[25],
+                                               frag_k[26],
+                                               frag_k[27],
+                                               frag_k[28],
+                                               frag_k[29],
+                                               frag_k[30],
+                                               frag_k[31]);
+      } else if constexpr (N == 128) {
+        frag_k = frag + k_iter * 64;
+        wgmma_m64n128k16_bf16bf16bf32_rs<tnspB>(a_frag_k[0],
+                                                a_frag_k[1],
+                                                a_frag_k[2],
+                                                a_frag_k[3],
+                                                b_desc.at(b_offset),
+                                                frag_k[0],
+                                                frag_k[1],
+                                                frag_k[2],
+                                                frag_k[3],
+                                                frag_k[4],
+                                                frag_k[5],
+                                                frag_k[6],
+                                                frag_k[7],
+                                                frag_k[8],
+                                                frag_k[9],
+                                                frag_k[10],
+                                                frag_k[11],
+                                                frag_k[12],
+                                                frag_k[13],
+                                                frag_k[14],
+                                                frag_k[15],
+                                                frag_k[16],
+                                                frag_k[17],
+                                                frag_k[18],
+                                                frag_k[19],
+                                                frag_k[20],
+                                                frag_k[21],
+                                                frag_k[22],
+                                                frag_k[23],
+                                                frag_k[24],
+                                                frag_k[25],
+                                                frag_k[26],
+                                                frag_k[27],
+                                                frag_k[28],
+                                                frag_k[29],
+                                                frag_k[30],
+                                                frag_k[31],
+                                                frag_k[32],
+                                                frag_k[33],
+                                                frag_k[34],
+                                                frag_k[35],
+                                                frag_k[36],
+                                                frag_k[37],
+                                                frag_k[38],
+                                                frag_k[39],
+                                                frag_k[40],
+                                                frag_k[41],
+                                                frag_k[42],
+                                                frag_k[43],
+                                                frag_k[44],
+                                                frag_k[45],
+                                                frag_k[46],
+                                                frag_k[47],
+                                                frag_k[48],
+                                                frag_k[49],
+                                                frag_k[50],
+                                                frag_k[51],
+                                                frag_k[52],
+                                                frag_k[53],
+                                                frag_k[54],
+                                                frag_k[55],
+                                                frag_k[56],
+                                                frag_k[57],
+                                                frag_k[58],
+                                                frag_k[59],
+                                                frag_k[60],
+                                                frag_k[61],
+                                                frag_k[62],
+                                                frag_k[63]);
+      } else {
+        assert(false);
       }
     }
   } else {

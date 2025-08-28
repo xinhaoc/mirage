@@ -141,11 +141,8 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
       paged_v_cache_dmem(d_paged_v_cache);
 
   // STensors' offsets and sizes
-  constexpr size_t ZERO_BUFFER_OFFSET = 0;
-  constexpr size_t ZERO_BUFFER_SIZE = sizeof(T) * 8;
 
-  // since smem is 1024 bytes aligned after zero buffer, S_Q_OFFSET is set to
-  // zero
+  // since smem is 1024 bytes aligned, S_Q_OFFSET is set to zero
   constexpr size_t S_Q_OFFSET = 0;
   constexpr size_t S_Q_SIZE = sizeof(T) * MAX_TOKENS * NUM_QO_PER_KV * HEAD_DIM;
 
@@ -212,9 +209,7 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
 
   extern __shared__ char smem_ptr[];
 
-  T *zero_buf = reinterpret_cast<T *>(smem_ptr + ZERO_BUFFER_OFFSET);
-  clear_smem_buffer<T, 8>(zero_buf);
-  uintptr_t smem = (reinterpret_cast<uintptr_t>(zero_buf) + 1023) / 1024 * 1024;
+  uintptr_t smem = (reinterpret_cast<uintptr_t>(smem_ptr) + 1023) / 1024 * 1024;
 
   T *s_q = reinterpret_cast<T *>(smem + S_Q_OFFSET);
   T *s_k = reinterpret_cast<T *>(smem + S_K_OFFSET);
@@ -229,7 +224,6 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
   float *s_o_buffer = reinterpret_cast<float *>(smem + S_O_BUFFER_OFFSET);
 
   // STensors' layouts
-  using ZeroBufferSmem = smem_row<T, 0, 0, 0, 1, 8, 8>;
   using QOSmem = smem_tma<T,
                           3,
                           3,
@@ -242,8 +236,6 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
   using Q_DESC = wgmma::mma_descriptor<QOSmem>;
   using K_DESC = wgmma::mma_descriptor<KVSmem, false>;
   using V_DESC = wgmma::mma_descriptor<KVSmem, true>;
-
-  ZeroBufferSmem zero_buffer(zero_buf);
 
   QOSmem q_smem(s_q), o_smem(s_o);
   KVSmem k_smem(s_k), v_smem(s_v);
