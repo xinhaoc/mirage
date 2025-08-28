@@ -38,7 +38,8 @@ __device__ __forceinline__ void
     silu_mul_linear_task_impl(void const *input_ptr,
                               void const *weight_ptr,
                               void const *residual_ptr,
-                              void *output_ptr) {
+                              void *output_ptr,
+                              bool residual = true) {
   constexpr int CHUNK_SIZE = 16 / sizeof(T);
   constexpr int OUTPUT_ATOM_SIZE = OUTPUT_SIZE <= 128 ? OUTPUT_SIZE : 128;
   constexpr int NUM_OUTPUT_ATOMS = OUTPUT_SIZE / OUTPUT_ATOM_SIZE;
@@ -79,7 +80,8 @@ __device__ __forceinline__ void
   T const *__restrict__ d_mul =
       static_cast<T const *>(input_ptr) + REDUCTION_SIZE;
   T const *__restrict__ d_weight = static_cast<T const *>(weight_ptr);
-  T const *__restrict__ d_residual = static_cast<T const *>(residual_ptr);
+  T const *__restrict__ d_residual =
+      residual ? static_cast<T const *>(residual_ptr) : nullptr;
   T *__restrict__ d_output = static_cast<T *>(output_ptr);
 
   using InputDmem =
@@ -134,15 +136,9 @@ __device__ __forceinline__ void
       sizeof(T) * NUM_WARPS_K * BATCH_SIZE * OUTPUT_ATOM_SIZE;
   // sizeof(T) * BATCH_SIZE * OUTPUT_ATOM_SIZE
 
-  // if (threadIdx.x == 0) {
-  //   int const smem_size =
-  //       SHARED_OUTPUT_OFFSET + sizeof(T) * BATCH_SIZE * OUTPUT_ATOM_SIZE;
-  //   printf("smem size of silu_mul %d\n", smem_size);
-  // }
-
   // zero buffer
   T *zero_buf = (T *)(smem + ZERO_BUFFER_OFFSET);
-  *((__uint128_t *)zero_buf) = 0ul;
+  vec_zero_t<T, 8>::fill_zero(zero_buf);
 
   // copy
   T *shared_input_buffer = (T *)(smem + SHARED_INPUT_BUFFER_OFFSET);
@@ -150,7 +146,8 @@ __device__ __forceinline__ void
   T *shared_weight_buffer = (T *)(smem + SHARED_WEIGHT_BUFFER_OFFSET);
 
   // residual
-  T *shared_residual = (T *)(smem + SHARED_RESIDUAL_OFFSET);
+  T *shared_residual =
+      residual ? (T *)(smem + SHARED_RESIDUAL_OFFSET) : nullptr;
 
   // intermidiate
   T *silu_mul_output = (T *)(smem + SILU_MUL_OUTPUT_OFFSET);
@@ -194,7 +191,7 @@ __device__ __forceinline__ void
   for (int output_atom_idx = 0; output_atom_idx < NUM_OUTPUT_ATOMS;
        output_atom_idx++,
            d_weight += OUTPUT_ATOM_SIZE * REDUCTION_SIZE,
-           d_residual += OUTPUT_ATOM_SIZE,
+           d_residual = residual ? d_residual + OUTPUT_ATOM_SIZE : nullptr,
            d_output += OUTPUT_ATOM_SIZE) {
     weight_dmem.set_ptr(d_weight);
     residual_dmem.set_ptr(d_residual);
@@ -204,11 +201,13 @@ __device__ __forceinline__ void
     InputBufferSmem mul_buffer_smem(shared_mul_buffer);
     WeightBufferSmem weight_buffer_smem(shared_weight_buffer);
 
+    if (residual) {
 #pragma unroll
-    for (int i = threadIdx.x; i < NUM_CHUNKS_C; i += NUM_THREADS) {
-      int row = i >> log2_CHUNKS_PER_ROW_C;
-      int col = (i & (CHUNKS_PER_ROW_C - 1)) << log2_CHUNK_SIZE;
-      load_smem(residual_smem(row, col), residual_dmem(row, col));
+      for (int i = threadIdx.x; i < NUM_CHUNKS_C; i += NUM_THREADS) {
+        int row = i >> log2_CHUNKS_PER_ROW_C;
+        int col = (i & (CHUNKS_PER_ROW_C - 1)) << log2_CHUNK_SIZE;
+        load_smem(residual_smem(row, col), residual_dmem(row, col));
+      }
     }
 
 #pragma unroll
@@ -216,7 +215,7 @@ __device__ __forceinline__ void
 #pragma unroll
       for (int i = threadIdx.x; i < NUM_CHUNKS_A; i += NUM_THREADS) {
         int src_row = i >> log2_CHUNKS_PER_ROW_A;
-        int dst_row = src_row + ((k_pipe + 1) << log2_constexpr(BATCH_SIZE));
+        int dst_row = src_row + ((k_pipe + 1) * BATCH_SIZE);
         int dst_col = (i & (CHUNKS_PER_ROW_A - 1)) << log2_CHUNK_SIZE;
         int src_col = dst_col + (k_pipe << log2_constexpr(TILE_SIZE));
         load_smem(input_buffer_smem(dst_row, dst_col),
@@ -355,12 +354,13 @@ __device__ __forceinline__ void
     }
 
 #pragma unroll
-    for (int i = threadIdx.x; i < OUTPUT_SIZE; i += NUM_THREADS) {
-      int row = 0;
-      output_dmem.at(row, i) =
-          NUM_WARPS_K > 1
-              ? output_smem.at(row, i) + residual_smem.at(row, i)
-              : mm_intermediate_smem.at(row, i) + residual_smem.at(row, i);
+    for (int row = 0; row < BATCH_SIZE; row++) {
+      for (int i = threadIdx.x; i < OUTPUT_SIZE; i += NUM_THREADS) {
+        T val = NUM_WARPS_K > 1 ? output_smem.at(row, i)
+                                : mm_intermediate_smem.at(row, i);
+        output_dmem.at(row, i) =
+            residual ? val + residual_smem.at(row, i) : val;
+      }
     }
     if (output_atom_idx + 1 < NUM_OUTPUT_ATOMS) {
       __syncthreads();

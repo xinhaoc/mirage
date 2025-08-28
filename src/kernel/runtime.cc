@@ -254,7 +254,7 @@ void register_mugraph(
               TaskDesc task(TASK_NVSHMEM_COPY, 0 /*variant_id*/);
               // task.trigger_event = get_event_id(
               //     tgt_gpu_id, all_events.size(), true /*nvshmem_event*/);
-              //  Initialize input/output tensors to the task
+              //  Initialize input tensors to the task
               {
                 TensorDesc desc;
                 assert(input_ops[0]->output_tensors.size() == 1);
@@ -268,8 +268,22 @@ void register_mugraph(
                                        : desc.stride[d + 1] *
                                              input_ops[0]->dtensor.dim[d + 1];
                 }
-                // Input and output have the same shape
                 task.inputs[task.num_inputs++] = desc;
+              }
+              // Initialize output tensors to the task
+              {
+                TensorDesc desc;
+                assert(input_ops[1]->output_tensors.size() == 1);
+                tb::STensor stensor = input_ops[1]->output_tensors[0];
+                desc.num_dims = stensor.num_dims;
+                desc.data_type = stensor.data_type;
+                for (int d = stensor.num_dims - 1; d >= 0; d--) {
+                  desc.dim[d] = stensor.dim[d];
+                  desc.stride[d] = (d == stensor.num_dims - 1)
+                                       ? 1
+                                       : desc.stride[d + 1] *
+                                             input_ops[1]->dtensor.dim[d + 1];
+                }
                 task.outputs[task.num_outputs++] = desc;
               }
               all_tasks.push_back(task);
@@ -382,11 +396,20 @@ void register_mugraph(
     }
     // Step 2: create events between operators
     if (pre_op == nullptr) {
-      // Assert that the first op launches a single task
-      assert(tasks.size() == 1);
-      first_tasks.push_back(all_tasks.size());
-      cur_task_map[dim3(0, 0, 0)] = all_tasks.size();
-      all_tasks.push_back(tasks[0]);
+      dim3 bid;
+      for (bid.x = 0; bid.x < bgraph.grid_dim.x; bid.x++) {
+        for (bid.y = 0; bid.y < bgraph.grid_dim.y; bid.y++) {
+          for (bid.z = 0; bid.z < bgraph.grid_dim.z; bid.z++) {
+            cur_task_map[bid] = all_tasks.size();
+
+            int offset = bid.x * bgraph.grid_dim.y * bgraph.grid_dim.z +
+                         bid.y * bgraph.grid_dim.z + bid.z;
+
+            first_tasks.push_back(all_tasks.size());
+            all_tasks.push_back(tasks[offset]);
+          }
+        }
+      }
     } else {
       // Step 2.1: analyze dependencies between thread blocks of the two ops
       std::vector<int> producer_partition(mirage::config::MAX_TENSOR_DIMS, 1);
@@ -490,8 +513,10 @@ bool sanity_check(mirage::kernel::Graph const &graph,
   }
   std::queue<TaskId> task_queue;
   std::queue<EventId> event_queue;
-  assert(first_tasks.size() == 1);
-  task_queue.push(first_tasks[0]);
+  printf("First tasks: %d\n", (int)first_tasks.size());
+  for (size_t i = 0; i < first_tasks.size(); i++) {
+    task_queue.push(first_tasks[i]);
+  }
   while (!(task_queue.empty() && event_queue.empty())) {
     // Execute tasks
     while (!task_queue.empty()) {
@@ -590,24 +615,14 @@ TaskGraphResult print_task_graph(
            "long long int>();");
     code.e("}");
     code.e("else {");
-    code.e("json j = task.at(\"trigger_event\");");
-    code.e("int gpu_offset = j.at(\"gpu_offset\").get<int>();");
-    code.e("size_t event_pos = j.at(\"event_pos\").get<size_t>();");
-    code.e("bool is_nvshmem = j.at(\"is_nvshmem\").get<bool>();");
-    code.e("task_desc.trigger_event = get_event_id((my_gpu_id + gpu_offset) \% "
-           "num_gpus, event_pos, is_nvshmem);");
+    code.e("assert(false);");
     code.e("}");
     code.e("if (task.at(\"dependent_event\").is_number_integer()) {");
     code.e("task_desc.dependent_event = "
            "task.at(\"dependent_event\").get<unsigned long long int>();");
     code.e("}");
     code.e("else {");
-    code.e("json j = task.at(\"dependent_event\");");
-    code.e("int gpu_offset = j.at(\"gpu_offset\").get<int>();");
-    code.e("size_t event_pos = j.at(\"event_pos\").get<size_t>();");
-    code.e("bool is_nvshmem = j.at(\"is_nvshmem\").get<bool>();");
-    code.e("task_desc.dependent_event = get_event_id((my_gpu_id + gpu_offset) "
-           "\% num_gpus, event_pos, is_nvshmem);");
+    code.e("assert(false);");
     code.e("}");
 
     // load inputs
@@ -749,7 +764,7 @@ TaskGraphResult print_task_graph(
              {"inputs", {}},
              {"outputs", {}},
              {"trigger_event",
-              json{{"gpu_offset", 0}, {"event_pos", 1}, {"is_nvshmem", false}}},
+              get_event_id(my_gpu_id, 1 /*event_pos*/, false /*is_nvshmem*/)},
              {"dependent_event", EVENT_INVALID_ID}});
   }
   // generate all other tasks
@@ -799,37 +814,18 @@ TaskGraphResult print_task_graph(
               tgbody.e("{");
               tgbody.e("TaskDesc task_desc(static_cast<TaskType>($));",
                        task_desc.task_type);
-              size_t gpu_offset = ((task_desc.trigger_event >> 32) & 0xffff);
-              size_t event_pos = (task_desc.trigger_event & 0xffffffff);
               bool is_nvshmem_event =
                   ((task_desc.trigger_event & EVENT_NVSHMEM_TAG) > 0);
               assert(is_nvshmem_event);
-              tgbody.e("task_desc.trigger_event = get_event_id((my_gpu_id + $) "
-                       "\% num_gpus, $, $);",
-                       gpu_offset,
-                       event_pos,
-                       is_nvshmem_event);
               assert(task_desc.dependent_event != EVENT_INVALID_ID);
-              tgbody.e("task_desc.dependent_event = get_event_id(my_gpu_id, $, "
-                       "false);",
-                       (task_desc.dependent_event & 0xffffffff));
               assert(task_desc.num_inputs == 1);
               assert(task_desc.num_outputs == 1);
-              json json_task = {
-                  {"task_type", task_desc.task_type},
-                  {"variant_id", task_desc.variant_id},
-                  {"inputs", {}},
-                  {"outputs", {}},
-                  {"trigger_event",
-                   json{{"gpu_offset", gpu_offset},
-                        {"event_pos", event_pos},
-                        {"is_nvshmem", is_nvshmem_event}}},
-                  {"dependent_event",
-                   json{{"gpu_offset", 0},
-                        {"event_pos", (task_desc.dependent_event & 0xffffffff)},
-                        {"is_nvshmem", false}}}};
-              tgbody.e("task_desc.num_inputs = $;", task_desc.num_inputs);
-              tgbody.e("task_desc.num_outputs = $;", task_desc.num_outputs);
+              json json_task = {{"task_type", task_desc.task_type},
+                                {"variant_id", task_desc.variant_id},
+                                {"inputs", {}},
+                                {"outputs", {}},
+                                {"trigger_event", task_desc.trigger_event},
+                                {"dependent_event", task_desc.dependent_event}};
               off_t offset = 0;
               // Add input
               int3 input_map = input_ops[0]->input_map;
@@ -885,7 +881,7 @@ TaskGraphResult print_task_graph(
                   {"strides", json_strides}});
               // Add nvshmem_copy output
               // Note that nvshmem_copy's output is stored in input_ops[1]
-              offset = tgt_gpu_id * input_ops[0]->dtensor.num_elements();
+              offset = my_gpu_id * input_ops[0]->dtensor.num_elements();
               int3 output_map = input_ops[1]->input_map;
               io_desc = io_configs.find(input_ops[1]->dtensor.guid)->second;
               if (output_map.x >= 0) {
@@ -960,48 +956,31 @@ TaskGraphResult print_task_graph(
           tgbody.e("{");
           tgbody.e("TaskDesc task_desc(static_cast<TaskType>($));",
                    task_desc.task_type);
-          size_t gpu_offset = ((task_desc.trigger_event >> 32) & 0xffff);
+          size_t gpu_id = ((task_desc.trigger_event >> 32) & 0xffff);
           size_t event_pos = (task_desc.trigger_event & 0xffffffff);
           bool is_nvshmem_event =
               ((task_desc.trigger_event & EVENT_NVSHMEM_TAG) > 0);
-          assert(gpu_offset == 0);
+          assert(gpu_id == my_gpu_id);
           assert(!is_nvshmem_event);
-          tgbody.e("task_desc.trigger_event = get_event_id(my_gpu_id, $, $);",
-                   event_pos,
-                   is_nvshmem_event);
           json json_task;
-          if (task_desc.dependent_event == EVENT_INVALID_ID) {
-            tgbody.e("task_desc.dependent_event = EVENT_INVALID_ID;");
-            json_task = {{"task_type", task_desc.task_type},
-                         {"variant_id", task_desc.variant_id},
-                         {"inputs", {}},
-                         {"outputs", {}},
-                         {"trigger_event",
-                          json{{"gpu_offset", gpu_offset},
-                               {"event_pos", event_pos},
-                               {"is_nvshmem", is_nvshmem_event}}},
-                         {"dependent_event", EVENT_INVALID_ID}};
-          } else {
-            tgbody.e("task_desc.dependent_event = get_event_id(my_gpu_id, $, "
-                     "false);",
-                     (task_desc.dependent_event & 0xffffffff));
-            json_task = {
-                {"task_type", task_desc.task_type},
-                {"variant_id", task_desc.variant_id},
-                {"inputs", {}},
-                {"outputs", {}},
-                {"trigger_event",
-                 json{{"gpu_offset", gpu_offset},
-                      {"event_pos", event_pos},
-                      {"is_nvshmem", is_nvshmem_event}}},
-                {"dependent_event",
-                 json{{"gpu_offset", 0},
-                      {"event_pos", (task_desc.dependent_event & 0xffffffff)},
-                      {"is_nvshmem", false}}}};
-          }
-          tgbody.e("task_desc.num_inputs = $;", task_desc.num_inputs);
-          tgbody.e("task_desc.num_outputs = $;", task_desc.num_outputs);
+          json_task = {{"task_type", task_desc.task_type},
+                       {"variant_id", task_desc.variant_id},
+                       {"inputs", {}},
+                       {"outputs", {}},
+                       {"trigger_event", task_desc.trigger_event},
+                       {"dependent_event", task_desc.dependent_event}};
           for (int i = 0; i < task_desc.num_inputs; i++) {
+            if (input_ops[i]->dtensor == kernel::DTensor::EMPTY_TENSOR) {
+              json json_dims = json::array();
+              json json_strides = json::array();
+              json_task["inputs"].push_back(
+                  json{{"base_ptr", "nullptr"},
+                       {"offset", 0},
+                       {"data_type", type::DT_UNKNOWN},
+                       {"dims", json_dims},
+                       {"strides", json_strides}});
+              continue;
+            }
             off_t offset = 0;
             int num_dims = input_ops[i]->dtensor.num_dims;
             int3 input_map = input_ops[i]->input_map;
@@ -1247,6 +1226,8 @@ TaskGraphResult print_task_graph(
     json_task_graph["first_tasks"].push_back(task);
   }
   if (use_json_format) {
+    // Add nullptr for tensors set as None
+    code.e("all_tensors[\"nullptr\"] = nullptr;");
     code.e("construct_task_graph(num_gpus, my_gpu_id, all_tasks, all_events, "
            "first_tasks, all_tensors);");
   } else {
@@ -1265,11 +1246,15 @@ TaskGraphResult print_task_graph(
   task_type_to_name[TASK_LINEAR_WITH_RESIDUAL] = "TASK_LINEAR_WITH_RESIDUAL";
   task_type_to_name[TASK_ARGMAX_PARTIAL] = "TASK_ARGMAX_PARTIAL";
   task_type_to_name[TASK_ARGMAX_REDUCE] = "TASK_ARGMAX_REDUCE";
+  task_type_to_name[TASK_FIND_NGRAM_PARTIAL] = "TASK_FIND_NGRAM_PARTIAL";
+  task_type_to_name[TASK_FIND_NGRAM_GLOBAL] = "TASK_FIND_NGRAM_GLOBAL";
+  task_type_to_name[TASK_TARGET_VERIFY_GREEDY] = "TASK_TARGET_VERIFY_GREEDY";
+  task_type_to_name[TASK_SINGLE_BATCH_EXTEND_ATTENTION] =
+      "TASK_SINGLE_BATCH_EXTEND_ATTENTION";
 
   code.e("__device__ __forceinline__");
   code.e("void _execute_task(TaskDesc const& task_desc,");
-  code.e("                   int *step,");
-  code.e("                   long long *tokens) {");
+  code.e("                   RuntimeConfig const &runtime_config) {");
   TaskRegister *task_register = TaskRegister::get_instance();
   bool first_task = true;
   for (auto const &task : task_register->all_task_variants) {
@@ -1297,7 +1282,7 @@ TaskGraphResult print_task_graph(
   return result;
 }
 
-TaskGraphResult Graph::generate_task_graph(int _num_gpus) {
+TaskGraphResult Graph::generate_task_graph(int _num_gpus, int _my_gpu_id) {
   std::vector<TaskDesc> all_tasks;
   std::vector<EventDesc> all_events;
   std::vector<TaskId> first_tasks;
@@ -1305,9 +1290,7 @@ TaskGraphResult Graph::generate_task_graph(int _num_gpus) {
   std::map<kernel::KNOperator *, std::map<dim3, TaskId, Dim3Comparator>>
       all_task_maps;
   num_gpus = _num_gpus;
-  // FIXME: currently we assume my_gpu_id = 0 and use gpu_offset
-  // This should be fixed after we let each GPU has a unique task graph
-  my_gpu_id = 0;
+  my_gpu_id = _my_gpu_id;
   // add the termination event to the event lists
   EventDesc e(EVENT_TERMINATION, 1, 0, 0);
   all_events.push_back(e);
