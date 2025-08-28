@@ -34,8 +34,6 @@
 
 namespace kernel {
 
-// NOTE(Jinchen): this task implements the paged attention where a causal mask
-// is applied. In each task, we process one request with one or more tokens
 template <typename T,
           int NUM_QO_HEADS,
           int NUM_KV_HEADS,
@@ -60,11 +58,8 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
     const TMA_PAGED_KV_CACHE_TAIL_PAGE &tma_paged_k_cache_tail_page,
     const TMA_PAGED_KV_CACHE_TAIL_PAGE &tma_paged_v_cache_tail_page,
     const TMA_OUTPUT &tma_output,
-    // old arguments
-    void *qkv_ptr,
     void *paged_k_cache_ptr,
     void *paged_v_cache_ptr,
-    void *output_ptr,
     int const *qo_indptr_buffer_ptr,
     int const *paged_kv_indptr_buffer_ptr,
     int const *paged_kv_indices_buffer_ptr,
@@ -80,13 +75,6 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
     float k_eps) {
   constexpr int NUM_QO_PER_KV = NUM_QO_HEADS / NUM_KV_HEADS;
 
-  // NOTE(Jinchen): The input is a packed QKV tensor, which may contain
-  // multiple tokens. The shape of the packed QKV tensor is
-  // [num_tokens, head_dim * (num_qo_heads + num_kv_heads * 2)]
-  // NOTE(Jinchen): assume the layout of KV Cache is NHD,
-  // i.e., the shape of KV Cache is
-  // [max_num_pages, page_size, num_kv_heads, head_dim]
-  constexpr int CP_CHUNK_SIZE = 16 / sizeof(T);
   constexpr int KV_TILE_SIZE = 64;
   constexpr int MAX_PAGES_PER_REQUEST =
       (MAX_SEQ_LEN + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -113,14 +101,7 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
     return;
   }
   int const num_tokens = last_token_pos - first_token_pos;
-  if (threadIdx.x == 128) {
-    printf("num_tokens: %d\n", num_tokens);
-  }
 
-  // NOTE(Jinchen): to simplify the implementation, we assume that the metadata
-  // of the paged KV cache includes the new tokens, i.e., spaces are allocated
-  // before the request is processed, while the real data is copied into the
-  // corresponding pages after that
   int const first_page_pos = paged_kv_indptr_buffer_ptr[request_id];
   int const last_page_pos = paged_kv_indptr_buffer_ptr[request_id + 1];
   int const num_pages = last_page_pos - first_page_pos;
@@ -148,35 +129,16 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
     }
   }
 
-  if (threadIdx.x == 128) {
-    printf("num_pages = %d\n", num_pages);
-    for (int i = 0; i < num_pages; i++) {
-      printf("page_indices[%d] = %d\n", i, page_indices[i]);
-    }
-  }
   __syncthreads();
 
-  T const *__restrict__ d_q =
-      reinterpret_cast<T const *>(qkv_ptr) + first_token_pos * QKV_STRIDE;
-  T const *__restrict__ d_k = d_q + NUM_QO_PER_KV * HEAD_DIM;
-  T const *__restrict__ d_v = d_k + HEAD_DIM;
   T *__restrict__ d_paged_k_cache = reinterpret_cast<T *>(paged_k_cache_ptr);
   T *__restrict__ d_paged_v_cache = reinterpret_cast<T *>(paged_v_cache_ptr);
-  T *__restrict__ d_output =
-      reinterpret_cast<T *>(output_ptr) + first_token_pos * O_STRIDE;
 
   //  DTensors' layouts
-  using QDmem =
-      dmem_row_const<T, MAX_TOKENS, HEAD_DIM * NUM_QO_PER_KV, QKV_STRIDE>;
-  using KVDmem = dmem_row_const<T, MAX_TOKENS, HEAD_DIM, QKV_STRIDE>;
   using KVCacheDmem = dmem_row<T, KV_TILE_SIZE, HEAD_DIM, KV_CACHE_STRIDE>;
-  using ODmem = dmem_row<T, MAX_TOKENS, HEAD_DIM * NUM_QO_PER_KV, O_STRIDE>;
 
-  QDmem q_dmem(d_q);
-  KVDmem k_dmem(d_k), v_dmem(d_v);
   KVCacheDmem paged_k_cache_dmem(d_paged_k_cache),
       paged_v_cache_dmem(d_paged_v_cache);
-  ODmem o_dmem(d_output);
 
   // STensors' offsets and sizes
   constexpr size_t ZERO_BUFFER_OFFSET = 0;
@@ -229,16 +191,20 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
   constexpr size_t S_O_BUFFER_SIZE =
       sizeof(float) * MMA_ITERS_M * NUM_THREADS * 64;
 
-  constexpr size_t S_Q_BARRIER_OFFSET = (S_O_BUFFER_OFFSET + S_O_BUFFER_SIZE + 7) / 8 * 8;
+  constexpr size_t S_Q_BARRIER_OFFSET =
+      (S_O_BUFFER_OFFSET + S_O_BUFFER_SIZE + 7) / 8 * 8;
   constexpr size_t S_Q_BARRIER_SIZE = 8 * Kstages;
 
-  constexpr size_t S_K_BARRIER_OFFSET = (S_Q_BARRIER_OFFSET + S_Q_BARRIER_SIZE + 7) / 8 * 8;
+  constexpr size_t S_K_BARRIER_OFFSET =
+      (S_Q_BARRIER_OFFSET + S_Q_BARRIER_SIZE + 7) / 8 * 8;
   constexpr size_t S_K_BARRIER_SIZE = 8 * Kstages;
 
-  constexpr size_t S_V_BARRIER_OFFSET = (S_K_BARRIER_OFFSET + S_K_BARRIER_SIZE + 7) / 8 * 8;
+  constexpr size_t S_V_BARRIER_OFFSET =
+      (S_K_BARRIER_OFFSET + S_K_BARRIER_SIZE + 7) / 8 * 8;
   constexpr size_t S_V_BARRIER_SIZE = 8 * Kstages;
 
-  constexpr size_t S_COMPUTE_DONE_OFFSET = (S_V_BARRIER_OFFSET + S_V_BARRIER_SIZE + 7) / 8 * 8;
+  constexpr size_t S_COMPUTE_DONE_OFFSET =
+      (S_V_BARRIER_OFFSET + S_V_BARRIER_SIZE + 7) / 8 * 8;
   constexpr size_t S_COMPUTE_DONE_SIZE = 8 * Kstages;
 
   constexpr size_t S_TOTAL_OFFSET = S_COMPUTE_DONE_OFFSET + S_COMPUTE_DONE_SIZE;
@@ -278,16 +244,14 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
   using V_DESC = wgmma::mma_descriptor<KVSmem, true>;
 
   ZeroBufferSmem zero_buffer(zero_buf);
-  QOSmem q_smem(s_q), o_smem(s_o);
 
+  QOSmem q_smem(s_q), o_smem(s_o);
   KVSmem k_smem(s_k), v_smem(s_v);
   KVSmem k_buffer_smem(s_k_buffer), v_buffer_smem(s_v_buffer);
 
   int const num_iters = (seq_len + KV_TILE_SIZE - 1) / KV_TILE_SIZE;
   int curr_iter_len = min(seq_len, KV_TILE_SIZE);
   int cp_finished_seq_len = 0;
-  // assert no leafover to be handled when loading qkv
-  static_assert(HEAD_DIM % CP_CHUNK_SIZE == 0);
 
   // Currently assume that PAGE_SIZE is a multiplier of KV_TILE_SIZE
   // so that we access a single page in one iteration
@@ -301,7 +265,8 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
   Barrier *q_barrier = reinterpret_cast<Barrier *>(smem + S_Q_BARRIER_OFFSET);
   Barrier *k_barrier = reinterpret_cast<Barrier *>(smem + S_K_BARRIER_OFFSET);
   Barrier *v_barrier = reinterpret_cast<Barrier *>(smem + S_V_BARRIER_OFFSET);
-  Barrier *compute_done = reinterpret_cast<Barrier *>(smem + S_COMPUTE_DONE_OFFSET);
+  Barrier *compute_done =
+      reinterpret_cast<Barrier *>(smem + S_COMPUTE_DONE_OFFSET);
 
   // init barrier
   if (threadIdx.x == 0) {
@@ -325,8 +290,6 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
     wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(8);
 
     // load k and v
-    int page_idx_0 = page_indices[0];
-
     if (lane_idx == 0 && warp_idx % 4 == 0) {
       set_barrier_transaction_bytes(k_barrier[0],
                                     curr_iter_len * HEAD_DIM * sizeof(T));
@@ -361,7 +324,6 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
             k_barrier[0], k_buffer_smem(0, 0), coords);
         tma_paged_v_cache.tma_cp_async(
             v_barrier[0], v_buffer_smem(0, 0), coords);
-
       }
 
       if (kv_rows > 0) {
@@ -426,7 +388,6 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
                 k_barrier[slot], k_smem(0, 0), coords);
             tma_paged_v_cache.tma_cp_async(
                 v_barrier[slot], v_smem(0, 0), coords);
-
           }
 
           if (kv_rows > 0) {
@@ -481,30 +442,14 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
     for (int m = 0; m < MMA_ITERS_M; m++) {
 #pragma unroll
       for (int n = 0; n < HEAD_DIM / 64; n++) {
-        clear_8_floats(o[m][n]);
+#pragma unroll
+        for (int k = 0; k < 4; k++) {
+          clear_8_floats(o[m][n] + k * 8);
+        }
       }
     }
 
     wait(q_barrier[0], 0);
-
-#if 0
-     if (threadIdx.x == 0) {
-      for (int i = 0; i < num_tokens * NUM_QO_PER_KV * HEAD_DIM; i++) {
-        if (i % 64 == 0) {
-          printf("\n i / 64 = %d\n", i / 64);
-        }
-          printf("%f ", (float)reinterpret_cast<bfloat16 *>(q_smem(0, 0))[i]);
-      }
-      printf("\n\nviewed q as 16x128 matrix\n");
-      for (int i = 0; i < num_tokens * NUM_QO_PER_KV; i++) {
-        for (int j = 0; j < HEAD_DIM; j++) {
-            printf("%f ", (float)q_smem.at(i, j));
-          
-        }
-        printf("\n");
-      }
-     }
-#endif
 
     for (int iter = 0; iter < num_iters; iter++) {
 
@@ -531,25 +476,6 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
         v_smem.set_ptr(s_v);
         v_buffer_smem.set_ptr(s_v_buffer);
       }
-
-#if 0
-        if (threadIdx.x == 0) {
-          for (int i = 0; i < KV_TILE_SIZE * HEAD_DIM; i++) {
-            if (i % 64 == 0) {
-              printf("\n i / 64 = %d\n", i / 64);
-            }
-              printf("%f ", (float)reinterpret_cast<bfloat16 *>(k_smem(0, 0))[i]);
-          }
-          printf("\n\nviewed as 64x128 matrix\n");
-          for (int i = 0; i < KV_TILE_SIZE; i++) {
-            for (int j = 0; j < HEAD_DIM; j++) {
-                printf("%f ", (float)k_smem.at(i, j));
-              
-            }
-            printf("\n");
-          }
-        }
-#endif
 
       int kv_tokens_to_process = min(
           curr_iter_len,
@@ -646,8 +572,6 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
              elem_idx += NUM_THREADS) {
           int token_idx = elem_idx / HEAD_DIM;
           int col = elem_idx % HEAD_DIM;
-          // int page_idx = page_indices[(token_idx + first_kv_token_to_process)
-          // / PAGE_SIZE];
           int page_offset = (token_idx + first_kv_token_to_process) % PAGE_SIZE;
           int src_row = (token_idx + first_kv_token_to_process) % KV_TILE_SIZE;
           int dst_row = page_idx * PAGE_SIZE + page_offset;
@@ -656,14 +580,8 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
         }
       }
       // compute X = QK^T
-      // NOTE(Yu): we use m64n64k16 mma atom, and wrapped it as m64n64kK mma, i.e. we don't need to iterate over k explicitly
-      float x_frag_f_ref[MMA_ITERS_M][8];
-#pragma unroll
-      for (int m = 0; m < MMA_ITERS_M; m++) {
-        clear_8_floats(x_frag_f_ref[m]);
-      }
-      uint32_t q_frag[4], kt_frag[4];
-
+      // NOTE(Yu): we use m64n64k16 mma atom, and wrapped it as m64n64kK mma,
+      // i.e. we don't need to iterate over k explicitly
       float x_frag_f[MMA_ITERS_M][32];
 #pragma unroll
       for (int m = 0; m < MMA_ITERS_M; m++) {
@@ -840,45 +758,25 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
                                THREADS_PER_WARPGROUP * 2 // mma iter m
                            + t_idx * 2                   // corresponding thread
                            + (frag_idx % 4) / 2; // first half or second half
-      float m_prev = m_global,
-            d_prev = d_global; // save previous values
-      float other_m = s_m_buffer[md_smem_offset],
-            other_d = s_d_buffer[md_smem_offset];
-      m_global = max(m_prev, other_m);
-      d_global =
-          d_prev * expf(m_prev - m_global) + other_d * expf(other_m - m_global);
-      // accumulate o
-      float other_o = s_o_buffer[(row / 64) * CONSUMER_WARPGROUPS *
-                                     THREADS_PER_WARPGROUP * 64 // mma iter m
-                                 + t_idx * 64      // corresponding thread
-                                 + mma_iter_n * 32 // mma iter n
-                                 + frag_idx];
-      o_global = o_global * expf(m_prev - m_global) +
-                 other_o * expf(other_m - m_global);
 
-      // m_global = s_m_buffer[md_smem_offset];
-      // d_global = s_d_buffer[md_smem_offset];
-      // o_global = s_o_buffer[(row / 64) * CONSUMER_WARPGROUPS *
-      //                           THREADS_PER_WARPGROUP * 64 // mma iter m
-      //                       + t_idx * 64      // corresponding thread
-      //                       + mma_iter_n * 32 // mma iter n
-      //                       + frag_idx];
-
+      m_global = s_m_buffer[md_smem_offset];
+      d_global = s_d_buffer[md_smem_offset];
+      o_global = s_o_buffer[(row / 64) * CONSUMER_WARPGROUPS *
+                                THREADS_PER_WARPGROUP * 64 // mma iter m
+                            + t_idx * 64      // corresponding thread
+                            + mma_iter_n * 32 // mma iter n
+                            + frag_idx];
 
       o_smem.at(row, col) = bfloat16(o_global / d_global);
-
     }
     wg_sync<THREADS_PER_WARPGROUP * CONSUMER_WARPGROUPS>(9);
 
-    // store the output
-    for (int elem_idx = threadIdx.x;
-         elem_idx < num_tokens * NUM_QO_PER_KV * HEAD_DIM;
-         elem_idx += NUM_THREADS) {
-      int src_row = elem_idx / HEAD_DIM;
-      int src_col = elem_idx % HEAD_DIM;
-      int dst_row = src_row / NUM_QO_PER_KV;
-      int dst_col = src_col + (src_row % NUM_QO_PER_KV) * HEAD_DIM;
-      o_dmem.at(dst_row, dst_col) = o_smem.at(src_row, src_col);
+    async_proxy_fence();
+
+    // copy back to dmem
+    if (warp_idx % 4 == 0 && lane_id() == 0) {
+      tma_output.tma_store_async(o_smem(0, 0), {0, 0});
+      store_commit_group();
     }
   }
 }

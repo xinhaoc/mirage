@@ -48,7 +48,10 @@ __device__ __forceinline__ void
                          const TMA_OUT &tma_out) {
 
   constexpr int chunk_size = 16 / sizeof(T);
-  constexpr int TILE_SIZE = REDUCTION_SIZE < TMA_A::SMEM_COL * TMA_A::SMEM_REPEAT_COL ? REDUCTION_SIZE : TMA_A::SMEM_COL * TMA_A::SMEM_REPEAT_COL;
+  constexpr int TILE_SIZE =
+      REDUCTION_SIZE < TMA_A::SMEM_COL * TMA_A::SMEM_REPEAT_COL
+          ? REDUCTION_SIZE
+          : TMA_A::SMEM_COL * TMA_A::SMEM_REPEAT_COL;
   constexpr int THREADS_PER_WARPGROUP = 128;
   constexpr int CONSUMER_WARPGROUPS = 1;
   constexpr int PRODUCER_WARPGROUPS = 1;

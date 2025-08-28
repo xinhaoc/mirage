@@ -133,15 +133,13 @@ __device__ __forceinline__ void
   T *mm_output = (T *)(smem + SHARED_MM_OUTPUT_OFFSET);
 
   // define the swizzle mode
-  using InputSmem =
-      smem_row<T, B, M, S, BATCH_SIZE, TILE_SIZE, TILE_SIZE>;
+  using InputSmem = smem_row<T, B, M, S, BATCH_SIZE, TILE_SIZE, TILE_SIZE>;
   InputSmem input_smem(shared_input);
   InputSmem input_smem_buffer(shared_input);
   InputSmem mul_output_smem(shared_mul_output);
   InputSmem element_unary_smem(shared_element_unary_output);
 
-  using NormWeightSmem =
-      smem_row<T, B, M, S, BATCH_SIZE, TILE_SIZE, TILE_SIZE>;
+  using NormWeightSmem = smem_row<T, B, M, S, BATCH_SIZE, TILE_SIZE, TILE_SIZE>;
   NormWeightSmem norm_weight_smem(shared_norm_weight);
   NormWeightSmem norm_weight_smem_buffer(shared_norm_weight);
 
