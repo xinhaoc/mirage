@@ -1,4 +1,4 @@
-/* Copyright 2023 CMU
+/* Copyright 2023-2024 CMU
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,18 +15,18 @@
 
 #pragma once
 
-#include "mirage/utils/json_utils.h"
+#ifdef MIRAGE_BACKEND_USE_CUDA
+#include <vector_types.h>
+#else
+struct dim3 {
+  unsigned int x, y, z;
 
-namespace mirage {
-
-struct ProfileResult {
-  static int const NUM_WARPUP_ITERATIONS = 1024;
-  static int const NUM_ITERATIONS = 1024;
-  float run_time;
-
-  static ProfileResult infinity();
+  constexpr dim3(unsigned int _x = 1, unsigned int _y = 1, unsigned int _z = 1)
+      : x(_x), y(_y), z(_z) {}
 };
+struct int3 {
+  int x, y, z;
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ProfileResult, run_time);
-
-} // namespace mirage
+  constexpr int3(int _x = 1, int _y = 1, int _z = 1) : x(_x), y(_y), z(_z) {}
+};
+#endif

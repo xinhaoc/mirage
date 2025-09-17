@@ -137,6 +137,8 @@ def get_kn_operator_type_string(int op_type):
         return "kn_mul_op"
     elif op_type == KN_DIV_OP:
         return "kn_div_op"
+    elif op_type == KN_POW_OP:
+        return "kn_pow_op"
     elif op_type == KN_REDUCTION_0_OP:
         return "kn_reduction_0_op"
     elif op_type == KN_REDUCTION_1_OP:
@@ -214,6 +216,10 @@ def get_tb_operator_type_string(int op_type):
         return "tb_mul_op"
     elif op_type == TB_DIV_OP:
         return "tb_div_op"
+    elif op_type == TB_SUB_OP:
+        return "tb_sub_op"
+    elif op_type == TB_POW_OP:
+        return "tb_pow_op"
     elif op_type == TB_REDUCTION_FIRST_OP_ID:
         return "tb_reduction_first_op_id"
     elif op_type == TB_REDUCTION_0_OP:
@@ -228,6 +234,12 @@ def get_tb_operator_type_string(int op_type):
         return "tb_reduction_1_to_dimx_op"
     elif op_type == TB_REDUCTION_2_TO_DIMX_OP:
         return "tb_reduction_2_to_dimx_op"
+    elif op_type == TB_REDUCTION_0_MAX_OP:
+        return "tb_reduction_0_max_op"
+    elif op_type == TB_REDUCTION_1_MAX_OP:
+        return "tb_reduction_1_max_op"
+    elif op_type == TB_REDUCTION_2_MAX_OP:
+        return "tb_reduction_2_max_op"
     elif op_type == TB_REDUCTION_LAST_OP_ID:
         return "tb_reduction_last_op_id"
     elif op_type == TB_RMS_NORM_OP:
@@ -264,6 +276,12 @@ def get_tb_operator_type_string(int op_type):
         return "tb_forloop_accum_red_ld_rms_op"
     elif op_type == TB_FORLOOP_ACCUM_REDTOX_LD_SUM_OP:
         return "tb_forloop_accum_redtox_ld_sum_op"
+    elif op_type == TB_FORLOOP_ACCUM_NO_RED_RESCALE_OP:
+        return "tb_forloop_accum_no_red_rescale_op"
+    elif op_type == TB_FORLOOP_ACCUM_RED_LD_SUM_RESCALE_OP:
+        return "tb_forloop_accum_red_ld_sum_rescale_op"
+    elif op_type == TB_FORLOOP_ACCUM_MAX_OP:
+        return "tb_forloop_accum_max_op"
     elif op_type == TB_FORLOOP_ACCUM_LAST_OP:
         return "tb_forloop_accum_last_op"
     elif op_type == TB_CUSTOMIZED_OP:
@@ -283,10 +301,12 @@ def convert_dtype_to_ctype(type : dtype):
         return DT_BFLOAT16
     elif type.is_fp32():
         return DT_FLOAT32
+    elif type.is_int64():
+        return DT_INT64
     elif type.is_fp64():
         return DT_DOUBLE
     else:
-        return DT_UNKNOWN
+        raise RuntimeError(f"Unsupported dtype: {dtype}")
 
 def convert_dtype_to_torch_type(type : dtype):
     if type.is_int8():
@@ -299,6 +319,8 @@ def convert_dtype_to_torch_type(type : dtype):
         return torch.bfloat16
     elif type.is_fp32():
         return torch.float32
+    elif type.is_int64():
+        return torch.int64
     elif type.is_fp64():
         return torch.float64
     else:
@@ -319,6 +341,25 @@ def convert_ctype_to_dtype(type):
         return float64
     else:
         return None
+
+def convert_torch_type_to_dtype(type):
+    if type is torch.int8:
+        return int8
+    elif type is torch.uint16:
+        return uint16
+    elif type is torch.float16:
+        return float16
+    elif type is torch.bfloat16:
+        return bfloat16
+    elif type is torch.float32:
+        return float32
+    elif type is torch.int64:
+        return int64
+    elif type is torch.float64:
+        return float64
+    else:
+        raise RuntimeError(f"Unsupported dtype: {type}")
+
 
 def string_to_tbepilogue(epilogue):
     if epilogue is None:
@@ -343,6 +384,15 @@ def string_to_accum_optype(acc):
     else:
         assert False, "Unsupported accum optype"
         return None
+
+def string_to_accum_rescale_optype(acc):
+     if acc is None:
+         return TB_FORLOOP_ACCUM_NO_RED_RESCALE_OP
+     elif acc == "sum":
+         return TB_FORLOOP_ACCUM_RED_LD_SUM_RESCALE_OP
+     else:
+         assert False, "Unsupported accum rescale optype"
+         return None
 
 cdef class DTensor:
     cdef CppDTensor* c_ptr # Hold a Tensor instance
@@ -619,10 +669,14 @@ cdef class CyTBOutputOp(CyTBOperator):
 cdef class CyKNGraph:
     cdef CppKNGraph *p_kgraph #Hold a CppKNGraph instance
 
-    def __cinit__(self, graph = None):
+    def __cinit__(self, graph = None, bool disable_fingerprint = False):
         cdef unsigned long long ptr
+        cdef dim3 c_gpu_dim
         if graph is None:
-            self.p_kgraph = new CppKNGraph()
+            c_gpu_dim.x = 1
+            c_gpu_dim.y = 1
+            c_gpu_dim.z = 1
+            self.p_kgraph = new CppKNGraph(c_gpu_dim, disable_fingerprint)
         else:
             ptr = ctypes.cast(graph, ctypes.c_void_p).value
             self.p_kgraph = <CppKNGraph*>(ptr)
@@ -696,6 +750,16 @@ cdef class CyKNGraph:
         t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
         return DTensor(t)
 
+    def sqrt(self, DTensor input):
+        cdef CppDTensor* ptr = self.p_kgraph.sqrt(input.c_ptr)
+        t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
+        return DTensor(t)
+
+    def square(self, DTensor input):
+        cdef CppDTensor* ptr = self.p_kgraph.square(input.c_ptr)
+        t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
+        return DTensor(t)
+
     def add(self, DTensor A, DTensor B):
         cdef CppDTensor* ptr = self.p_kgraph.add(A.c_ptr, B.c_ptr)
         t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
@@ -711,14 +775,22 @@ cdef class CyKNGraph:
         t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
         return DTensor(t)
 
+    def pow(self, DTensor A, DTensor B):
+        cdef CppDTensor* ptr = self.p_kgraph.pow(A.c_ptr, B.c_ptr)
+        t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
+        return DTensor(t)
+
     def customized(self, list inputs, CyTBGraph bgraph):
         cdef vector[const CppDTensor*] cinputs
         cinputs.resize(len(inputs))
         cdef DTensor t
         for i in range(len(inputs)):
-            assert(type(inputs[i]) == DTensor)
-            t = inputs[i]
-            cinputs[i] = t.c_ptr
+            if inputs[i] is None:
+                cinputs[i] = NULL
+            else:
+                assert (type(inputs[i]) == DTensor)
+                t = inputs[i]
+                cinputs[i] = t.c_ptr
         cdef CppDTensor* coutputs[1024]
         num_outputs = self.p_kgraph.customized(cinputs, coutputs, bgraph.p_bgraph)
         outputs = list()
@@ -834,6 +906,66 @@ cdef class CyKNGraph:
             dims.append(cdims[i])
         return tuple(dims), tuple(strides)
 
+    # Functions for ersistent kernels
+    def attach_torch_tensor(self, DTensor tensor, torch_tensor, str name):
+        cdef unsigned long long torch_data_ptr = ctypes.cast(torch_tensor.data_ptr(), ctypes.c_void_p).value
+        cdef char* cname = NULL
+        if name is not None:
+            py_byte_string = name.encode('UTF-8')
+            cname = py_byte_string
+        self.p_kgraph.attach_torch_tensor(tensor.c_ptr, <void *>torch_data_ptr, cname)
+
+    def attach_cuda_tensor(self, DTensor tensor, str name):
+        cdef char* cname = NULL
+        if name is not None:
+            py_byte_string = name.encode('UTF-8')
+            cname = py_byte_string
+        self.p_kgraph.attach_cuda_tensor(tensor.c_ptr, cname)
+
+    def attach_nvshmem_tensor(self, DTensor tensor, str name):
+        cdef char* cname = NULL
+        if name is not None:
+            py_byte_string = name.encode('UTF-8')
+            cname = py_byte_string
+        self.p_kgraph.attach_nvshmem_tensor(tensor.c_ptr, cname)
+
+    def fuse_tensors(self, list[DTensor] inputs, int fused_dim, int num_groups, str name):
+        cdef vector[const CppDTensor*] cinputs
+        cinputs.resize(len(inputs))
+        cdef DTensor t
+        for i in range(len(inputs)):
+            assert(type(inputs[i]) == DTensor)
+            t = inputs[i]
+            cinputs[i] = t.c_ptr
+        cdef char* cname = NULL
+        if name is not None:
+            py_byte_string = name.encode('UTF-8')
+            cname = py_byte_string
+        cdef CppDTensor* ptr = self.p_kgraph.fuse_tensors(cinputs, fused_dim, num_groups, cname)
+        output = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
+        return DTensor(output)
+
+    def register_task(self, CyTBGraph bgraph, str task_type, list[int] params):
+        cdef char* cname = NULL
+        if task_type is not None:
+            py_byte_string = task_type.encode('UTF-8')
+            cname = py_byte_string
+        cdef vector[int] cparams
+        cparams.resize(0)
+        if params is not None:
+            cparams.resize(len(params))
+            for i in range(len(params)):
+                cparams[i] = params[i]
+        self.p_kgraph.register_task(cname, cparams)
+
+    def generate_task_graph(self, int num_gpus, int my_gpu_id):
+        cdef TaskGraphResult result = self.p_kgraph.generate_task_graph(num_gpus, my_gpu_id)
+        return {
+            "cuda_code": result.cuda_code.decode("UTF-8"),
+            "json_file": result.json_file.decode("UTF-8"),
+        }
+     
+
 cdef class CyTBGraph:
     cdef CppTBGraph *p_bgraph #Hold a CppTBGraph instance
 
@@ -862,13 +994,16 @@ cdef class CyTBGraph:
             else:
                 assert False, "bgraph must be an integer or ctypes.c_void_p, but got " + str(type(bgraph))
     
-    def new_input(self, DTensor dtensor, tuple input_map, int forloop_dim):
+    def new_input(self, DTensor dtensor, tuple input_map, int forloop_dim, bool store_in_dmem = False):
         assert len(input_map) == 3, "input_map must be of length 3"
         cdef int3 c_input_map
         c_input_map.x = input_map[0]
         c_input_map.y = input_map[1]
         c_input_map.z = input_map[2]
-        cdef CppSTensor* ptr = self.p_bgraph.new_input(dtensor.c_ptr, c_input_map, forloop_dim, SmemRowMajor)
+        cdef CppDTensor* dtensor_cptr = NULL
+        if dtensor is not None:
+            dtensor_cptr = dtensor.c_ptr
+        cdef CppSTensor* ptr = self.p_bgraph.new_input(dtensor_cptr, c_input_map, forloop_dim, SmemRowMajor, store_in_dmem)
         t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
         return STensor(t)
 
@@ -921,6 +1056,11 @@ cdef class CyTBGraph:
         t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
         return STensor(t)
 
+    def mul_scalar(self, STensor A, float scalar):
+        cdef CppSTensor* ptr = self.p_bgraph.mul_scalar(A.c_ptr, scalar)
+        t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
+        return STensor(t)
+
     def add(self, STensor A, STensor B):
         cdef CppSTensor* ptr = self.p_bgraph.add(A.c_ptr, B.c_ptr)
         t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
@@ -936,10 +1076,21 @@ cdef class CyTBGraph:
         t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
         return STensor(t)
 
+    def sub(self, STensor A, STensor B):
+        cdef CppSTensor* ptr = self.p_bgraph.sub(A.c_ptr, B.c_ptr)
+        t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
+        return STensor(t)
+
     def reduction(self, STensor A, int dim):
         cdef CppSTensor* ptr = self.p_bgraph.reduction(A.c_ptr, dim)
         t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
         return STensor(t)
+
+    def reduction_max(self, STensor A, int dim):
+        cdef vector[CppSTensor*] ptr = self.p_bgraph.reduction_max(A.c_ptr, dim)
+        t0 = ctypes.cast(<unsigned long long>ptr[0], ctypes.c_void_p)
+        t1 = ctypes.cast(<unsigned long long>ptr[1], ctypes.c_void_p)
+        return STensor(t0), STensor(t1)
 
     def rms_norm(self, STensor A):
         cdef CppSTensor* ptr = self.p_bgraph.rms_norm(A.c_ptr)
@@ -954,6 +1105,17 @@ cdef class CyTBGraph:
     def forloop_accum(self, STensor A, str acc):
         optype = string_to_accum_optype(acc)
         cdef CppSTensor* ptr = self.p_bgraph.forloop_accum(A.c_ptr, optype)
+        t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
+        return STensor(t)
+
+    def forloop_accum_rescale(self, STensor A, STensor B, str acc):
+        optype = string_to_accum_rescale_optype(acc)
+        cdef CppSTensor* ptr = self.p_bgraph.forloop_accum_rescale(A.c_ptr, B.c_ptr, optype)
+        t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
+        return STensor(t)
+
+    def forloop_accum_max(self, STensor A):
+        cdef CppSTensor* ptr = self.p_bgraph.forloop_accum_max(A.c_ptr)
         t = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
         return STensor(t)
 
@@ -979,7 +1141,7 @@ cdef class CyTBGraph:
                 operators.append(CyTBOperator(ptr))
             return operators
 
-def search(CyKNGraph input_graph, *, int max_num_new_graphs = 1024, list imaps = None, list omaps = None, list griddims = None, list blockdims = None, list fmaps = None, list franges = None, str previous_checkpoint = None, bool verbose, str default_config = None):
+def search(CyKNGraph input_graph, *, str backend = "cuda", int max_num_new_graphs = 1024, list imaps = None, list omaps = None, list griddims = None, list blockdims = None, list fmaps = None, list franges = None, str previous_checkpoint = None, bool verbose, str default_config = None, bool is_formal_verified):
     # set cimaps
     cdef vector[MInt3] cimaps
     cimaps.resize(0)
@@ -1037,17 +1199,24 @@ def search(CyKNGraph input_graph, *, int max_num_new_graphs = 1024, list imaps =
     cdef CppKNGraph* cnewgraphs[1024]
     # set verbose
     cverbose = verbose
+    # set backend
+    cdef char* cbackend = NULL
+    if backend is not None:
+        py_byte_string_backend = backend.encode('UTF-8')
+        cbackend = py_byte_string_backend
     # set previous_checkpoint
     cdef char* cprevious_checkpoint = NULL
     if previous_checkpoint is not None:
-        py_byte_string = previous_checkpoint.encode('UTF-8')
-        cprevious_checkpoint = py_byte_string
+        py_byte_string_cp = previous_checkpoint.encode('UTF-8')
+        cprevious_checkpoint = py_byte_string_cp
     # convert config description
     cdef char* cconfig = NULL
     if default_config is not None:
-        py_byte_string = default_config.encode('UTF-8')
-        cconfig = py_byte_string
-    num = cython_search(input_graph.p_kgraph, max_num_new_graphs, cnewgraphs, cimaps, comaps, cgriddims, cblockdims, cfmaps, cfranges, cprevious_checkpoint, cverbose, cconfig)
+        py_byte_string_config = default_config.encode('UTF-8')
+        cconfig = py_byte_string_config
+    # set is_formal_verified
+    cis_formal_verifed = is_formal_verified
+    num = cython_search(input_graph.p_kgraph, cbackend, max_num_new_graphs, cnewgraphs, cimaps, comaps, cgriddims, cblockdims, cfmaps, cfranges, cprevious_checkpoint, cverbose, cconfig, cis_formal_verifed)
     new_graphs = list()
     for i in range(num):
         ptr = ctypes.cast(<unsigned long long>cnewgraphs[i], ctypes.c_void_p)
@@ -1057,11 +1226,12 @@ def search(CyKNGraph input_graph, *, int max_num_new_graphs = 1024, list imaps =
 
 # Generate CUDA program for a uGraph
 # Return (CUDA code, buffer size in bytes)
-def generate_cuda_program(CyKNGraph input_graph, *, int target_cc, list input_strides, int num_warp_groups = -1, int pipeline_stages = -1, bool profiling = False) -> dict:
+def generate_cuda_program(CyKNGraph input_graph, *, int target_cc, list input_strides, int num_warp_groups = -1, int pipeline_stages = -1, bool profiling = False, bool enable_online_softmax = False) -> dict:
     # Set transpiler_config
     cdef TranspilerConfig transpiler_config
     transpiler_config.target_cc = target_cc
     transpiler_config.profiling = profiling
+    transpiler_config.enable_online_softmax = enable_online_softmax
 
     if num_warp_groups != -1 and pipeline_stages != -1:
         transpiler_config.num_producer_wgs = 1;
@@ -1131,3 +1301,13 @@ def generate_triton_program(CyKNGraph input_graph, *, int target_cc) -> dict:
 
 def set_gpu_device_id(gpu_id: int):
     cython_set_gpu_device_id(gpu_id)
+
+def cy_to_json(CyKNGraph input_graph, str filename):
+    cfilename = filename.encode('UTF-8')
+    cython_to_json(input_graph.p_kgraph, cfilename)
+
+def cy_from_json(str filename):
+    cfilename = filename.encode('UTF-8')
+    ptr = cython_from_json(cfilename)
+    graph = ctypes.cast(<unsigned long long>ptr, ctypes.c_void_p)
+    return CyKNGraph(graph)

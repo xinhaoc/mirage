@@ -1,4 +1,4 @@
-/* Copyright 2023 CMU
+/* Copyright 2025 CMU
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,27 +13,17 @@
  * limitations under the License.
  */
 
-#include <cublas_v2.h>
+#pragma once
+#include "../runtime_header.h"
+#include "bfloat16.h"
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <iostream>
 
-namespace mirage {
-namespace simulator {
-class Simulator {
-private:
-  static Simulator *singleton;
-  Simulator();
-  ~Simulator();
-  off_t offset;
-  size_t work_space_size;
-  void *base_ptr;
+constexpr int NUM_THREADS = 128;
+constexpr int NUM_THREADS_PER_WARP = 32;
+constexpr int NUM_WARPS = 4;
+constexpr int WARPGROUP_WARPS = 4;
 
-public:
-  static Simulator *get_instance();
-  void *allocate(size_t size_in_bytes);
-  void free_all();
-
-public:
-  cublasHandle_t blas;
-};
-
-} // namespace simulator
-} // namespace mirage
+constexpr float inf = 5e4;

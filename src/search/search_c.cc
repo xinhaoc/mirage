@@ -1,5 +1,6 @@
 #include "mirage/search/search_c.h"
 #include "mirage/kernel/customized.h"
+#include "mirage/kernel/graph.h"
 #include "mirage/search/dim_strategy.h"
 #include "mirage/search/op_utils.h"
 #include "mirage/search/search.h"
@@ -12,6 +13,7 @@ namespace mirage {
 namespace search_c {
 
 int cython_search(mirage::kernel::Graph const *input_graph,
+                  char const *backend,
                   int max_num_graphs,
                   mirage::kernel::Graph **new_graphs,
                   std::vector<MInt3> imap_to_explore,
@@ -22,7 +24,8 @@ int cython_search(mirage::kernel::Graph const *input_graph,
                   std::vector<int> frange_to_explore,
                   char const *filename,
                   bool verbose,
-                  char const *default_config) {
+                  char const *default_config,
+                  bool is_formal_verified) {
   if (filename) {
     std::ifstream generated_graphs_file(filename, std::ifstream::binary);
     if (generated_graphs_file) {
@@ -48,6 +51,9 @@ int cython_search(mirage::kernel::Graph const *input_graph,
         config.enable_concat_matmul_transformation();
       } else if (!strcmp(default_config, "mlp")) {
       }
+    }
+    if (is_formal_verified) {
+      config.verifier_type = search::VerifierType::FORMAL_VERIFIER;
     }
     // Customized imaps
     if (imap_to_explore.size() > 0) {
@@ -107,6 +113,23 @@ int cython_search(mirage::kernel::Graph const *input_graph,
     }
     return num;
   }
+}
+
+void cython_to_json(mirage::kernel::Graph const *input_graph,
+                    char const *filename) {
+  json j;
+  to_json(j, *input_graph);
+  std::ofstream ofs(filename);
+  ofs << j;
+}
+
+mirage::kernel::Graph *cython_from_json(char const *filename) {
+  std::ifstream graph_file(filename, std::ifstream::binary);
+  json j;
+  graph_file >> j;
+  mirage::kernel::Graph *new_graph = new mirage::kernel::Graph();
+  from_json(j, *new_graph);
+  return new_graph;
 }
 
 } // namespace search_c
