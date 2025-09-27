@@ -58,14 +58,15 @@ template <typename DataType_,
           int BATCH_SIZE_,
           int OUTPUT_SIZE_,
           int REDUCTION_SIZE_,
-          class GmemLayoutATag,
-          class GmemLayoutBTag,
-          class GmemLayputCTag,
-          class GmemLayoutDTag,
+          class GmemLayoutATag_,
+          class GmemLayoutBTag_,
+          class GmemLayputCTag_,
+          class GmemLayoutDTag_,
           int NUM_WARPS,
-          int M,
-          int N,
-          int K,
+          int M_,
+          int N_,
+          int K_,
+          typename ProblemShape_,
           int O_STRIDE = OUTPUT_SIZE_,
           int NUM_STAGES_ = 3>
 struct MMAKernelTraits {
@@ -73,7 +74,21 @@ struct MMAKernelTraits {
   using DTypeAccum = float;
 
   // tile size
-  using TileShape_MNK = Shape<Int<M>, Int<N>, Int<K>>;
+  using TileShape_MNK = Shape<Int<M_>, Int<N_>, Int<K_>>;
+  using GmemLayoutATag = GmemLayoutATag_;
+  using GmemLayoutBTag = GmemLayoutBTag_;
+  using GmemLayoutCTag = GmemLayputCTag_;
+  using GmemLayoutDTag = GmemLayoutDTag_;
+  using ProblemShape = ProblemShape_;
+
+  using StrideA = cutlass::detail::TagToStrideA_t<GmemLayoutATag>;
+  using StrideB = cutlass::detail::TagToStrideB_t<GmemLayoutATag>;
+  using StrideC = cutlass::detail::TagToStrideC_t<GmemLayoutCTag>;
+  using StrideD = cutlass::detail::TagToStrideC_t<GmemLayoutDTag>;
+
+  static constexpr int M = M_;
+  static constexpr int N = N_;
+  static constexpr int K = K_;
 
   static constexpr int NUM_THREADS = NUM_WARPS * cutlass::NumThreadsPerWarp;
   static constexpr int NUM_PRODUCER_THREADS = cutlass::NumThreadsPerWarp;
@@ -87,10 +102,10 @@ struct MMAKernelTraits {
   static constexpr int FragmentSize = 1;
   // epilogue
   using ThreadOp = cutlass::epilogue::thread::LinearCombination<
-      DTypeAccum,
+      DataType,
       FragmentSize,
       DTypeAccum,
-      DataType,
+      DTypeAccum,
       cutlass::epilogue::thread::ScaleType::Default,
       cutlass::FloatRoundStyle::round_to_nearest,
       DTypeAccum>;
@@ -138,6 +153,23 @@ struct MMAKernelTraits {
                DTypeAccum,
                decltype(cute::get<0>(TileShape_MNK{})),
                decltype(cute::get<1>(TileShape_MNK{}))>());
+
+  using SmemLayoutA = decltype(tile_to_shape(
+      SmemLayoutAtomA{},
+      make_shape(shape<0>(TileShape_MNK{}),
+                 shape<2>(TileShape_MNK{}),
+                 Int<NUM_STAGES>{}),
+      cute::conditional_t<::cutlass::gemm::detail::is_major<0, StrideA>(),
+                          Step<_2, _1, _3>,
+                          Step<_1, _2, _3>>{}));
+  using SmemLayoutB = decltype(tile_to_shape(
+      SmemLayoutAtomB{},
+      make_shape(shape<1>(TileShape_MNK{}),
+                 shape<2>(TileShape_MNK{}),
+                 Int<NUM_STAGES>{}),
+      cute::conditional_t<::cutlass::gemm::detail::is_major<0, StrideB>(),
+                          Step<_2, _1, _3>,
+                          Step<_1, _2, _3>>{}));
 
   using MainloopPipeline = cutlass::PipelineTmaAsync<NUM_STAGES>;
   using PipelineState = typename cutlass::PipelineState<NUM_STAGES>;

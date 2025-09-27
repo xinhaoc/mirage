@@ -39,6 +39,9 @@
 #include "kernel_traits.cuh"
 #include "mma_tma_ws_mainloop.cuh"
 
+#include <torch/extension.h>
+#include <cuda_runtime.h>
+
 template <typename CollectiveMainloop,
           typename CollectiveEpilogue,
           typename Ktraits>
@@ -53,15 +56,14 @@ __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_wrapper(
                                                       epilogue_params);
 }
 
-template <int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE>
+template <typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE>
 void launch_linear_hopper_cute(void *input_ptr,
                                void *weight_ptr,
                                void *residual_ptr,
-                               void *output_ptr,
-                               cudaStream_t stream) {
+                               void *output_ptr) {
 
   using namespace cute;
-  using T = bfloat16_t;
+
   using KernelTraits =
       kernel::MMAKernelTraits<T,
                               BATCH_SIZE,
@@ -81,14 +83,11 @@ void launch_linear_hopper_cute(void *input_ptr,
 
   auto problem_shape = {BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE};
 
-  using StrideA =
-      cutlass::detail::TagToStrideA_t<typename KernelTraits::GmemLayoutATag>;
-  using StrideB =
-      cutlass::detail::TagToStrideB_t<typename KernelTraits::GmemLayoutATag>;
-  using StrideC =
-      cutlass::detail::TagToStrideC_t<typename KernelTraits::GmemLayoutCTag>;
-  using StrideD =
-      cutlass::detail::TagToStrideC_t<typename KernelTraits::GmemLayoutDTag>;
+  using StrideA = typename KernelTraits::StrideA;
+  using StrideB = typename KernelTraits::StrideB;
+  using StrideC = typename KernelTraits::StrideC;
+  using StrideD = typename KernelTraits::StrideD;
+
   StrideA stride_A = cutlass::make_cute_packed_stride(
       StrideA{}, {KernelTraits::M, KernelTraits::K, 1});
   StrideB stride_B = cutlass::make_cute_packed_stride(
@@ -106,16 +105,16 @@ void launch_linear_hopper_cute(void *input_ptr,
   };
 
   typename Epilogue::Arguments epilogue_args{
-      static_cast<T const *>(residual_ptr), // ptr_C
+      static_cast<float const *>(residual_ptr), // ptr_C
       stride_C,                             // dC
-      static_cast<T *>(output_ptr),         // ptr_D
+      static_cast<float *>(output_ptr),         // ptr_D
       stride_C,                             // dD
   };
 
   typename Mainloop::Params mainloop_params =
       Mainloop::to_underlying_arguments(problem_shape, mainloop_args);
   typename Epilogue::Params epilogue_params =
-      Epilogue::to_underlying_arguments();
+      Epilogue::to_underlying_arguments(problem_shape, epilogue_params);
 
   dim3 grid(1);
   dim3 block(256);
@@ -124,3 +123,28 @@ void launch_linear_hopper_cute(void *input_ptr,
   linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue, KernelTraits>
       <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params);
 }
+
+void linear_kernel(torch::Tensor input,
+                     torch::Tensor weight,
+                     torch::Tensor residual,
+                     torch::Tensor output) {
+
+    void *input_ptr = input.data_ptr();
+    void *weight_ptr = weight.data_ptr();
+    void *residual_ptr = residual.data_ptr();
+    void *output_ptr = output.data_ptr();
+
+    launch_linear_hopper_cute<cutlass::bfloat16_t, 64, 4096, 4096>(input_ptr,
+                                           weight_ptr,
+                                           residual_ptr,
+                                           output_ptr);
+
+    cudaError_t err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+      printf("CUDA kernel launch error: %s\n", cudaGetErrorString(err));
+    }
+  }
+
+  PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def("linear", &linear_kernel, "Linear kernel");
+  }

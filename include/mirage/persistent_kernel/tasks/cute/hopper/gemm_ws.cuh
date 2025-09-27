@@ -37,7 +37,7 @@ namespace kernel {
 
 using namespace cute;
 
-template <class CollectiveMainloop, class CollectiveEpilogue, class Ktraits>
+template <class CollectiveMainloop, class CollectiveEpilogue>
 CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
     typename CollectiveMainloop::Params const mainloop_params,
     typename CollectiveEpilogue::Params const epilogue_params) {
@@ -79,16 +79,17 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
   using ClusterShape = typename CollectiveMainloop::ClusterShape;
   using TiledMma = typename CollectiveMainloop::TiledMma;
   using TileShape = typename CollectiveMainloop::TileShape;
+  // using PipelineState = typename CollectiveMainloop::PipelineState;
 
   // Kernel level shared memory storage
   SharedStorage &shared_storage = *reinterpret_cast<SharedStorage *>(smem);
 
   int thread_idx = int(threadIdx.x);
-  int lane_idx = canonical_lane_idx();
-  int warp_idx = canonical_warp_idx_sync();
-  int warp_idx_in_warp_group = warp_idx % NumWarpsPerWarpGroup;
-  int warp_group_thread_idx = thread_idx % NumThreadsPerWarpGroup;
-  auto warp_group_role = WarpGroupRole(canonical_warp_group_idx());
+  int lane_idx = cutlass::canonical_lane_idx();
+  int warp_idx = cutlass::canonical_warp_idx_sync();
+  int warp_idx_in_warp_group = warp_idx % cutlass::NumWarpsPerWarpGroup;
+  int warp_group_thread_idx = thread_idx % cutlass::NumThreadsPerWarpGroup;
+  auto warp_group_role = WarpGroupRole(cutlass::canonical_warp_group_idx());
   auto producer_warp_role = ProducerWarpRole(warp_idx_in_warp_group);
   int lane_predicate = cute::elect_one_sync();
   uint32_t block_rank_in_cluster = cute::block_rank_in_cluster();
@@ -110,7 +111,7 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
     mainloop_pipeline_params.role = MainloopPipeline::ThreadCategory::Consumer;
   }
   mainloop_pipeline_params.is_leader = warp_group_thread_idx == 0;
-  mainloop_pipeline_params.num_consumers = NumThreadsPerWarpGroup;
+  mainloop_pipeline_params.num_consumers = cutlass::NumThreadsPerWarpGroup;
   mainloop_pipeline_params.transaction_bytes =
       mainloop_params.tma_transaction_bytes;
   MainloopPipeline mainloop_pipeline(shared_storage.pipelines.mainloop,
@@ -128,8 +129,8 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
     epi_load_pipeline_params.role = EpiLoadPipeline::ThreadCategory::Consumer;
   }
   epi_load_pipeline_params.dst_blockid = cute::block_rank_in_cluster();
-  epi_load_pipeline_params.producer_arv_count = NumThreadsPerWarp;
-  epi_load_pipeline_params.consumer_arv_count = NumThreadsPerWarpGroup;
+  epi_load_pipeline_params.producer_arv_count = cutlass::NumThreadsPerWarp;
+  epi_load_pipeline_params.consumer_arv_count = cutlass::NumThreadsPerWarpGroup;
   if constexpr (CollectiveEpilogue::RequiresTransactionBytes) {
     epi_load_pipeline_params.transaction_bytes =
         epilogue_params.tma_transaction_bytes;
@@ -151,27 +152,12 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
 
   // For the DMA Load (producer) we start with an opposite phase
   // i.e., we skip all waits since we know that the buffer is indeed empty
-  PipelineState mainloop_pipe_producer_state =
+  cutlass::PipelineState mainloop_pipe_producer_state =
       cutlass::make_producer_start_state<MainloopPipeline>();
-  PipelineState epi_load_pipe_producer_state =
+  cutlass::PipelineState epi_load_pipe_producer_state =
       cutlass::make_producer_start_state<EpiLoadPipeline>();
-  PipelineState epi_store_pipe_producer_state =
+  cutlass::PipelineState epi_store_pipe_producer_state =
       cutlass::make_producer_start_state<EpiStorePipeline>();
-
-  // // Preconditions only valid for Gemm
-  // static_assert(IsConvProblemShape || cute::rank(StrideA{}) == 3, "StrideA
-  // must be rank-3: [M, K, L]. If batch mode is not needed, set L stride to
-  // Int<0>."); static_assert(IsConvProblemShape || cute::rank(StrideB{}) == 3,
-  // "StrideB must be rank-3: [N, K, L]. If batch mode is not needed, set L
-  // stride to Int<0>."); static_assert(IsConvProblemShape ||
-  // cute::rank(StrideC{}) == 3, "StrideC must be rank-3: [M, N, L]. If batch
-  // mode is not needed, set L stride to Int<0>.");
-  // static_assert(IsConvProblemShape || cute::rank(StrideD{}) == 3, "StrideD
-  // must be rank-3: [M, N, L]. If batch mode is not needed, set L stride to
-  // Int<0>.");
-
-  // Get the appropriate blocks for this thread block -- potential for thread
-  // block locality
   auto blk_shape = TileShape{}; // (BLK_M,BLK_N,BLK_K)
   TiledMma tiled_mma;
 
@@ -179,8 +165,7 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
       append<4>(mainloop_params.problem_shape, cute::Int<1>{});
 
   CollectiveMainloop collective_mainloop;
-  CollectiveEpilogue collective_epilogue(epilogue_params,
-                                         shared_storage.tensors.epilogue);
+  CollectiveEpilogue collective_epilogue(epilogue_params);
 
   auto load_inputs =
       collective_mainloop.load_init(problem_shape_MNKL, mainloop_params);
@@ -241,22 +226,22 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
       collective_mainloop.load_tail(mainloop_pipeline,
                                     mainloop_pipe_producer_state);
 
-      if (collective_epilogue.is_producer_load_needed()) {
-        printf("Producer warp group %d loading epilogue tensors\n", 0);
-        // Ensure warp is converged before issuing epilogue loads
-        __syncwarp();
-        epi_load_pipe_producer_state =
-            collective_epilogue.load(epi_load_pipeline,
-                                     epi_load_pipe_producer_state,
-                                     problem_shape_MNKL,
-                                     blk_shape,
-                                     blk_coord,
-                                     tiled_mma,
-                                     lane_idx,
-                                     shared_storage.tensors.epilogue);
-        collective_epilogue.load_tail(epi_load_pipeline,
-                                      epi_load_pipe_producer_state);
-      }
+      // if (collective_epilogue.is_producer_load_needed()) {
+      //   printf("Producer warp group %d loading epilogue tensors\n", 0);
+      //   // Ensure warp is converged before issuing epilogue loads
+      //   __syncwarp();
+      //   epi_load_pipe_producer_state =
+      //       collective_epilogue.load(epi_load_pipeline,
+      //                                epi_load_pipe_producer_state,
+      //                                problem_shape_MNKL,
+      //                                blk_shape,
+      //                                blk_coord,
+      //                                tiled_mma,
+      //                                lane_idx,
+      //                                shared_storage.tensors.epilogue);
+      //   collective_epilogue.load_tail(epi_load_pipeline,
+      //                                 epi_load_pipe_producer_state);
+      // }
     }
   } else if (warp_group_role == WarpGroupRole::Consumer) {
     Tensor accumulators = partition_fragment_C(
@@ -295,10 +280,10 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
                                   warp_group_thread_idx,
                                   shared_storage.tensors.epilogue);
 
-    collective_epilogue.store_tail(epi_load_pipeline,
-                                   epi_load_pipe_consumer_state_next,
-                                   epi_store_pipeline,
-                                   epi_store_pipe_producer_state_next);
+    // collective_epilogue.store_tail(epi_load_pipeline,
+    //                                epi_load_pipe_consumer_state_next,
+    //                                epi_store_pipeline,
+    //                                epi_store_pipe_producer_state_next);
   }
 }
 // };

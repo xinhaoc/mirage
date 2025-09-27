@@ -26,7 +26,6 @@
 #include "cute/arch/copy_sm90.hpp"
 #include "cute/atom/mma_atom.hpp"
 #include "cute/numeric/arithmetic_tuple.hpp"
-#include "cute/tensor_predicate.hpp"
 #include "kernel_traits.cuh"
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -51,7 +50,7 @@ struct CollectiveMainloop {
   using StrideA = typename KernelTraits::StrideA;
   using StrideB = typename KernelTraits::StrideB;
 
-  using TileShape = typename KernelTraits::TilesTileShape_MNK;
+  using TileShape = typename KernelTraits::TileShape_MNK;
   using ClusterShape = typename KernelTraits::ClusterShape_MNK;
 
   using MainloopPipeline = typename KernelTraits::MainloopPipeline;
@@ -59,7 +58,23 @@ struct CollectiveMainloop {
 
   using TiledMma = typename KernelTraits::TiledMma;
 
-  using TensorStorage = typename KernelTraits::SharedStorageMMA::TensorStorage;
+  using ProblemShape = typename KernelTraits::ProblemShape;
+
+  struct SharedStorage {
+    struct TensorStorage : cute::aligned_struct<128, _0> {
+      cute::array_aligned<typename TiledMma::ValTypeA,
+                          cute::cosize_v<SmemLayoutA>>
+          smem_A;
+      cute::array_aligned<typename TiledMma::ValTypeB,
+                          cute::cosize_v<SmemLayoutB>>
+          smem_B;
+    } tensors;
+
+    using PipelineStorage = typename MainloopPipeline::SharedStorage;
+    PipelineStorage pipeline;
+  };
+  using TensorStorage = typename SharedStorage::TensorStorage;
+  using PipelineStorage = typename SharedStorage::PipelineStorage;
 
   static constexpr uint32_t TmaTransactionBytesMK = cutlass::bits_to_bytes(
       size<0>(SmemLayoutA{}) * size<1>(SmemLayoutA{}) *
@@ -72,9 +87,9 @@ struct CollectiveMainloop {
 
   // Host side kernel arguments
   struct Arguments {
-    DTypeAccum const *ptr_A;
+    DataType const *ptr_A;
     StrideA dA;
-    DTypeAccum const *ptr_B;
+    DataType const *ptr_B;
     StrideB dB;
   };
 
@@ -103,6 +118,7 @@ struct CollectiveMainloop {
     uint32_t tma_transaction_bytes = TmaTransactionBytes;
     uint32_t tma_transaction_bytes_mk = TmaTransactionBytesMK;
     uint32_t tma_transaction_bytes_nk = TmaTransactionBytesNK;
+    ProblemShape problem_shape;
   };
 
   //
@@ -147,7 +163,8 @@ struct CollectiveMainloop {
             tma_load_b,
             transaction_bytes,
             transaction_bytes_mk,
-            transaction_bytes_nk};
+            transaction_bytes_nk,
+            problem_shape};
   }
 
   /// Issue Tma Descriptor Prefetch -- ideally from a single thread for best
