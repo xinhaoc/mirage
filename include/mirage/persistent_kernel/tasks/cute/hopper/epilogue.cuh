@@ -28,7 +28,7 @@ namespace kernel {
 template <typename Ktraits>
 struct CollectiveEpilogue {
 
-  using DataTypeC = typename Ktraits::DTypeAccum;
+  using DataTypeC = typename Ktraits::DataType;
   using StrideC = typename Ktraits::StrideC;
   using StrideD = typename Ktraits::StrideD;
   using ThreadEpilogueOp = typename Ktraits::ThreadOp;
@@ -171,28 +171,32 @@ struct CollectiveEpilogue {
     using FragDType = remove_cvref_t<decltype(tCgD(0))>;
 
     // source is needed
-    if (epilogue_op.is_source_needed()) {
-      CUTLASS_PRAGMA_UNROLL
-      for (int i = 0; i < size(accumulators); ++i) {
-        FragCType fragC;
-        bool pred = elem_less(tCcD(i), residue_tCcD);
-        cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
-            fragC, &tCgC(i), pred);
-        FragDType fragD = epilogue_op(accumulators(i), fragC);
-        cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
-            fragD, &tCgD(i), pred);
-      }
-    }
+    // if (epilogue_op.is_source_needed()) {
+    //   CUTLASS_PRAGMA_UNROLL
+    //   for (int i = 0; i < size(accumulators); ++i) {
+    //     FragCType fragC;
+    //     bool pred = elem_less(tCcD(i), residue_tCcD);
+    //     cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
+    //         fragC, &tCgC(i), pred);
+    //     FragDType fragD = epilogue_op(accumulators(i), fragC);
+    //     cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
+    //         fragD, &tCgD(i), pred);
+    //   }
+    // }
     // source is not needed, avoid load
-    else {
-      // printf("xxxxxxxxxxxxxx\n");
-      CUTLASS_PRAGMA_UNROLL
-      for (int i = 0; i < size(accumulators); ++i) {
-        bool pred = elem_less(tCcD(i), residue_tCcD);
-        FragDType fragD = epilogue_op(accumulators(i));
-        cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
-            fragD, &tCgD(i), pred);
-      }
+    // else {
+
+    CUTLASS_PRAGMA_UNROLL
+    for (int i = 0; i < size(accumulators); ++i) {
+      FragCType fragC;
+      bool pred = elem_less(tCcD(i), residue_tCcD);
+      cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
+          fragC, &tCgC(i), pred);
+      FragDType fragD = epilogue_op(accumulators(i), fragC);
+
+      cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
+          fragD, &tCgD(i), pred);
+      // }
     }
   }
 
@@ -215,10 +219,7 @@ struct CollectiveEpilogue {
                             TensorStorage &shared_tensors,
                             int subtile_index = -1) {
     using namespace cute;
-    if (threadIdx.x == 0) {
-      printf("Epilogue store waiting doneqwe12331edqwsd\n");
-    }
-    // printf("Epilogue store waiting doneqwe12331edqwsd\n");
+
     constexpr int BLK_M_RANK = cute::rank<0>(cta_tile_mnk);
     auto m_max_coord =
         unwrap(cute::transform(make_seq<BLK_M_RANK>{}, [&](auto i) {

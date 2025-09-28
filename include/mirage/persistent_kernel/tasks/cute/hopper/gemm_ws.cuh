@@ -39,8 +39,8 @@ using namespace cute;
 
 template <class CollectiveMainloop, class CollectiveEpilogue>
 CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
-    typename CollectiveMainloop::Params const mainloop_params,
-    typename CollectiveEpilogue::Params const epilogue_params) {
+    typename CollectiveMainloop::Params const &mainloop_params,
+    typename CollectiveEpilogue::Params const &epilogue_params) {
 
   struct SharedStorage {
     // Mainloop and epilogue don't use smem concurrently since kernel is
@@ -110,6 +110,7 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
   if (warp_group_role == WarpGroupRole::Consumer) {
     mainloop_pipeline_params.role = MainloopPipeline::ThreadCategory::Consumer;
   }
+
   mainloop_pipeline_params.is_leader = warp_group_thread_idx == 0;
   mainloop_pipeline_params.num_consumers = cutlass::NumThreadsPerWarpGroup;
   mainloop_pipeline_params.transaction_bytes =
@@ -137,13 +138,11 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
   }
   EpiLoadPipeline epi_load_pipeline(shared_storage.pipelines.epi_load,
                                     epi_load_pipeline_params);
-
   // Epilogue Store pipeline
   using EpiStorePipeline = typename CollectiveEpilogue::StorePipeline;
   typename EpiStorePipeline::Params epi_store_pipeline_params;
   epi_store_pipeline_params.always_wait = true;
   EpiStorePipeline epi_store_pipeline(epi_store_pipeline_params);
-
   // Initialize starting pipeline states for the collectives
   // Epilogue store pipe is producer-only (consumer is TMA unit, waits via
   // scoreboarding)
@@ -204,7 +203,6 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
   __syncthreads();
 
   if (warp_group_role == WarpGroupRole::Producer) {
-    // printf("gemm\n");
     if (producer_warp_role == ProducerWarpRole::MainloopEpilogue) {
       // Ensure that the prefetched kernel does not touch
       // unflushed global memory prior to this instruction
@@ -225,23 +223,6 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
       // epilogue load
       collective_mainloop.load_tail(mainloop_pipeline,
                                     mainloop_pipe_producer_state);
-
-      // if (collective_epilogue.is_producer_load_needed()) {
-      //   printf("Producer warp group %d loading epilogue tensors\n", 0);
-      //   // Ensure warp is converged before issuing epilogue loads
-      //   __syncwarp();
-      //   epi_load_pipe_producer_state =
-      //       collective_epilogue.load(epi_load_pipeline,
-      //                                epi_load_pipe_producer_state,
-      //                                problem_shape_MNKL,
-      //                                blk_shape,
-      //                                blk_coord,
-      //                                tiled_mma,
-      //                                lane_idx,
-      //                                shared_storage.tensors.epilogue);
-      //   collective_epilogue.load_tail(epi_load_pipeline,
-      //                                 epi_load_pipe_producer_state);
-      // }
     }
   } else if (warp_group_role == WarpGroupRole::Consumer) {
     Tensor accumulators = partition_fragment_C(

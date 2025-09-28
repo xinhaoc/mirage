@@ -135,6 +135,8 @@ struct CollectiveMainloop {
     auto problem_shape_MNKL = append<4>(problem_shape, 1);
     auto [M, N, K, L] = problem_shape_MNKL;
 
+    print(problem_shape_MNKL);
+
     auto ptr_A = reinterpret_cast<DataType const *>(args.ptr_A);
     auto ptr_B = reinterpret_cast<DataType const *>(args.ptr_B);
 
@@ -255,6 +257,7 @@ struct CollectiveMainloop {
             pipeline.producer_get_barrier(smem_pipe_write);
 
         int write_stage = smem_pipe_write.index();
+        // printf("producer really start\n");
         copy(mainloop_params.tma_load_a.with(*tma_barrier, mcast_mask_a),
              tAgA(_, _, _, *k_tile_iter),
              tAsA(_, _, _, write_stage));
@@ -295,7 +298,6 @@ struct CollectiveMainloop {
                             SmemLayoutA{}); // (BLK_M,BLK_K,PIPE)
     Tensor sB = make_tensor(make_smem_ptr(shared_tensors.smem_B.data()),
                             SmemLayoutB{}); // (BLK_N,BLK_K,PIPE)
-
     constexpr int MmaWarpGroups =
         size(TiledMma{}) / cutlass::NumThreadsPerWarpGroup;
     Layout warp_group_thread_layout = make_layout(
@@ -342,6 +344,7 @@ struct CollectiveMainloop {
       // WAIT on smem_pipe_read until its data are available (phase bit flips
       // from rdPhaseBit value)
       auto barrier_token = pipeline.consumer_try_wait(smem_pipe_read);
+
       pipeline.consumer_wait(smem_pipe_read, barrier_token);
 
       int read_stage = smem_pipe_read.index();

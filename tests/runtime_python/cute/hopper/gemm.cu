@@ -39,21 +39,18 @@
 #include "kernel_traits.cuh"
 #include "mma_tma_ws_mainloop.cuh"
 
-#include <torch/extension.h>
 #include <cuda_runtime.h>
+#include <torch/extension.h>
 
-template <typename CollectiveMainloop,
-          typename CollectiveEpilogue,
-          typename Ktraits>
+template <typename CollectiveMainloop, typename CollectiveEpilogue>
 __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_wrapper(
     CUTE_GRID_CONSTANT
     typename CollectiveMainloop::Params const mainloop_params,
     CUTE_GRID_CONSTANT
     typename CollectiveEpilogue::Params const epilogue_params) {
   kernel::gemm_kernel_tma_warp_specialized<CollectiveMainloop,
-                                           CollectiveEpilogue,
-                                           Ktraits>()(mainloop_params,
-                                                      epilogue_params);
+                                           CollectiveEpilogue>(mainloop_params,
+                                                               epilogue_params);
 }
 
 template <typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE>
@@ -63,39 +60,42 @@ void launch_linear_hopper_cute(void *input_ptr,
                                void *output_ptr) {
 
   using namespace cute;
+  auto problem_shape =
+      Shape<Int<BATCH_SIZE>, Int<OUTPUT_SIZE>, Int<REDUCTION_SIZE>>{};
 
   using KernelTraits =
       kernel::MMAKernelTraits<T,
                               BATCH_SIZE,
                               OUTPUT_SIZE,
                               REDUCTION_SIZE,
-                              cutlass::layout::RowMajor,    // GmemLayoutATag
-                              cutlass::layout::ColumnMajor, // GmemLayoutBTag
-                              cutlass::layout::ColumnMajor, // GmemLayoutCTag
-                              cutlass::layout::ColumnMajor, // GmemLayoutDTag
-                              8,                            // NUM_WARPS
-                              128,                          // M
-                              128,                          // N
-                              32>;                          // K
+                              cutlass::layout::RowMajor, // GmemLayoutATag
+                              cutlass::layout::RowMajor, // GmemLayoutBTag
+                              cutlass::layout::RowMajor, // GmemLayoutCTag
+                              cutlass::layout::RowMajor, // GmemLayoutDTag
+                              8,                         // NUM_WARPS
+                              64,                        // M
+                              16,                        // N
+                              64,                        // K
+                              decltype(problem_shape),
+                              OUTPUT_SIZE, // O_STRIDE
+                              4>;          // NUM_STAGES
 
   using Mainloop = kernel::CollectiveMainloop<KernelTraits>;
   using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;
 
-  auto problem_shape = {BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE};
-
   using StrideA = typename KernelTraits::StrideA;
   using StrideB = typename KernelTraits::StrideB;
   using StrideC = typename KernelTraits::StrideC;
-  using StrideD = typename KernelTraits::StrideD;
+  //   using StrideD = typename KernelTraits::StrideD;
 
   StrideA stride_A = cutlass::make_cute_packed_stride(
-      StrideA{}, {KernelTraits::M, KernelTraits::K, 1});
+      StrideA{}, {KernelTraits::BATCH_SIZE, KernelTraits::REDUCTION_SIZE, 1});
   StrideB stride_B = cutlass::make_cute_packed_stride(
-      StrideB{}, {KernelTraits::N, KernelTraits::K, 1});
+      StrideB{}, {KernelTraits::OUTPUT_SIZE, KernelTraits::REDUCTION_SIZE, 1});
   StrideC stride_C = cutlass::make_cute_packed_stride(
-      StrideC{}, {KernelTraits::M, KernelTraits::N, 1});
-  StrideD stride_D = cutlass::make_cute_packed_stride(
-      StrideD{}, {KernelTraits::M, KernelTraits::N, 1});
+      StrideC{}, {KernelTraits::BATCH_SIZE, KernelTraits::OUTPUT_SIZE, 1});
+  //   StrideD stride_D = cutlass::make_cute_packed_stride(
+  //       StrideD{}, {KernelTraits::M, KernelTraits::N, 1});
 
   typename Mainloop::Arguments mainloop_args{
       static_cast<T const *>(input_ptr),  // ptr_A
@@ -105,46 +105,99 @@ void launch_linear_hopper_cute(void *input_ptr,
   };
 
   typename Epilogue::Arguments epilogue_args{
-      static_cast<float const *>(residual_ptr), // ptr_C
+      static_cast<T const *>(residual_ptr), // ptr_C
       stride_C,                             // dC
-      static_cast<float *>(output_ptr),         // ptr_D
+      static_cast<T *>(output_ptr),         // ptr_D
       stride_C,                             // dD
+      {1.0f, 1.0f}                          // alpha and beta
   };
 
   typename Mainloop::Params mainloop_params =
       Mainloop::to_underlying_arguments(problem_shape, mainloop_args);
   typename Epilogue::Params epilogue_params =
-      Epilogue::to_underlying_arguments(problem_shape, epilogue_params);
+      Epilogue::to_underlying_arguments(problem_shape, epilogue_args);
 
   dim3 grid(1);
   dim3 block(256);
 
-  size_t shared_mem_size = 1000000;
-  linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue, KernelTraits>
-      <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params);
+  size_t shared_mem_size = 100000;
+  cudaFuncSetAttribute(linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>,
+                       cudaFuncAttributeMaxDynamicSharedMemorySize,
+                       shared_mem_size);
+  // linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>
+  //     <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params);
+
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+
+  constexpr int WARMUP_RUNS = 16;
+  constexpr int BENCHMARK_RUNS = 1000;
+
+  printf("=== Kernel Performance Profiling ===\n");
+
+  for (int i = 0; i < WARMUP_RUNS; i++) {
+    linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>
+        <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params);
+  }
+  cudaDeviceSynchronize(); // Wait for all warmup runs to complete
+
+  printf("Running %d benchmark iterations...\n", BENCHMARK_RUNS);
+
+  float *iteration_times = new float[BENCHMARK_RUNS];
+  float total_time_ms = 0.0f;
+  float min_time_ms = FLT_MAX;
+  float max_time_ms = 0.0f;
+
+  for (int i = 0; i < BENCHMARK_RUNS; i++) {
+    cudaEventRecord(start);
+    linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>
+        <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params);
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    float iteration_time_ms;
+    cudaEventElapsedTime(&iteration_time_ms, start, stop);
+
+    total_time_ms += iteration_time_ms;
+  }
+
+  float avg_time_ms = total_time_ms / BENCHMARK_RUNS;
+
+  printf("\n=== Performance Results ===\n");
+  printf("Configuration:\n");
+  printf("  BATCH_SIZE=%d, OUTPUT_SIZE=%d, REDUCTION_SIZE=%d\n",
+         BATCH_SIZE,
+         OUTPUT_SIZE,
+         REDUCTION_SIZE);
+  printf("  Average: %.3f ms\n", avg_time_ms);
+
+  printf("===============================\n");
+
+  delete[] iteration_times;
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
 }
 
 void linear_kernel(torch::Tensor input,
-                     torch::Tensor weight,
-                     torch::Tensor residual,
-                     torch::Tensor output) {
+                   torch::Tensor weight,
+                   torch::Tensor residual,
+                   torch::Tensor output) {
 
-    void *input_ptr = input.data_ptr();
-    void *weight_ptr = weight.data_ptr();
-    void *residual_ptr = residual.data_ptr();
-    void *output_ptr = output.data_ptr();
+  void *input_ptr = input.data_ptr();
+  void *weight_ptr = weight.data_ptr();
+  void *residual_ptr = residual.data_ptr();
+  void *output_ptr = output.data_ptr();
 
-    launch_linear_hopper_cute<cutlass::bfloat16_t, 64, 4096, 4096>(input_ptr,
-                                           weight_ptr,
-                                           residual_ptr,
-                                           output_ptr);
+  launch_linear_hopper_cute<cutlass::bfloat16_t, 64, 16, 4096>(
+      input_ptr, weight_ptr, residual_ptr, output_ptr);
 
-    cudaError_t err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-      printf("CUDA kernel launch error: %s\n", cudaGetErrorString(err));
-    }
+  cudaError_t err = cudaDeviceSynchronize();
+  if (err != cudaSuccess) {
+    printf("CUDA kernel launch error: %s\n", cudaGetErrorString(err));
   }
+}
 
-  PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("linear", &linear_kernel, "Linear kernel");
-  }
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  m.def("linear", &linear_kernel, "Linear kernel");
+}

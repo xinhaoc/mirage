@@ -108,7 +108,7 @@ struct MMAKernelTraits {
       DTypeAccum,
       cutlass::epilogue::thread::ScaleType::Default,
       cutlass::FloatRoundStyle::round_to_nearest,
-      DTypeAccum>;
+      DataType>;
 
   // using 2,1,1 for cooperative scheduling
   using AtomLayoutMNK = Layout<Shape<_1, _1, _1>>;
