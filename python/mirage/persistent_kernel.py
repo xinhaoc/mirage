@@ -142,6 +142,7 @@ def get_compile_command(
         f"-I{os.path.join(mirage_deps_path, 'cutlass/include')}",
         f"-I{os.path.join(mirage_home_path, 'deps/json/include')}",
         f"-DMAX_WORKER_PER_SCHEDULER={max_worker_per_scheduler}",
+        "--compiler-bindir=/usr/bin/g++-14",
     ]
 
     flags = [

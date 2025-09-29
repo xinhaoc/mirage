@@ -314,6 +314,7 @@ __device__ __forceinline__ int get_rand_sched_id(size_t event_index,
   return x / ((num_workers + num_schedulers - 1) / num_schedulers);
 }
 
+// Evenly divides num_elements across num_workers, setting the first and last elements for the current worker with id my_id
 __device__ __forceinline__ void
     get_first_last_ids(unsigned long long int num_elements,
                        unsigned long long int num_workers,
@@ -414,6 +415,7 @@ __device__ __forceinline__ void execute_worker(RuntimeConfig config) {
 #endif
 
   int worker_id = blockIdx.x;
+  // local and remote
   __shared__ TaskId *worker_queues[2];
   __shared__ int worker_queue_ids[2];
   TaskId *local_worker_queue = config.worker_queues[worker_id];
@@ -483,6 +485,7 @@ __device__ __forceinline__ void execute_worker(RuntimeConfig config) {
 #endif
     }
     __syncthreads();
+    // cooperative loading of the TaskDesc from device memory to shared memory (task_desc)
     int *smem_as_int = reinterpret_cast<int *>(&task_desc);
     int const *dmem_as_int = reinterpret_cast<int *>(
         config.all_tasks + get_task_position_index(cur_task_id));
@@ -713,6 +716,7 @@ __device__ __forceinline__ void execute_scheduler(RuntimeConfig config, int offs
            my_first_worker,
            my_last_worker);
 #endif
+    // two pointers representing the start and end of window of events to be processed
     size_t cur_event_pos[2], last_event_pos[2];
     for (int i = 0; i < 2; i++) {
       cur_event_pos[i] = 0;
@@ -727,7 +731,9 @@ __device__ __forceinline__ void execute_scheduler(RuntimeConfig config, int offs
     // if (sched_id == 0) {
     //   worker_queue_next_free_task_pos[0] = 1;
     // }
+    // this is never modified again
     int next_worker = my_first_worker;
+    // cyclically increments each time
     int queue_idx = 0;
     while (true) {
       while (cur_event_pos[queue_idx] == last_event_pos[queue_idx]) {
@@ -913,6 +919,7 @@ __global__ void persistent_kernel(RuntimeConfig config) {
   if (blockIdx.x < config.num_workers) {
     execute_worker(config);
   } else {
+    // each block has 4 workers, // TODO: make 4 a constexpr
     execute_scheduler(config, -(4 * config.num_workers));
   }
 }
