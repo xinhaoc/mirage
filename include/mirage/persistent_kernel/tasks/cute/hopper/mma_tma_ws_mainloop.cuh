@@ -60,6 +60,8 @@ struct CollectiveMainloop {
 
   using ProblemShape = typename KernelTraits::ProblemShape;
 
+  using TileScheduler = typename KernelTraits::TileScheduler;
+
   struct SharedStorage {
     struct TensorStorage : cute::aligned_struct<128, _0> {
       cute::array_aligned<typename TiledMma::ValTypeA,
@@ -134,8 +136,6 @@ struct CollectiveMainloop {
     // only rank-3 (MNK)
     auto problem_shape_MNKL = append<4>(problem_shape, 1);
     auto [M, N, K, L] = problem_shape_MNKL;
-
-    print(problem_shape_MNKL);
 
     auto ptr_A = reinterpret_cast<DataType const *>(args.ptr_A);
     auto ptr_B = reinterpret_cast<DataType const *>(args.ptr_B);
@@ -223,12 +223,16 @@ struct CollectiveMainloop {
 
       Tensor gA_mkl = get<0>(load_inputs);
       Tensor gB_nkl = get<1>(load_inputs);
+      // CUTE_STATIC_ASSERT_V(size<2>(gB_nkl) == 0); //
+      // int m_tile_count = size<2>(gA_mkl);
+      // int n_tile_count = size<2>(gB_nkl);
 
       auto block_tma_a = mainloop_params.tma_load_a.get_slice(0);
       auto block_tma_b = mainloop_params.tma_load_b.get_slice(0);
 
       // Partition the inputs based on the current block coordinates.
       auto [m_coord, n_coord, k_coord, l_coord] = blk_coord;
+
       Tensor gA = gA_mkl(_, _, m_coord, _, l_coord); // (BLK_M,BLK_K,k)
       Tensor gB = gB_nkl(_, _, n_coord, _, l_coord); // (BLK_N,BLK_K,k)
 

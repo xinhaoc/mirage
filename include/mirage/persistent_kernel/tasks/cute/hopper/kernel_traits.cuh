@@ -26,6 +26,9 @@
 #include "cutlass/epilogue/thread/scale_type.h"
 #include "cutlass/functional.h"
 #include "cutlass/gemm/collective/collective_builder.hpp"
+#include "cutlass/gemm/kernel/sm90_tile_scheduler.hpp"
+#include "cutlass/gemm/kernel/tile_scheduler_detail.hpp"
+#include "cutlass/kernel_hardware_info.hpp"
 #include "cutlass/layout/layout.h"
 #include "cutlass/numeric_conversion.h"
 #include "cutlass/numeric_types.h"
@@ -111,8 +114,23 @@ struct MMAKernelTraits {
       DataType>;
 
   // using 2,1,1 for cooperative scheduling
-  using AtomLayoutMNK = Layout<Shape<_1, _1, _1>>;
+  //   using AtomLayoutMNK = Layout<Shape<_1, _1, _1>>;
   using ClusterShape_MNK = Shape<Int<1>, Int<1>, Int<1>>;
+
+  static constexpr bool IsCooperative = size<0>(TileShape_MNK{}) != Int<64>{};
+
+  using AtomLayoutMNK = cute::conditional_t<IsCooperative,
+                                            Layout<Shape<_2, _1, _1>>,
+                                            Layout<Shape<_1, _1, _1>>>;
+
+  using TileScheduler =
+      cutlass::gemm::kernel::detail::PersistentTileSchedulerSm90;
+  //   enable_if_t<IsCooperative,
+  //   cutlass::gemm::kernel::detail::PersistentTileSchedulerSm90>;
+
+  using KernelHardwareInfo = cutlass::KernelHardwareInfo;
+
+  using RasterOrderOptions = cutlass::gemm::kernel::detail::RasterOrderOptions;
 
   static constexpr cute::GMMA::Major GmmaMajorA = cutlass::gemm::collective::
       detail::gmma_ss_tag_to_major_A<DataType, GmemLayoutATag>();

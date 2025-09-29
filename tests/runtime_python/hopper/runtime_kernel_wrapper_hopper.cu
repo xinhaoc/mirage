@@ -69,28 +69,27 @@ void launch_linear_hopper(void *input_ptr,
 
   constexpr int OUTPUT_TMA_CP_SIZE = OUTPUT_SIZE < 64 ? OUTPUT_SIZE : 64;
 
-  using TMA_A = kernel::tma::tma_2d<bfloat16,
-                                    B,
-                                    M,
-                                    S,
-                                    BATCH_SIZE,
-                                    REDUCTION_SIZE,
-                                    BATCH_SIZE,
-                                    TMA_CP_ASYNC_SIZE,
-                                    1,
-                                    TMA_CP_ASYNC_REPEAT_COL,
-                                    true>;
-  using TMA_B = kernel::tma::tma_2d<bfloat16,
-                                    B,
-                                    M,
-                                    S,
-                                    OUTPUT_SIZE,
-                                    REDUCTION_SIZE,
-                                    OUTPUT_SIZE,
-                                    TMA_CP_ASYNC_SIZE,
-                                    1,
-                                    TMA_CP_ASYNC_REPEAT_COL,
-                                    true>;
+  using TMA_A =
+      kernel::tma::tma_2d<bfloat16,
+                          B,
+                          M,
+                          S,
+                          BATCH_SIZE,
+                          REDUCTION_SIZE,
+                          BATCH_SIZE,
+                          TMA_CP_ASYNC_SIZE,
+                          1,                       /*GMEM_STRIDE_COL_*/
+                          1,                       /*SMEM_REPEAT_ROW_*/
+                          TMA_CP_ASYNC_REPEAT_COL, /*SMEM_REPEAT_COL_*/
+                          OUTPUT_ATOM_SIZE * TMA_CP_ASYNC_SIZE, /*SMEM_STRIDE_*/
+                          true>;
+  using TMA_B = kernel::tma::tma_2d < bfloat16, B, M, S, OUTPUT_SIZE,
+        REDUCTION_SIZE, OUTPUT_SIZE, TMA_CP_ASYNC_SIZE, 1, /*GMEM_STRIDE_COL_*/
+      1,                                                   /*SMEM_REPEAT_ROW_*/
+      TMA_CP_ASYNC_REPEAT_COL,                             /*SMEM_REPEAT_COL_*/
+      SMEM_M_SIZE *TMA_CP_ASYNC_SIZE,                      /*SMEM_STRIDE_*/
+      true >>
+      ;
   using TMA_RESIDUAL = kernel::tma::tma_2d<bfloat16,
                                            0,
                                            0,
@@ -100,7 +99,9 @@ void launch_linear_hopper(void *input_ptr,
                                            BATCH_SIZE,
                                            OUTPUT_TMA_CP_SIZE,
                                            1,
-                                           OUTPUT_REPEAT_COL,
+                                           1,
+                                           OUTPUT_ATOM_REPEAT_COL,
+                                           SMEM_M_SIZE * OUTPUT_TMA_CP_SIZE,
                                            true>;
 
   using TMA_OUT = kernel::tma::tma_2d<bfloat16,
@@ -112,7 +113,9 @@ void launch_linear_hopper(void *input_ptr,
                                       BATCH_SIZE,
                                       OUTPUT_TMA_CP_SIZE,
                                       1,
-                                      OUTPUT_REPEAT_COL,
+                                      1,
+                                      OUTPUT_ATOM_REPEAT_COL,
+                                      SMEM_M_SIZE * TMA_CP_ASYNC_SIZE,
                                       true>;
   TMA_A tma_a(input_ptr);
   TMA_B tma_b(weight_ptr);
