@@ -28,6 +28,7 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+#include "cutlass_headers.cuh"
 
 using bfloat16 = type::bfloat16_t;
 using namespace mirage::runtime;

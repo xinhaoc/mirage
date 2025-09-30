@@ -12,8 +12,8 @@ import os
 def grid_for_rmsnorm_linear_layer(size):
     # 96 and 64 are enough to cover all Qwen3 model? Please update the method
     # if you meet any incompatibility.
-    if size % 128 == 0:
-        return 128
+    if size % 96 == 0:
+        return 96
     elif size % 96 == 0:
         return 96
     elif size % 64 == 0:

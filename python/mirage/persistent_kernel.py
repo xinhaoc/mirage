@@ -140,6 +140,7 @@ def get_compile_command(
         f"-I{mirage_inc_path}",
         f"-I{os.path.join(mirage_inc_path, 'mirage/persistent_kernel')}",
         f"-I{os.path.join(mirage_deps_path, 'cutlass/include')}",
+        f"-I{os.path.join(mirage_deps_path, 'cutlass/tools/util/include')}",
         f"-I{os.path.join(mirage_home_path, 'deps/json/include')}",
         f"-DMAX_WORKER_PER_SCHEDULER={max_worker_per_scheduler}",
     ]
@@ -609,7 +610,7 @@ class PersistentKernel:
         tb_graph.new_input(weight, (0, -1, -1), 1, True)
         tb_graph.new_input(output, (1, -1, -1), -1, True)
         self.kn_graph.customized([input, weight, output], tb_graph)
-        self.kn_graph.register_task(tb_graph, "linear_swapAB_hopper" if self.target_cc == 90 else "linear")
+        self.kn_graph.register_task(tb_graph, "linear_cutlass_hopper" if self.target_cc == 90 else "linear")
 
     def linear_with_residual_layer(
         self,
