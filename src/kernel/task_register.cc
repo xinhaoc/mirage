@@ -1253,7 +1253,8 @@ mirage::transpiler::CodeKeeper code;
 code.inc_indent();
 // NOTE: output_size and batch_size are swapped here
 code.e("auto problem_shape = cute::Shape<cute::Int<$>, cute::Int<$>, cute::Int<$>>{};", output_size, batch_size, reduction_size);
-code.e("using KernelTraits = kernel::MMAKernelTraits<bfloat16, $, $, $, cutlass::layout::RowMajor, cutlass::layout::RowMajor, cutlass::layout::RowMajor, cutlass::layout::RowMajor, $, $, $, $, decltype(problem_shape), $, $>;", batch_size, output_size, reduction_size, 8, 64, 16, 64, output_size, KSTAGES);
+// NOTE: output_size and batch_size are swapped here
+code.e("using KernelTraits = kernel::MMAKernelTraits<cutlass::bfloat16_t, $, $, $, cutlass::layout::RowMajor, cutlass::layout::RowMajor, cutlass::layout::RowMajor, cutlass::layout::RowMajor, $, $, $, $, decltype(problem_shape), $, $>;", output_size, batch_size, reduction_size, 8, 64, 16, 64, batch_size, KSTAGES);
 code.e("using Mainloop = kernel::CollectiveMainloop<KernelTraits>;");
 code.e("using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;");
 code.e("using StrideA = typename KernelTraits::StrideA;");
@@ -1265,23 +1266,25 @@ code.e("StrideB stride_B = cutlass::make_cute_packed_stride(StrideB{}, {KernelTr
 code.e("StrideC stride_C = cutlass::make_cute_packed_stride(StrideC{}, {KernelTraits::BATCH_SIZE, KernelTraits::REDUCTION_SIZE, 1});");
 code.e("StrideD stride_D = cutlass::make_cute_packed_stride(StrideD{}, {KernelTraits::BATCH_SIZE, KernelTraits::REDUCTION_SIZE, 1});");
 code.e("typename Mainloop::Arguments mainloop_args{");
-code.e("    static_cast<bfloat16 const *>(task_desc.inputs[0].base_ptr),");
+code.e("    static_cast<cutlass::bfloat16_t const *>(task_desc.inputs[0].base_ptr),");
 code.e("    stride_A,");
-code.e("    static_cast<bfloat16 const *>(task_desc.inputs[1].base_ptr),");
+code.e("    static_cast<cutlass::bfloat16_t const *>(task_desc.inputs[1].base_ptr),");
 code.e("    stride_B,");
 code.e("};");
 code.e("typename Epilogue::Arguments epilogue_args{");
-code.e("    static_cast<bfloat16 const *>(task_desc.inputs[2].base_ptr),");
+code.e("    static_cast<cutlass::bfloat16_t const *>(task_desc.inputs[2].base_ptr),");
 code.e("    stride_C,");
-code.e("    static_cast<bfloat16 *>(task_desc.outputs[0].base_ptr),");
+code.e("    static_cast<cutlass::bfloat16_t *>(task_desc.outputs[0].base_ptr),");
 code.e("    stride_C,");
 code.e("    {1.0f, 1.0f},");
 code.e("};");
+code.e("typename Mainloop::Params mainloop_params = Mainloop::to_underlying_arguments(problem_shape, mainloop_args);");
+code.e("typename Epilogue::Params epilogue_params = Epilogue::to_underlying_arguments(problem_shape, epilogue_args);");
 
 
 
 code.e(
-    "kernel::gemm_kernel_tma_warp_specialized<CollectiveMainloop, CollectiveEpilogue>(mainloop_params, epilogue_params);");
+    "kernel::gemm_kernel_tma_warp_specialized<Mainloop, Epilogue>(mainloop_params, epilogue_params);");
 
 // if (with_residual) {
   return register_task_variant(TASK_LINEAR_CUTLASS_HOPPER,

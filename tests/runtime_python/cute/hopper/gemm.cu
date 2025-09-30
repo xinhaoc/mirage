@@ -79,6 +79,7 @@ void launch_linear_hopper_cute(void *input_ptr,
                               decltype(problem_shape),
                               OUTPUT_SIZE, // O_STRIDE
                               4>;          // NUM_STAGES
+  // printf("BATCH_SIZE: %d, OUTPUT_SIZE: %d, REDUCTION_SIZE: %d\n", BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE);
 
   using Mainloop = kernel::CollectiveMainloop<KernelTraits>;
   using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;

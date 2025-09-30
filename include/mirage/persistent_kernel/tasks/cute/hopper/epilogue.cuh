@@ -59,6 +59,7 @@ struct CollectiveEpilogue {
   using Params = Arguments;
 
   template <class ProblemShape>
+  CUTLASS_HOST_DEVICE
   static constexpr Arguments
       to_underlying_arguments([[maybe_unused]] ProblemShape const &_,
                               Arguments const &args) {
