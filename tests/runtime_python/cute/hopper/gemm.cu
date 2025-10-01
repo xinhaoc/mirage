@@ -205,9 +205,9 @@ void launch_linear_hopper_cute(void *input_ptr,
   switch (output.size(1)) {                                                    \
     DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 8)                    \
     DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 16)                    \
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 64)                   \
     /* \
     DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 32)                    \
-    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 128)                   \
     DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 256)                   \
     DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 512)                   \
     DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 1024)                  \
@@ -234,13 +234,13 @@ void linear_kernel(torch::Tensor input,
   void *output_ptr = output.data_ptr();
 
   switch (input.size(0)) {
+    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(8)                     \
+    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(16)                    \
     DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(64)                    \
+    /* \
     DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(128)                   \
     DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(256)                   \
     DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(2048)                  \
-    /* \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(8)                     \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(16)                    \
     DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(32)                    \
     DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(512)                   \
     DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(1024)                  \

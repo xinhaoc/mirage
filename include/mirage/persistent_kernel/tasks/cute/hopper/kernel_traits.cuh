@@ -71,7 +71,8 @@ template <typename DataType_,
           int K_,
           typename ProblemShape_,
           int O_STRIDE = OUTPUT_SIZE_,
-          int NUM_STAGES_ = 3>
+          int NUM_STAGES_ = 3,
+          typename IS_SWAPAB_ = cute::true_type>
 struct MMAKernelTraits {
   using DataType = DataType_;
   using DTypeAccum = float;
@@ -197,6 +198,9 @@ struct MMAKernelTraits {
                                          SmemLayoutAtomA,
                                          SmemLayoutAtomB,
                                          SmemLayoutAtomC>;
+
+    static constexpr bool SwapAB = IS_SWAPAB_::value;
+
 };
 
 } // namespace kernel
