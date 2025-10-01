@@ -85,7 +85,7 @@ struct MMAKernelTraits {
   using ProblemShape = ProblemShape_;
 
   using StrideA = cutlass::detail::TagToStrideA_t<GmemLayoutATag>;
-  using StrideB = cutlass::detail::TagToStrideB_t<GmemLayoutATag>;
+  using StrideB = cutlass::detail::TagToStrideB_t<GmemLayoutBTag>;
   using StrideC = cutlass::detail::TagToStrideC_t<GmemLayoutCTag>;
   using StrideD = cutlass::detail::TagToStrideC_t<GmemLayoutDTag>;
 

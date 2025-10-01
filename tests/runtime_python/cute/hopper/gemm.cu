@@ -79,6 +79,7 @@ void launch_linear_hopper_cute(void *input_ptr,
                               decltype(problem_shape),
                               OUTPUT_SIZE, // O_STRIDE
                               4>;          // NUM_STAGES
+  // printf("BATCH_SIZE: %d, OUTPUT_SIZE: %d, REDUCTION_SIZE: %d\n", BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE);
 
   using Mainloop = kernel::CollectiveMainloop<KernelTraits>;
   using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;
@@ -146,8 +147,6 @@ void launch_linear_hopper_cute(void *input_ptr,
 
   float *iteration_times = new float[BENCHMARK_RUNS];
   float total_time_ms = 0.0f;
-  float min_time_ms = FLT_MAX;
-  float max_time_ms = 0.0f;
 
   for (int i = 0; i < BENCHMARK_RUNS; i++) {
     cudaEventRecord(start);
@@ -179,6 +178,51 @@ void launch_linear_hopper_cute(void *input_ptr,
   cudaEventDestroy(stop);
 }
 
+#define DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(                            \
+    BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE)                                   \
+  case REDUCTION_SIZE:                                                         \
+    launch_linear_hopper_cute<cutlass::bfloat16_t, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE>(   \
+        input_ptr, weight_ptr, residual_ptr, output_ptr);                      \
+    break;
+
+#define DISPATCH_LINEAR_CUTE_REDUCTION_SIZE(BATCH_SIZE, OUTPUT_SIZE)         \
+  switch (input.size(1)) {                                                     \
+    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(BATCH_SIZE, OUTPUT_SIZE, 4096)  \
+    /* \
+    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(BATCH_SIZE, OUTPUT_SIZE, 12288) \
+    */ \
+    default:                                                                   \
+      printf("Unsupported reduction size in test: %zu\n", input.size(1));      \
+      break;                                                                   \
+  }
+
+#define DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, OUTPUT_SIZE)       \
+  case OUTPUT_SIZE:                                                            \
+    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE(BATCH_SIZE, OUTPUT_SIZE)             \
+    break;
+
+#define DISPATCH_LINEAR_CUTE_OUTPUT_SIZE(BATCH_SIZE)                         \
+  switch (output.size(1)) {                                                    \
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 8)                    \
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 16)                    \
+    /* \
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 32)                    \
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 128)                   \
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 256)                   \
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 512)                   \
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 1024)                  \
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 2048)                  \
+    */ \
+    default:                                                                   \
+      printf("Unsupported output size in test: %zu\n", output.size(1));        \
+      break;                                                                   \
+  }
+
+#define DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(BATCH_SIZE)                     \
+  case BATCH_SIZE:                                                             \
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE(BATCH_SIZE)                             \
+    break;
+
 void linear_kernel(torch::Tensor input,
                    torch::Tensor weight,
                    torch::Tensor residual,
@@ -189,8 +233,22 @@ void linear_kernel(torch::Tensor input,
   void *residual_ptr = residual.data_ptr();
   void *output_ptr = output.data_ptr();
 
-  launch_linear_hopper_cute<cutlass::bfloat16_t, 64, 16, 4096>(
-      input_ptr, weight_ptr, residual_ptr, output_ptr);
+  switch (input.size(0)) {
+    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(64)                    \
+    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(128)                   \
+    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(256)                   \
+    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(2048)                  \
+    /* \
+    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(8)                     \
+    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(16)                    \
+    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(32)                    \
+    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(512)                   \
+    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(1024)                  \
+    */ \
+    default:
+      printf("Unsupported batch size in test: %zu\n", output.size(0));
+      break;
+  }
 
   cudaError_t err = cudaDeviceSynchronize();
   if (err != cudaSuccess) {
