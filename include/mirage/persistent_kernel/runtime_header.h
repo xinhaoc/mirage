@@ -94,6 +94,12 @@ enum EventType {
   EVENT_INVALID = 999,
 };
 
+enum class TensorLifetime {
+    IN_OUTPUT,  // can't overlap with previous tasks  
+    COMPUTE,  
+};
+
+
 struct TensorDesc {
   int num_dims;
   void *base_ptr;
@@ -103,6 +109,7 @@ struct TensorDesc {
   int data_type;
   int dim[mirage::config::MAX_TENSOR_DIMS];
   int stride[mirage::config::MAX_TENSOR_DIMS];
+  TensorLifetime lifetime;
 };
 
 struct EventDesc {
