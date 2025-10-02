@@ -1254,21 +1254,21 @@ code.inc_indent();
 // NOTE: output_size and batch_size are swapped here
 code.e("auto problem_shape = cute::Shape<cute::Int<$>, cute::Int<$>, cute::Int<$>>{};", output_size, batch_size, reduction_size);
 // NOTE: output_size and batch_size are swapped here
-code.e("using KernelTraits = kernel::MMAKernelTraits<cutlass::bfloat16_t, $, $, $, cutlass::layout::RowMajor, cutlass::layout::RowMajor, cutlass::layout::RowMajor, cutlass::layout::RowMajor, $, $, $, $, decltype(problem_shape), $, $>;", output_size, batch_size, reduction_size, 8, 64, 16, 64, batch_size, KSTAGES);
+code.e("using KernelTraits = kernel::MMAKernelTraits<cutlass::bfloat16_t, $, $, $, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor, cutlass::layout::RowMajor, cutlass::layout::RowMajor, $, $, $, $, decltype(problem_shape), $, $>;", output_size, batch_size, reduction_size, 8, 64, 16, 64, batch_size, KSTAGES);
 code.e("using Mainloop = kernel::CollectiveMainloop<KernelTraits>;");
 code.e("using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;");
 code.e("using StrideA = typename KernelTraits::StrideA;");
 code.e("using StrideB = typename KernelTraits::StrideB;");
 code.e("using StrideC = typename KernelTraits::StrideC;");
 code.e("using StrideD = typename KernelTraits::StrideD;");
-code.e("StrideA stride_A = cutlass::make_cute_packed_stride(StrideA{}, {KernelTraits::BATCH_SIZE, KernelTraits::REDUCTION_SIZE, 1});");
+code.e("StrideA stride_A = cutlass::make_cute_packed_stride(StrideA{}, {KernelTraits::OUTPUT_SIZE, KernelTraits::REDUCTION_SIZE, 1});");
 code.e("StrideB stride_B = cutlass::make_cute_packed_stride(StrideB{}, {KernelTraits::BATCH_SIZE, KernelTraits::REDUCTION_SIZE, 1});");
-code.e("StrideC stride_C = cutlass::make_cute_packed_stride(StrideC{}, {KernelTraits::BATCH_SIZE, KernelTraits::REDUCTION_SIZE, 1});");
-code.e("StrideD stride_D = cutlass::make_cute_packed_stride(StrideD{}, {KernelTraits::BATCH_SIZE, KernelTraits::REDUCTION_SIZE, 1});");
+code.e("StrideC stride_C = cutlass::make_cute_packed_stride(StrideC{}, {KernelTraits::BATCH_SIZE, KernelTraits::OUTPUT_SIZE, 1});");
+code.e("StrideD stride_D = cutlass::make_cute_packed_stride(StrideD{}, {KernelTraits::BATCH_SIZE, KernelTraits::OUTPUT_SIZE, 1});");
 code.e("typename Mainloop::Arguments mainloop_args{");
-code.e("    static_cast<cutlass::bfloat16_t const *>(task_desc.inputs[0].base_ptr),");
-code.e("    stride_A,");
 code.e("    static_cast<cutlass::bfloat16_t const *>(task_desc.inputs[1].base_ptr),");
+code.e("    stride_A,");
+code.e("    static_cast<cutlass::bfloat16_t const *>(task_desc.inputs[0].base_ptr),");
 code.e("    stride_B,");
 code.e("};");
 code.e("typename Epilogue::Arguments epilogue_args{");
