@@ -310,6 +310,7 @@ __device__ __forceinline__ int get_rand_sched_id(size_t event_index,
   // x *= worker_id;
   //  x *= 0xed5ad4bb;
   // x ^= x >> 11;
+  // Is this supposed to be the same mapping as schedulers to workers?
   size_t x = worker_id;
   return x / ((num_workers + num_schedulers - 1) / num_schedulers);
 }
@@ -620,6 +621,7 @@ __device__ __forceinline__ void execute_worker(RuntimeConfig config) {
                 event_desc.event_type == EVENT_LAUNCH_DEPENDENT_TASKS) {
               use_bcast_queue = true;
             }
+            // const bool use_bcast_queue = (event_desc.event_type == EVENT_LAUNCH_MASSIVE_TASKS || event_desc.event_type == EVENT_LAUNCH_DEPENDENT_TASKS);
             int sched_id =
                 use_bcast_queue
                     ? config.num_local_schedulers + config.num_remote_schedulers
@@ -627,6 +629,7 @@ __device__ __forceinline__ void execute_worker(RuntimeConfig config) {
                                         worker_id,
                                         config.num_workers,
                                         config.num_local_schedulers);
+            // TODO: race condition here?
             size_t last_event_pos = atom_add_release_gpu_u64(
                 &config.sched_queue_next_free_event_id[sched_id], 1);
             st_relaxed_gpu_u64(
