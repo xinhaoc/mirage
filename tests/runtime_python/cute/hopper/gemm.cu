@@ -54,8 +54,8 @@ __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_wrapper(
 }
 
 template <typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE>
-void launch_linear_hopper_cute(void *input_ptr,
-                               void *weight_ptr,
+void launch_linear_hopper_cute(void *weight_ptr,
+                               void *input_ptr,
                                void *residual_ptr,
                                void *output_ptr) {
 
@@ -99,9 +99,9 @@ void launch_linear_hopper_cute(void *input_ptr,
   //       StrideD{}, {KernelTraits::M, KernelTraits::N, 1});
 
   typename Mainloop::Arguments mainloop_args{
-      static_cast<T const *>(input_ptr),  // ptr_A
+      static_cast<T const *>(weight_ptr),  // ptr_A
       stride_A,                           // dA
-      static_cast<T const *>(weight_ptr), // ptr_B
+      static_cast<T const *>(input_ptr), // ptr_B
       stride_B,                           // dB
   };
 
@@ -179,52 +179,48 @@ void launch_linear_hopper_cute(void *input_ptr,
 }
 
 #define DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(                            \
-    BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE)                                   \
+    OUTPUT_SIZE, BATCH_SIZE, REDUCTION_SIZE)                                   \
   case REDUCTION_SIZE:                                                         \
-    launch_linear_hopper_cute<cutlass::bfloat16_t, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE>(   \
-        input_ptr, weight_ptr, residual_ptr, output_ptr);                      \
+    launch_linear_hopper_cute<cutlass::bfloat16_t, OUTPUT_SIZE, BATCH_SIZE, REDUCTION_SIZE>(   \
+        weight_ptr, input_ptr, residual_ptr, output_ptr);                      \
     break;
 
-#define DISPATCH_LINEAR_CUTE_REDUCTION_SIZE(BATCH_SIZE, OUTPUT_SIZE)         \
-  switch (input.size(1)) {                                                     \
-    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(BATCH_SIZE, OUTPUT_SIZE, 4096)  \
+#define DISPATCH_LINEAR_CUTE_REDUCTION_SIZE(OUTPUT_SIZE, BATCH_SIZE)         \
+  switch (weight.size(1)) {                                                     \
+    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(OUTPUT_SIZE, BATCH_SIZE, 4096)  \
     /* \
-    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(BATCH_SIZE, OUTPUT_SIZE, 12288) \
+    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(OUTPUT_SIZE, BATCH_SIZE, 12288) \
     */ \
     default:                                                                   \
       printf("Unsupported reduction size in test: %zu\n", input.size(1));      \
       break;                                                                   \
   }
 
-#define DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, OUTPUT_SIZE)       \
-  case OUTPUT_SIZE:                                                            \
-    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE(BATCH_SIZE, OUTPUT_SIZE)             \
+#define DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(OUTPUT_SIZE, BATCH_SIZE)       \
+  case BATCH_SIZE:                                                            \
+    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE(OUTPUT_SIZE, BATCH_SIZE)             \
     break;
 
-#define DISPATCH_LINEAR_CUTE_OUTPUT_SIZE(BATCH_SIZE)                         \
-  switch (output.size(1)) {                                                    \
-    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 8)                    \
-    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 16)                    \
-    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 64)                   \
+#define DISPATCH_LINEAR_CUTE_BATCH_SIZE(OUTPUT_SIZE)                         \
+  switch (input.size(1)) {                                                    \
+    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(OUTPUT_SIZE, 16)                    \
     /* \
-    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 32)                    \
-    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 256)                   \
-    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 512)                   \
-    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 1024)                  \
-    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(BATCH_SIZE, 2048)                  \
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(OUTPUT_SIZE, 8)                    \
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(OUTPUT_SIZE, 32)                    \
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(OUTPUT_SIZE, 64)                    \
     */ \
     default:                                                                   \
-      printf("Unsupported output size in test: %zu\n", output.size(1));        \
+      printf("Unsupported batch size in test: %zu\n", input.size(1));        \
       break;                                                                   \
   }
 
-#define DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(BATCH_SIZE)                     \
-  case BATCH_SIZE:                                                             \
-    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE(BATCH_SIZE)                             \
+#define DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(OUTPUT_SIZE)                     \
+  case OUTPUT_SIZE:                                                             \
+    DISPATCH_LINEAR_CUTE_BATCH_SIZE(OUTPUT_SIZE)                             \
     break;
 
-void linear_kernel(torch::Tensor input,
-                   torch::Tensor weight,
+void linear_kernel(torch::Tensor weight,
+                   torch::Tensor input,
                    torch::Tensor residual,
                    torch::Tensor output) {
 
@@ -233,20 +229,10 @@ void linear_kernel(torch::Tensor input,
   void *residual_ptr = residual.data_ptr();
   void *output_ptr = output.data_ptr();
 
-  switch (input.size(0)) {
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(8)                     \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(16)                    \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(64)                    \
-    /* \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(128)                   \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(256)                   \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(2048)                  \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(32)                    \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(512)                   \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(1024)                  \
-    */ \
+  switch (weight.size(0)) {
+    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(64)                    \
     default:
-      printf("Unsupported batch size in test: %zu\n", output.size(0));
+      printf("Unsupported output size in test: %zu\n", weight.size(0));
       break;
   }
 
