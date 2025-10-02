@@ -53,7 +53,7 @@ __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_wrapper(
                                                                epilogue_params);
 }
 
-template <typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE>
+template <typename T, int OUTPUT_SIZE, int BATCH_SIZE, int REDUCTION_SIZE>
 void launch_linear_hopper_cute(void *weight_ptr,
                                void *input_ptr,
                                void *residual_ptr,
@@ -61,15 +61,15 @@ void launch_linear_hopper_cute(void *weight_ptr,
 
   using namespace cute;
   auto problem_shape =
-      Shape<Int<BATCH_SIZE>, Int<OUTPUT_SIZE>, Int<REDUCTION_SIZE>>{};
+      Shape<Int<OUTPUT_SIZE>, Int<BATCH_SIZE>, Int<REDUCTION_SIZE>>{};
 
   using KernelTraits =
       kernel::MMAKernelTraits<T,
-                              BATCH_SIZE,
                               OUTPUT_SIZE,
+                              BATCH_SIZE,
                               REDUCTION_SIZE,
                               cutlass::layout::RowMajor, // GmemLayoutATag
-                              cutlass::layout::RowMajor, // GmemLayoutBTag
+                              cutlass::layout::ColumnMajor, // GmemLayoutBTag
                               cutlass::layout::RowMajor, // GmemLayoutCTag
                               cutlass::layout::RowMajor, // GmemLayoutDTag
                               8,                         // NUM_WARPS
@@ -90,9 +90,9 @@ void launch_linear_hopper_cute(void *weight_ptr,
   //   using StrideD = typename KernelTraits::StrideD;
 
   StrideA stride_A = cutlass::make_cute_packed_stride(
-      StrideA{}, {KernelTraits::BATCH_SIZE, KernelTraits::REDUCTION_SIZE, 1});
+      StrideA{}, {KernelTraits::OUTPUT_SIZE, KernelTraits::REDUCTION_SIZE, 1});
   StrideB stride_B = cutlass::make_cute_packed_stride(
-      StrideB{}, {KernelTraits::OUTPUT_SIZE, KernelTraits::REDUCTION_SIZE, 1});
+      StrideB{}, {KernelTraits::BATCH_SIZE, KernelTraits::REDUCTION_SIZE, 1});
   StrideC stride_C = cutlass::make_cute_packed_stride(
       StrideC{}, {KernelTraits::BATCH_SIZE, KernelTraits::OUTPUT_SIZE, 1});
   //   StrideD stride_D = cutlass::make_cute_packed_stride(
@@ -202,7 +202,7 @@ void launch_linear_hopper_cute(void *weight_ptr,
     break;
 
 #define DISPATCH_LINEAR_CUTE_BATCH_SIZE(OUTPUT_SIZE)                         \
-  switch (input.size(1)) {                                                    \
+  switch (input.size(0)) {                                                    \
     DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(OUTPUT_SIZE, 16)                    \
     /* \
     DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(OUTPUT_SIZE, 8)                    \

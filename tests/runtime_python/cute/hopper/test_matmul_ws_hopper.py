@@ -10,10 +10,17 @@ reduction_size = 4096
 batch_size = 16
 output_size = 64
 
-weight = torch.randn((output_size, reduction_size), device="cuda", dtype=torch.bfloat16, generator=g)
 x = torch.randn(
     (reduction_size, batch_size), device="cuda", dtype=torch.bfloat16, generator=g
 )
+weight = torch.randn((output_size, reduction_size), device="cuda", dtype=torch.bfloat16, generator=g)
+for i in range(reduction_size):
+    for j in range(batch_size):
+        x[i, j] = 0.2
+for i in range(output_size):
+    for j in range(reduction_size):
+        weight[i, j] = 0.1
+
 # x = torch.randn((batch_size, reduction_size), device="cuda", dtype=torch.bfloat16, generator=g)
 residual = torch.zeros(batch_size, output_size, device="cuda", dtype=torch.bfloat16)
 
