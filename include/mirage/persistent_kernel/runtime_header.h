@@ -95,10 +95,9 @@ enum EventType {
 };
 
 enum class TensorLifetime {
-    IN_OUTPUT,  // can't overlap with previous tasks  
-    COMPUTE,  
+  IN_OUTPUT, // can't overlap with previous tasks
+  COMPUTE,
 };
-
 
 struct TensorDesc {
   int num_dims;
