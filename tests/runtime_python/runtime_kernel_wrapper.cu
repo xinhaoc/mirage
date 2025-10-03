@@ -830,7 +830,7 @@ void launch_norm_linear(void const *input_ptr,
                         void *output_ptr) {
   dim3 grid_dim(1, 1, 1);
   dim3 block_dim(128, 1, 1);
-  size_t smem_size = 1024 * 96;
+  size_t smem_size = 1024 * 150;
 
   cudaFuncSetAttribute(
       norm_linear_kernel_wrapper<T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE>,
@@ -919,10 +919,10 @@ void norm_linear(torch::Tensor input,
     NORM_LINEAR_DISPATCH_BATCH_SIZE(2)
     NORM_LINEAR_DISPATCH_BATCH_SIZE(3)
     NORM_LINEAR_DISPATCH_BATCH_SIZE(4)
-    // NORM_LINEAR_DISPATCH_BATCH_SIZE(5)
-    // NORM_LINEAR_DISPATCH_BATCH_SIZE(6)
-    // NORM_LINEAR_DISPATCH_BATCH_SIZE(7)
-    // NORM_LINEAR_DISPATCH_BATCH_SIZE(8)
+    NORM_LINEAR_DISPATCH_BATCH_SIZE(5)
+    NORM_LINEAR_DISPATCH_BATCH_SIZE(6)
+    NORM_LINEAR_DISPATCH_BATCH_SIZE(7)
+    NORM_LINEAR_DISPATCH_BATCH_SIZE(8)
     default:
       printf("Unsupported batch size in test: %zu\n", input.size(0));
       break;

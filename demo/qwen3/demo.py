@@ -71,7 +71,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--model-path", type=str, default=None, help="Path to a local model (necessary for multi-GPU demo)")
     parser.add_argument(
-        "--model", type=str, default='Qwen/Qwen3-1.7B', help="Model path on hugging face"
+        "--model", type=str, default='Qwen/Qwen3-8B', help="Model path on hugging face"
     )
     args = parser.parse_args()
     try:

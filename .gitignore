@@ -75,3 +75,4 @@ ncu_tmp
 *.csv
 anthony_scratch/
 compiled_output/
+venv
