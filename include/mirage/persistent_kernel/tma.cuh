@@ -572,7 +572,8 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
 
       if (param_id == 0) {
         // TMA_INPUT
-        int const batch_size = tensor_desc.dim[0];
+        // int const batch_size = tensor_desc.dim[0];
+        int const batch_size = 16;
         int const reduction_size = tensor_desc.dim[1];
         uint64_t gmem_shape[2] = {static_cast<uint64_t>(batch_size),
                                   static_cast<uint64_t>(reduction_size)};
@@ -614,7 +615,8 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
       } else if (param_id == 2 && task_desc.task_type ==
                                       TASK_LINEAR_CUTLASS_HOPPER) {
         // TMA_RESIDUAL
-        int const batch_size = tensor_desc.dim[0];
+        // int const batch_size = tensor_desc.dim[0];
+        int const batch_size = 16;
         int const output_size = tensor_desc.dim[1];
         int const output_stride = (tensor_desc.stride[0]);
         int const output_tma_cp_size = output_size < 64 ? output_size : 64;
@@ -634,7 +636,8 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
       } else if (param_id == 3 && task_desc.task_type ==
                                       TASK_LINEAR_CUTLASS_HOPPER) {
         // TMA_OUT
-        int const batch_size = tensor_desc.dim[0];
+        // int const batch_size = tensor_desc.dim[0];
+        int const batch_size = 16;
         int const output_size = tensor_desc.dim[1];
         int const output_stride = (tensor_desc.stride[0]);
         int const output_tma_cp_size = output_size < 64 ? output_size : 64;

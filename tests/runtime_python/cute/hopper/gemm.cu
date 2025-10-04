@@ -46,209 +46,209 @@
 #include "../../bfloat16.h"
 using bfloat16 = type::bfloat16_t;
 
-template <typename CollectiveMainloop, typename CollectiveEpilogue>
-__global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_wrapper(
-    CUTE_GRID_CONSTANT
-    typename CollectiveMainloop::Params const mainloop_params,
-    CUTE_GRID_CONSTANT
-    typename CollectiveEpilogue::Params const epilogue_params) {
-  kernel::gemm_kernel_tma_warp_specialized<CollectiveMainloop,
-                                           CollectiveEpilogue>(mainloop_params,
-                                                               epilogue_params);
-}
+// template <typename CollectiveMainloop, typename CollectiveEpilogue>
+// __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_wrapper(
+//     CUTE_GRID_CONSTANT
+//     typename CollectiveMainloop::Params const mainloop_params,
+//     CUTE_GRID_CONSTANT
+//     typename CollectiveEpilogue::Params const epilogue_params) {
+//   kernel::gemm_kernel_tma_warp_specialized<CollectiveMainloop,
+//                                            CollectiveEpilogue>(mainloop_params,
+//                                                                epilogue_params);
+// }
 
-template <typename T, int OUTPUT_SIZE, int BATCH_SIZE, int REDUCTION_SIZE>
-void launch_linear_hopper_cute(void *weight_ptr,
-                               void *input_ptr,
-                               void *residual_ptr,
-                               void *output_ptr) {
+// template <typename T, int OUTPUT_SIZE, int BATCH_SIZE, int REDUCTION_SIZE>
+// void launch_linear_hopper_cute(void *weight_ptr,
+//                                void *input_ptr,
+//                                void *residual_ptr,
+//                                void *output_ptr) {
 
-  using namespace cute;
-  auto problem_shape =
-      Shape<Int<OUTPUT_SIZE>, Int<BATCH_SIZE>, Int<REDUCTION_SIZE>>{};
+//   using namespace cute;
+//   auto problem_shape =
+//       Shape<Int<OUTPUT_SIZE>, Int<BATCH_SIZE>, Int<REDUCTION_SIZE>>{};
 
-  using KernelTraits =
-      kernel::MMAKernelTraits<T,
-                              OUTPUT_SIZE,
-                              BATCH_SIZE,
-                              REDUCTION_SIZE,
-                              cutlass::layout::RowMajor, // GmemLayoutATag
-                              cutlass::layout::ColumnMajor, // GmemLayoutBTag
-                              cutlass::layout::RowMajor, // GmemLayoutCTag
-                              cutlass::layout::RowMajor, // GmemLayoutDTag
-                              8,                         // NUM_WARPS
-                              64,                        // M
-                              16,                        // N
-                              64,                        // K
-                              decltype(problem_shape),
-                              OUTPUT_SIZE, // O_STRIDE
-                              4>;          // NUM_STAGES
+//   using KernelTraits =
+//       kernel::MMAKernelTraits<T,
+//                               OUTPUT_SIZE,
+//                               BATCH_SIZE,
+//                               REDUCTION_SIZE,
+//                               cutlass::layout::RowMajor, // GmemLayoutATag
+//                               cutlass::layout::ColumnMajor, // GmemLayoutBTag
+//                               cutlass::layout::RowMajor, // GmemLayoutCTag
+//                               cutlass::layout::RowMajor, // GmemLayoutDTag
+//                               8,                         // NUM_WARPS
+//                               64,                        // M
+//                               16,                        // N
+//                               64,                        // K
+//                               decltype(problem_shape),
+//                               OUTPUT_SIZE, // O_STRIDE
+//                               4>;          // NUM_STAGES
 
-  using Mainloop = kernel::CollectiveMainloop<KernelTraits>;
-  using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;
+//   using Mainloop = kernel::CollectiveMainloop<KernelTraits>;
+//   using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;
 
-  using StrideA = typename KernelTraits::StrideA;
-  using StrideB = typename KernelTraits::StrideB;
-  using StrideC = typename KernelTraits::StrideC;
-  //   using StrideD = typename KernelTraits::StrideD;
+//   using StrideA = typename KernelTraits::StrideA;
+//   using StrideB = typename KernelTraits::StrideB;
+//   using StrideC = typename KernelTraits::StrideC;
+//   //   using StrideD = typename KernelTraits::StrideD;
 
-  StrideA stride_A = cutlass::make_cute_packed_stride(
-      StrideA{}, {KernelTraits::OUTPUT_SIZE, KernelTraits::REDUCTION_SIZE, 1});
-  StrideB stride_B = cutlass::make_cute_packed_stride(
-      StrideB{}, {KernelTraits::BATCH_SIZE, KernelTraits::REDUCTION_SIZE, 1});
-  StrideC stride_C = cutlass::make_cute_packed_stride(
-      StrideC{}, {KernelTraits::BATCH_SIZE, KernelTraits::OUTPUT_SIZE, 1});
-  //   StrideD stride_D = cutlass::make_cute_packed_stride(
-  //       StrideD{}, {KernelTraits::M, KernelTraits::N, 1});
+//   StrideA stride_A = cutlass::make_cute_packed_stride(
+//       StrideA{}, {KernelTraits::OUTPUT_SIZE, KernelTraits::REDUCTION_SIZE, 1});
+//   StrideB stride_B = cutlass::make_cute_packed_stride(
+//       StrideB{}, {KernelTraits::BATCH_SIZE, KernelTraits::REDUCTION_SIZE, 1});
+//   StrideC stride_C = cutlass::make_cute_packed_stride(
+//       StrideC{}, {KernelTraits::BATCH_SIZE, KernelTraits::OUTPUT_SIZE, 1});
+//   //   StrideD stride_D = cutlass::make_cute_packed_stride(
+//   //       StrideD{}, {KernelTraits::M, KernelTraits::N, 1});
 
-  typename Mainloop::Arguments mainloop_args{
-      static_cast<T const *>(weight_ptr),  // ptr_A
-      stride_A,                           // dA
-      static_cast<T const *>(input_ptr), // ptr_B
-      stride_B,                           // dB
-  };
+//   typename Mainloop::Arguments mainloop_args{
+//       static_cast<T const *>(weight_ptr),  // ptr_A
+//       stride_A,                           // dA
+//       static_cast<T const *>(input_ptr), // ptr_B
+//       stride_B,                           // dB
+//   };
 
-  typename Epilogue::Arguments epilogue_args{
-      static_cast<T const *>(residual_ptr), // ptr_C
-      stride_C,                             // dC
-      static_cast<T *>(output_ptr),         // ptr_D
-      stride_C,                             // dD
-      {1.0f, 1.0f}                          // alpha and beta
-  };
+//   typename Epilogue::Arguments epilogue_args{
+//       static_cast<T const *>(residual_ptr), // ptr_C
+//       stride_C,                             // dC
+//       static_cast<T *>(output_ptr),         // ptr_D
+//       stride_C,                             // dD
+//       {1.0f, 1.0f}                          // alpha and beta
+//   };
 
-  typename Mainloop::Params mainloop_params =
-      Mainloop::to_underlying_arguments(problem_shape, mainloop_args);
-  typename Epilogue::Params epilogue_params =
-      Epilogue::to_underlying_arguments(problem_shape, epilogue_args);
+//   typename Mainloop::Params mainloop_params =
+//       Mainloop::to_underlying_arguments(problem_shape, mainloop_args);
+//   typename Epilogue::Params epilogue_params =
+//       Epilogue::to_underlying_arguments(problem_shape, epilogue_args);
 
-  dim3 grid(1);
-  dim3 block(256);
+//   dim3 grid(1);
+//   dim3 block(256);
 
-  size_t shared_mem_size = 100000;
-  cudaFuncSetAttribute(linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>,
-                       cudaFuncAttributeMaxDynamicSharedMemorySize,
-                       shared_mem_size);
-  // linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>
-  //     <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params);
+//   size_t shared_mem_size = 100000;
+//   cudaFuncSetAttribute(linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>,
+//                        cudaFuncAttributeMaxDynamicSharedMemorySize,
+//                        shared_mem_size);
+//   // linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>
+//   //     <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params);
 
-  cudaEvent_t start, stop;
-  cudaEventCreate(&start);
-  cudaEventCreate(&stop);
+//   cudaEvent_t start, stop;
+//   cudaEventCreate(&start);
+//   cudaEventCreate(&stop);
 
-  constexpr int WARMUP_RUNS = 16;
-  constexpr int BENCHMARK_RUNS = 1000;
+//   constexpr int WARMUP_RUNS = 16;
+//   constexpr int BENCHMARK_RUNS = 1000;
 
-  printf("=== Kernel Performance Profiling ===\n");
+//   printf("=== Kernel Performance Profiling ===\n");
 
-  for (int i = 0; i < WARMUP_RUNS; i++) {
-    linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>
-        <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params);
-  }
-  cudaDeviceSynchronize(); // Wait for all warmup runs to complete
+//   for (int i = 0; i < WARMUP_RUNS; i++) {
+//     linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>
+//         <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params);
+//   }
+//   cudaDeviceSynchronize(); // Wait for all warmup runs to complete
 
-  printf("Running %d benchmark iterations...\n", BENCHMARK_RUNS);
+//   printf("Running %d benchmark iterations...\n", BENCHMARK_RUNS);
 
-  float *iteration_times = new float[BENCHMARK_RUNS];
-  float total_time_ms = 0.0f;
+//   float *iteration_times = new float[BENCHMARK_RUNS];
+//   float total_time_ms = 0.0f;
 
-  for (int i = 0; i < BENCHMARK_RUNS; i++) {
-    cudaEventRecord(start);
-    linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>
-        <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params);
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
+//   for (int i = 0; i < BENCHMARK_RUNS; i++) {
+//     cudaEventRecord(start);
+//     linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>
+//         <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params);
+//     cudaEventRecord(stop);
+//     cudaEventSynchronize(stop);
 
-    float iteration_time_ms;
-    cudaEventElapsedTime(&iteration_time_ms, start, stop);
+//     float iteration_time_ms;
+//     cudaEventElapsedTime(&iteration_time_ms, start, stop);
 
-    total_time_ms += iteration_time_ms;
-  }
+//     total_time_ms += iteration_time_ms;
+//   }
 
-  float avg_time_ms = total_time_ms / BENCHMARK_RUNS;
+//   float avg_time_ms = total_time_ms / BENCHMARK_RUNS;
 
-  printf("\n=== Performance Results ===\n");
-  printf("Configuration:\n");
-  printf("  BATCH_SIZE=%d, OUTPUT_SIZE=%d, REDUCTION_SIZE=%d\n",
-         BATCH_SIZE,
-         OUTPUT_SIZE,
-         REDUCTION_SIZE);
-  printf("  Average: %.3f ms\n", avg_time_ms);
+//   printf("\n=== Performance Results ===\n");
+//   printf("Configuration:\n");
+//   printf("  BATCH_SIZE=%d, OUTPUT_SIZE=%d, REDUCTION_SIZE=%d\n",
+//          BATCH_SIZE,
+//          OUTPUT_SIZE,
+//          REDUCTION_SIZE);
+//   printf("  Average: %.3f ms\n", avg_time_ms);
 
-  printf("===============================\n");
+//   printf("===============================\n");
 
-  delete[] iteration_times;
-  cudaEventDestroy(start);
-  cudaEventDestroy(stop);
-}
+//   delete[] iteration_times;
+//   cudaEventDestroy(start);
+//   cudaEventDestroy(stop);
+// }
 
-#define DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(                            \
-    OUTPUT_SIZE, BATCH_SIZE, REDUCTION_SIZE)                                   \
-  case REDUCTION_SIZE:                                                         \
-    launch_linear_hopper_cute<cutlass::bfloat16_t, OUTPUT_SIZE, BATCH_SIZE, REDUCTION_SIZE>(   \
-        weight_ptr, input_ptr, residual_ptr, output_ptr);                      \
-    break;
+// #define DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(                            \
+//     OUTPUT_SIZE, BATCH_SIZE, REDUCTION_SIZE)                                   \
+//   case REDUCTION_SIZE:                                                         \
+//     launch_linear_hopper_cute<cutlass::bfloat16_t, OUTPUT_SIZE, BATCH_SIZE, REDUCTION_SIZE>(   \
+//         weight_ptr, input_ptr, residual_ptr, output_ptr);                      \
+//     break;
 
-#define DISPATCH_LINEAR_CUTE_REDUCTION_SIZE(OUTPUT_SIZE, BATCH_SIZE)         \
-  switch (weight.size(1)) {                                                     \
-    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(OUTPUT_SIZE, BATCH_SIZE, 4096)  \
-    /* \
-    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(OUTPUT_SIZE, BATCH_SIZE, 12288) \
-    */ \
-    default:                                                                   \
-      printf("Unsupported reduction size in test: %zu\n", input.size(1));      \
-      break;                                                                   \
-  }
+// #define DISPATCH_LINEAR_CUTE_REDUCTION_SIZE(OUTPUT_SIZE, BATCH_SIZE)         \
+//   switch (weight.size(1)) {                                                     \
+//     DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(OUTPUT_SIZE, BATCH_SIZE, 4096)  \
+//     /* \
+//     DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(OUTPUT_SIZE, BATCH_SIZE, 12288) \
+//     */ \
+//     default:                                                                   \
+//       printf("Unsupported reduction size in test: %zu\n", input.size(1));      \
+//       break;                                                                   \
+//   }
 
-#define DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(OUTPUT_SIZE, BATCH_SIZE)       \
-  case BATCH_SIZE:                                                            \
-    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE(OUTPUT_SIZE, BATCH_SIZE)             \
-    break;
+// #define DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(OUTPUT_SIZE, BATCH_SIZE)       \
+//   case BATCH_SIZE:                                                            \
+//     DISPATCH_LINEAR_CUTE_REDUCTION_SIZE(OUTPUT_SIZE, BATCH_SIZE)             \
+//     break;
 
-#define DISPATCH_LINEAR_CUTE_BATCH_SIZE(OUTPUT_SIZE)                         \
-  switch (input.size(0)) {                                                    \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(OUTPUT_SIZE, 8)                    \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(OUTPUT_SIZE, 16)                    \
-    /* \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(OUTPUT_SIZE, 32)                    \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(OUTPUT_SIZE, 64)                    \
-    */ \
-    default:                                                                   \
-      printf("Unsupported batch size in test: %zu\n", input.size(1));        \
-      break;                                                                   \
-  }
+// #define DISPATCH_LINEAR_CUTE_BATCH_SIZE(OUTPUT_SIZE)                         \
+//   switch (input.size(0)) {                                                    \
+//     DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(OUTPUT_SIZE, 8)                    \
+//     DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(OUTPUT_SIZE, 16)                    \
+//     /* \
+//     DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(OUTPUT_SIZE, 32)                    \
+//     DISPATCH_LINEAR_CUTE_BATCH_SIZE_CASE(OUTPUT_SIZE, 64)                    \
+//     */ \
+//     default:                                                                   \
+//       printf("Unsupported batch size in test: %zu\n", input.size(1));        \
+//       break;                                                                   \
+//   }
 
-#define DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(OUTPUT_SIZE)                     \
-  case OUTPUT_SIZE:                                                             \
-    DISPATCH_LINEAR_CUTE_BATCH_SIZE(OUTPUT_SIZE)                             \
-    break;
+// #define DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(OUTPUT_SIZE)                     \
+//   case OUTPUT_SIZE:                                                             \
+//     DISPATCH_LINEAR_CUTE_BATCH_SIZE(OUTPUT_SIZE)                             \
+//     break;
 
-void linear_kernel(torch::Tensor weight,
-                   torch::Tensor input,
-                   torch::Tensor residual,
-                   torch::Tensor output) {
+// void linear_kernel(torch::Tensor weight,
+//                    torch::Tensor input,
+//                    torch::Tensor residual,
+//                    torch::Tensor output) {
 
-  void *input_ptr = input.data_ptr();
-  void *weight_ptr = weight.data_ptr();
-  void *residual_ptr = residual.data_ptr();
-  void *output_ptr = output.data_ptr();
+//   void *input_ptr = input.data_ptr();
+//   void *weight_ptr = weight.data_ptr();
+//   void *residual_ptr = residual.data_ptr();
+//   void *output_ptr = output.data_ptr();
 
-  switch (weight.size(0)) {
-    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(64)                    \
-    default:
-      printf("Unsupported output size in test: %zu\n", weight.size(0));
-      break;
-  }
+//   switch (weight.size(0)) {
+//     DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(64)                    \
+//     default:
+//       printf("Unsupported output size in test: %zu\n", weight.size(0));
+//       break;
+//   }
 
-  cudaError_t err = cudaDeviceSynchronize();
-  if (err != cudaSuccess) {
-    printf("CUDA kernel launch error: %s\n", cudaGetErrorString(err));
-  }
-}
+//   cudaError_t err = cudaDeviceSynchronize();
+//   if (err != cudaSuccess) {
+//     printf("CUDA kernel launch error: %s\n", cudaGetErrorString(err));
+//   }
+// }
 
 template <typename CollectiveMainloop, typename CollectiveEpilogue, typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE, typename TMA_A, typename TMA_B, typename TMA_OUT, typename TMA_RESIDUAL = void>
 __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_mpk_wrapper(
     CUTE_GRID_CONSTANT
-    typename CollectiveMainloop::Params const mainloop_params,
+    typename CollectiveMainloop::template Params<true> const mainloop_params,
     CUTE_GRID_CONSTANT
     typename CollectiveEpilogue::Params const epilogue_params,
     const __grid_constant__ TMA_A tma_a,
@@ -256,7 +256,7 @@ __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_mpk_wrapper(
     const __grid_constant__ TMA_OUT tma_out,
     const __grid_constant__ TMA_RESIDUAL tma_residual) {
   kernel::linear_cutlass_ws_hopper<CollectiveMainloop,
-                                           CollectiveEpilogue, T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, TMA_OUT, TMA_RESIDUAL>(mainloop_params,
+                                           CollectiveEpilogue, true, T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, TMA_OUT, TMA_RESIDUAL>(mainloop_params,
                                                                epilogue_params, tma_a, tma_b, tma_out, &tma_residual);
 }
 
@@ -319,8 +319,11 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
       {1.0f, 1.0f}                          // alpha and beta
   };
 
-  typename Mainloop::Params mainloop_params =
-      Mainloop::to_underlying_arguments(problem_shape, mainloop_args);
+  // typename Mainloop::Params mainloop_params =
+  // Mainloop::template to_underlying_arguments</*onHost=*/true>(problem_shape, mainloop_args);
+  using MainloopParamsHost = typename Mainloop::template Params<true>;
+MainloopParamsHost mainloop_params =
+    Mainloop::template to_underlying_arguments<true>(problem_shape, mainloop_args);
   typename Epilogue::Params epilogue_params =
       Epilogue::to_underlying_arguments(problem_shape, epilogue_args);
 
@@ -338,6 +341,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
       constexpr int OUTPUT_ATOM_SIZE = 64; // this is padded
       constexpr int OUTPUT_TMA_CP_SIZE = OUTPUT_SIZE < 64 ? OUTPUT_SIZE : 64;
       constexpr int OUTPUT_ATOM_REPEAT_COL = 1;
+      constexpr int PADDED_BATCH_SIZE = 16;
     
       constexpr int SMEM_M_SIZE = 16;
       using TMA_B =
@@ -345,9 +349,9 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                               B,
                               M,
                               S,
-                              BATCH_SIZE,                      /*GMEM_ROW_*/
+                              PADDED_BATCH_SIZE,                      /*GMEM_ROW_*/
                               REDUCTION_SIZE,                  /*GMEM_COL_*/
-                              BATCH_SIZE,                      /*SMEM_ROW_*/
+                              PADDED_BATCH_SIZE,                      /*SMEM_ROW_*/
                               TMA_CP_ASYNC_SIZE,               /*SMEM_COL_*/
                               REDUCTION_SIZE,                  /*GMEM_STRIDE_ROW_*/
                               1,                               /*GMEM_STRIDE_COL_*/
@@ -374,9 +378,9 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                                                0,
                                                0,
                                                0,
-                                               BATCH_SIZE,
+                                               PADDED_BATCH_SIZE,
                                                OUTPUT_SIZE,
-                                               BATCH_SIZE,
+                                               PADDED_BATCH_SIZE,
                                                OUTPUT_TMA_CP_SIZE,
                                                OUTPUT_SIZE,
                                                1,
@@ -389,9 +393,9 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                                           B,
                                           M,
                                           S,
-                                          BATCH_SIZE,
+                                          PADDED_BATCH_SIZE,
                                           OUTPUT_SIZE,
-                                          BATCH_SIZE,
+                                          PADDED_BATCH_SIZE,
                                           OUTPUT_TMA_CP_SIZE,
                                           OUTPUT_SIZE,
                                           1,
@@ -529,6 +533,6 @@ void linear_mpk_kernel(torch::Tensor weight,
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("linear", &linear_kernel, "Linear kernel");
+  // m.def("linear", &linear_kernel, "Linear kernel");
   m.def("linear_mpk", &linear_mpk_kernel, "Linear mpk kernel");
 }

@@ -1106,6 +1106,7 @@ int TaskRegister::register_linear_swapAB_hopper_task(
   int const SMEM_M_SIZE = 16; // batch size padded to 16
   int const output_tma_cp_size = output_size < 64 ? output_size : 64;
   int const output_atom_size = 64;
+  batch_size = 16;
   code.e("using TMA_B = kernel::tma::tma_2d<bfloat16, $, $, $, $, $, $, $, $, "
          "$, $, $, $, true>;",
          B,
@@ -1249,7 +1250,7 @@ assert(output_ops[0]->dtensor.owner_op->op_type == type::KN_INPUT_OP);
 kn::KNInputOp *kn_input_op =
     static_cast<kn::KNInputOp *>(output_ops[0]->dtensor.owner_op);
 output_stride = static_cast<int>(kn_input_op->input_strides[0]);
-
+const int padded_batch_size = 16;
 mirage::transpiler::CodeKeeper code;
 code.inc_indent();
 // NOTE: output_size and batch_size are swapped here
@@ -1279,7 +1280,8 @@ code.e("    static_cast<cutlass::bfloat16_t *>(task_desc.outputs[0].base_ptr),")
 code.e("    stride_C,");
 code.e("    {1.0f, 1.0f},");
 code.e("};");
-code.e("typename Mainloop::Params mainloop_params = Mainloop::to_underlying_arguments(problem_shape, mainloop_args);");
+code.e("using MainloopParamsDevice = typename Mainloop::template Params<false>;");
+code.e("MainloopParamsDevice mainloop_params = Mainloop::to_underlying_arguments<false>(problem_shape, mainloop_args);");
 code.e("typename Epilogue::Params epilogue_params = Epilogue::to_underlying_arguments(problem_shape, epilogue_args);");
 
  // define TMAs
@@ -1293,6 +1295,7 @@ code.e("typename Epilogue::Params epilogue_params = Epilogue::to_underlying_argu
  int const SMEM_M_SIZE = 16; // batch size padded to 16
  int const output_tma_cp_size = output_size < 64 ? output_size : 64;
  int const output_atom_size = 64;
+ batch_size = 16;
  code.e("using TMA_B = kernel::tma::tma_2d<cutlass::bfloat16_t, $, $, $, $, $, $, $, $, "
         "$, $, $, $, true>;",
         B,
@@ -1385,7 +1388,7 @@ code.e("typename Epilogue::Params epilogue_params = Epilogue::to_underlying_argu
 //     "kernel::linear_cutlass_ws_hopper<Mainloop, Epilogue>(mainloop_params, epilogue_params);");
 
 code.e(
-      "kernel::linear_cutlass_ws_hopper<Mainloop, Epilogue, cutlass::bfloat16_t, $, $, $, TMA_A, TMA_B, "
+      "kernel::linear_cutlass_ws_hopper<Mainloop, Epilogue, false, cutlass::bfloat16_t, $, $, $, TMA_A, TMA_B, "
       "TMA_OUT, $>(mainloop_params, epilogue_params,",
       batch_size,
       output_size,

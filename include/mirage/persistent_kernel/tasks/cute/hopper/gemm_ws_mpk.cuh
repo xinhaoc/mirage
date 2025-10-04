@@ -44,17 +44,17 @@
  
  using namespace cute;
  
- template <class CollectiveMainloop, class CollectiveEpilogue, typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE, typename TMA_A, typename TMA_B, typename TMA_OUT, typename TMA_RESIDUAL = void>
+ template <class CollectiveMainloop, class CollectiveEpilogue, bool TMAOnHost, typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE, typename TMA_A, typename TMA_B, typename TMA_OUT, typename TMA_RESIDUAL = void>
  CUTLASS_DEVICE void linear_cutlass_ws_hopper(
-     typename CollectiveMainloop::Params const &mainloop_params,
+     typename CollectiveMainloop::template Params<TMAOnHost> const &mainloop_params,
      typename CollectiveEpilogue::Params const &epilogue_params,
      const TMA_A &tma_a,
      const TMA_B &tma_b,
      const TMA_OUT &tma_out,
      const TMA_RESIDUAL *tma_residual = nullptr) {
-   if (threadIdx.x == 0) {
-    printf("Entering linear_cutlass_ws_hopper\n");
-   }
+  //  if (threadIdx.x == 0) {
+  //   printf("blockIdx.x: %d, threadIdx.x: %d, Entering linear_cutlass_ws_hopper, batch_size: %d, output_size: %d, reduction_size: %d\n", blockIdx.x, threadIdx.x, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE);
+  //  }
  
    struct SharedStorage {
      // Mainloop and epilogue don't use smem concurrently since kernel is
@@ -109,6 +109,10 @@
 
    extern __shared__ char smem[];
    uintptr_t aligned_smem = (reinterpret_cast<uintptr_t>(smem) + 1023) / 1024 * 1024;
+
+  //  if (threadIdx.x == 0) {
+  //   printf("blockIdx.x: %d, threadIdx.x: %d, Aligning smem: %llu\n", blockIdx.x, threadIdx.x, aligned_smem);
+  //  }
  
    using ClusterShape = typename CollectiveMainloop::ClusterShape;
    using TiledMma = typename CollectiveMainloop::TiledMma;
@@ -186,13 +190,20 @@
    // Issue Tma Descriptor Prefetch from a single thread
    if ((warp_idx == 0) && lane_predicate) {
     //  CollectiveMainloop::prefetch_tma_descriptors(mainloop_params);
+    // if (threadIdx.x == 0) {
+    //   printf("blockIdx.x: %d, threadIdx.x: %d, Prefetching tma descriptors\n", blockIdx.x, threadIdx.x);
+    // }
 
-      prefetch_tma_descriptor(tma_a.desc_ptr);
-      prefetch_tma_descriptor(tma_b.desc_ptr);
-      prefetch_tma_descriptor(tma_out.desc_ptr);
-      if constexpr (HAS_RESIDUAL) {
-        prefetch_tma_descriptor(tma_residual->desc_ptr);
-      }
+      // prefetch_tma_descriptor(tma_a.desc_ptr);
+      // prefetch_tma_descriptor(tma_b.desc_ptr);
+      // prefetch_tma_descriptor(tma_out.desc_ptr);
+      // if constexpr (HAS_RESIDUAL) {
+      //   prefetch_tma_descriptor(tma_residual->desc_ptr);
+      // }
+
+      // if (threadIdx.x == 0) {
+      //   printf("blockIdx.x: %d, threadIdx.x: %d, Prefetched tma descriptors\n", blockIdx.x, threadIdx.x);
+      // }
     //  NOTE(Yu): prefetch epilogue tma descriptor if needed
      // CollectiveEpilogue::prefetch_tma_descriptors(params.epilogue);
    }
@@ -212,11 +223,6 @@
    mainloop_pipeline_params.num_consumers = cutlass::NumThreadsPerWarpGroup;
    mainloop_pipeline_params.transaction_bytes =
        mainloop_params.tma_transaction_bytes;
-  if (threadIdx.x == 128) {
-    printf("transaction_bytes: %d\n", mainloop_pipeline_params.transaction_bytes);
-    printf("smemLayoutA: \n"); print(SmemLayoutA{});
-    printf("smemLayoutB: \n"); print(SmemLayoutB{});
-  }
    MainloopPipeline mainloop_pipeline(shared_storage.pipelines.mainloop,
                                       mainloop_pipeline_params,
                                       ClusterShape{});
@@ -315,6 +321,9 @@
    //   }
    // } (gB_nkl);
  
+  //  if (threadIdx.x == 0) {
+  //   printf("blockIdx.x: %d, threadIdx.x: %d, Making blk_coord\n", blockIdx.x, threadIdx.x);
+  //  }
    auto blk_coord = make_coord(Int<0>{}, Int<0>{}, _, Int<0>{});
  
    // Get pipeline iterators and increments from tensor shapes
@@ -345,10 +354,10 @@
             int lane_predicate = cute::elect_one_sync();
 
             if (lane_predicate) {
-            Tensor sA = make_tensor(make_smem_ptr(shared_storage.tensors.mainloop.smem_A.data()),
-                                    SmemLayoutA{}); // (BLK_M,BLK_K,PIPE)
-            Tensor sB = make_tensor(make_smem_ptr(shared_storage.tensors.mainloop.smem_B.data()),
-                                    SmemLayoutB{}); // (BLK_N,BLK_K,PIPE)
+            // Tensor sA = make_tensor(make_smem_ptr(shared_storage.tensors.mainloop.smem_A.data()),
+            //                         SmemLayoutA{}); // (BLK_M,BLK_K,PIPE)
+            // Tensor sB = make_tensor(make_smem_ptr(shared_storage.tensors.mainloop.smem_B.data()),
+            //                         SmemLayoutB{}); // (BLK_N,BLK_K,PIPE)
 
             // Tensor gA_mkl = get<0>(load_inputs);
             // Tensor gB_nkl = get<1>(load_inputs);
@@ -375,12 +384,15 @@
             // Tensor tBgB = block_tma_b.partition_S(gB); // (TMA,TMA_N,TMA_K,k)
             // Tensor tBsB = block_tma_b.partition_D(sB); // (TMA,TMA_N,TMA_K,PIPE)
 
-            uint16_t mcast_mask_a = 0;
-            uint16_t mcast_mask_b = 0;
+            // uint16_t mcast_mask_a = 0;
+            // uint16_t mcast_mask_b = 0;
 
             // Mainloop
             CUTLASS_PRAGMA_NO_UNROLL
             for (int k_iter = 0; k_iter < k_tile_count; k_iter++) {
+              // if (threadIdx.x == 0) {
+              //   printf("blockIdx.x: %d, threadIdx.x: %d, Producer loop k_iter: %d\n", blockIdx.x, threadIdx.x, k_iter);
+              // }
                 // LOCK smem_pipe_write for _writing_
                 mainloop_pipeline.producer_acquire(mainloop_pipe_producer_state);
 
@@ -405,7 +417,9 @@
                       *tma_barrier, input_weight_smem(0, 0), tma_coords_A);
                   tma_b.tma_cp_async(
                       *tma_barrier, input_smem(0, 0), tma_coords_B);
-                      
+                  // if (threadIdx.x == 0) {
+                  //   printf("blockIdx.x: %d, threadIdx.x: %d, Producer loop k_iter: %d, Tma cp async\n", blockIdx.x, threadIdx.x, k_iter);
+                  // }
                 // printf("producer really start\n");
                 // copy(mainloop_params.tma_load_a.with(*tma_barrier, mcast_mask_a),
                 //     tAgA(_, _, _, *k_tile_iter),
@@ -418,6 +432,10 @@
 
                 // Advance smem_pipe_write
                 ++mainloop_pipe_producer_state;
+
+                // if (threadIdx.x == 0) {
+                //   printf("blockIdx.x: %d, threadIdx.x: %d, Producer loop k_iter: %d, Advance smem_pipe_write\n", blockIdx.x, threadIdx.x, k_iter);
+                // }
 
             }
         }
@@ -444,6 +462,9 @@
         }
      }
    } else if (warp_group_role == WarpGroupRole::Consumer) {
+    // if (threadIdx.x == 128) {
+    //   printf("blockIdx.x: %d, threadIdx.x: %d, Consumer loop\n", blockIdx.x, threadIdx.x);
+    // }
      Tensor accum = partition_fragment_C(
          tiled_mma, take<0, 2>(blk_shape)); // (MMA,MMA_M,MMA_N)
  
@@ -467,7 +488,6 @@
 
         int warp_group_idx = __shfl_sync(
         0xFFFFFFFF, thread_idx / cutlass::NumThreadsPerWarpGroup, 0);
-        TiledMma tiled_mma;
         auto thread_mma =
         tiled_mma.get_slice(warp_group_thread_layout(warp_group_idx));
 
@@ -507,6 +527,9 @@
         auto barrier_token = mainloop_pipeline.consumer_try_wait(smem_pipe_read);
 
         mainloop_pipeline.consumer_wait(smem_pipe_read, barrier_token);
+        // if (threadIdx.x == 128) {
+        //   printf("blockIdx.x: %d, threadIdx.x: %d, Consumer loop, after consumer wait\n", blockIdx.x, threadIdx.x);
+        // }
 
         int read_stage = smem_pipe_read.index();
         warpgroup_arrive();
@@ -532,6 +555,9 @@
         }
         #endif
         // Unroll the K mode manually to set scale D to 1
+        // if (threadIdx.x == 128) {
+        //   printf("blockIdx.x: %d, threadIdx.x: %d, Consumer loop, before gemm\n", blockIdx.x, threadIdx.x);
+        // }
         CUTLASS_PRAGMA_UNROLL
         for (int k_block = 0; k_block < size<2>(tCrA); ++k_block) {
         // (V,M,K) x (V,N,K) => (V,M,N)
@@ -541,6 +567,9 @@
         accum);
         tiled_mma.accumulate_ = GMMA::ScaleOut::One;
         }
+        // if (threadIdx.x == 128) {
+        //   printf("blockIdx.x: %d, threadIdx.x: %d, Consumer loop, after gemm\n", blockIdx.x, threadIdx.x);
+        // }
 
         warpgroup_commit_batch();
 
@@ -550,6 +579,9 @@
         tiled_mma.accumulate_ = GMMA::ScaleOut::One;
 
         warpgroup_fence_operand(accum);
+        // if (threadIdx.x == 128) {
+        //   printf("blockIdx.x: %d, threadIdx.x: %d, Consumer loop, before second gemm\n", blockIdx.x, threadIdx.x);
+        // }
         CUTLASS_PRAGMA_UNROLL
         for (int k_tile_prologue = prologue_mma_count - 1; k_tile_prologue > 0;
         --k_tile_prologue) {
@@ -807,6 +839,9 @@
      //                                epi_store_pipeline,
      //                                epi_store_pipe_producer_state_next);
    }
+  //  if (threadIdx.x == 0) {
+  //   printf("blockIdx.x: %d, threadIdx.x: %d, Exiting linear_cutlass_ws_hopper\n", blockIdx.x, threadIdx.x);
+  //  }
  }
  // };
  
