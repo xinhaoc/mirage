@@ -40,7 +40,6 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
                                               int num_active_tokens,
                                               bool residual) {
 
-  printf("Entering linear_kernel with BATCH_SIZE: %d, OUTPUT_SIZE: %d, REDUCTION_SIZE: %d, O_STRIDE: %d, PIPE_MAX: %d, residual: %d\n", BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, O_STRIDE, PIPE_MAX, residual);
   constexpr int CHUNK_SIZE = 16 / sizeof(T);
   constexpr int OUTPUT_ATOM_SIZE = OUTPUT_SIZE <= 128 ? OUTPUT_SIZE : 128;
   constexpr int log2_OUTPUT_ATOM_SIZE = log2_constexpr(OUTPUT_ATOM_SIZE);
@@ -156,8 +155,6 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
 
   OutputFullSmem output_smem(shared_output);
   
-  printf("END_OFFSET: %d\n", END_OFFSET);
-
   // Initialize output_smem: if residual is provided, preload it; otherwise zero
 #pragma unroll
   for (int i = threadIdx.x; i < BATCH_SIZE * OUTPUT_SIZE / CHUNK_SIZE;
