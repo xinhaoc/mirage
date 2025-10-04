@@ -257,7 +257,7 @@ __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_mpk_wrapper(
     const __grid_constant__ TMA_RESIDUAL tma_residual) {
   kernel::linear_cutlass_ws_hopper<CollectiveMainloop,
                                            CollectiveEpilogue, T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, TMA_OUT, TMA_RESIDUAL>(mainloop_params,
-                                                               epilogue_params, tma_a, tma_b, tma_out, tma_residual);
+                                                               epilogue_params, tma_a, tma_b, tma_out, &tma_residual);
 }
 
 template <typename T, int OUTPUT_SIZE, int BATCH_SIZE, int REDUCTION_SIZE>
@@ -341,7 +341,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
     
       constexpr int SMEM_M_SIZE = 16;
       using TMA_B =
-          kernel::tma::tma_2d<bfloat16,
+          kernel::tma::tma_2d<T,
                               B,
                               M,
                               S,
@@ -356,7 +356,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                               SMEM_M_SIZE * TMA_CP_ASYNC_SIZE, /*SMEM_STRIDE_*/
                               true>;
       using TMA_A =
-          kernel::tma::tma_2d<bfloat16,
+          kernel::tma::tma_2d<T,
                               B,
                               M,
                               S,
@@ -370,7 +370,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                               TMA_CP_ASYNC_REPEAT_COL, /*SMEM_REPEAT_COL_*/
                               OUTPUT_ATOM_SIZE * TMA_CP_ASYNC_SIZE, /*SMEM_STRIDE_*/
                               true>;
-      using TMA_RESIDUAL = kernel::tma::tma_2d<bfloat16,
+      using TMA_RESIDUAL = kernel::tma::tma_2d<T,
                                                0,
                                                0,
                                                0,
@@ -385,7 +385,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                                                SMEM_M_SIZE * OUTPUT_TMA_CP_SIZE,
                                                true>;
     
-      using TMA_OUT = kernel::tma::tma_2d<bfloat16,
+      using TMA_OUT = kernel::tma::tma_2d<T,
                                           B,
                                           M,
                                           S,
@@ -408,7 +408,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
   dim3 block(256);
 
   size_t shared_mem_size = 100000;
-  cudaFuncSetAttribute(linear_kernel_hopper_cute_mpk_wrapper<Mainloop, Epilogue, bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, TMA_OUT, TMA_RESIDUAL>,
+  cudaFuncSetAttribute(linear_kernel_hopper_cute_mpk_wrapper<Mainloop, Epilogue, cutlass::bfloat16_t, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, TMA_OUT, TMA_RESIDUAL>,
                        cudaFuncAttributeMaxDynamicSharedMemorySize,
                        shared_mem_size);
   // linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>
@@ -425,7 +425,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
 
   for (int i = 0; i < WARMUP_RUNS; i++) {
     linear_kernel_hopper_cute_mpk_wrapper<Mainloop, Epilogue, T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, TMA_OUT, TMA_RESIDUAL>
-        <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params, tma_a, tma_b, tma_out, &tma_residual);
+        <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params, tma_a, tma_b, tma_out, tma_residual);
   }
   cudaDeviceSynchronize(); // Wait for all warmup runs to complete
 
@@ -437,7 +437,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
   for (int i = 0; i < BENCHMARK_RUNS; i++) {
     cudaEventRecord(start);
     linear_kernel_hopper_cute_mpk_wrapper<Mainloop, Epilogue, T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, TMA_OUT, TMA_RESIDUAL>
-        <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params, tma_a, tma_b, tma_out, &tma_residual);
+        <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params, tma_a, tma_b, tma_out, tma_residual);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 
