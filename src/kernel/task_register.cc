@@ -1250,13 +1250,13 @@ assert(output_ops[0]->dtensor.owner_op->op_type == type::KN_INPUT_OP);
 kn::KNInputOp *kn_input_op =
     static_cast<kn::KNInputOp *>(output_ops[0]->dtensor.owner_op);
 output_stride = static_cast<int>(kn_input_op->input_strides[0]);
-const int padded_batch_size = 16;
+
 mirage::transpiler::CodeKeeper code;
 code.inc_indent();
 // NOTE: output_size and batch_size are swapped here
 code.e("auto problem_shape = cute::Shape<cute::Int<$>, cute::Int<$>, cute::Int<$>>{};", output_size, batch_size, reduction_size);
 // NOTE: output_size and batch_size are swapped here
-code.e("using KernelTraits = kernel::MMAKernelTraits<cutlass::bfloat16_t, $, $, $, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor, cutlass::layout::RowMajor, cutlass::layout::RowMajor, $, $, $, $, decltype(problem_shape), $, $>;", output_size, batch_size, reduction_size, 8, 64, 16, 64, batch_size, KSTAGES);
+code.e("using KernelTraits = kernel::MMAKernelTraits<cutlass::bfloat16_t, $, $, $, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor, cutlass::layout::RowMajor, cutlass::layout::RowMajor, $, $, $, $, decltype(problem_shape), $, $>;", output_size, batch_size, reduction_size, 8, 64, batch_size, 64, batch_size, KSTAGES);
 code.e("using Mainloop = kernel::CollectiveMainloop<KernelTraits>;");
 code.e("using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;");
 code.e("using StrideA = typename KernelTraits::StrideA;");
@@ -1292,10 +1292,10 @@ code.e("typename Epilogue::Params epilogue_params = Epilogue::to_underlying_argu
  constexpr int TILE_SIZE = 64;
  constexpr int Kstages = 5;
  assert(batch_size <= 16);
- int const SMEM_M_SIZE = 16; // batch size padded to 16
+ int const SMEM_M_SIZE = batch_size;
  int const output_tma_cp_size = output_size < 64 ? output_size : 64;
  int const output_atom_size = 64;
- batch_size = 16;
+
  code.e("using TMA_B = kernel::tma::tma_2d<cutlass::bfloat16_t, $, $, $, $, $, $, $, $, "
         "$, $, $, $, true>;",
         B,
@@ -1389,11 +1389,12 @@ code.e("typename Epilogue::Params epilogue_params = Epilogue::to_underlying_argu
 
 code.e(
       "kernel::linear_cutlass_ws_hopper<Mainloop, Epilogue, false, cutlass::bfloat16_t, $, $, $, TMA_A, TMA_B, "
-      "TMA_OUT, $>(mainloop_params, epilogue_params,",
+      "TMA_OUT, $, $>(mainloop_params, epilogue_params,",
       batch_size,
       output_size,
       reduction_size,
-      with_residual ? "TMA_RESIDUAL" : "void"
+      with_residual ? "TMA_RESIDUAL" : "void",
+      output_stride
     );
   code.e("    tma_a,");
   code.e("    tma_b,");

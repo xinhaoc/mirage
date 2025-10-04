@@ -39,7 +39,7 @@ using namespace cute;
 
 template <class CollectiveMainloop, class CollectiveEpilogue>
 CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
-    typename CollectiveMainloop::Params const &mainloop_params,
+    typename CollectiveMainloop::template Params<true> const &mainloop_params,
     typename CollectiveEpilogue::Params const &epilogue_params) {
 
   struct SharedStorage {
@@ -98,11 +98,6 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
   if ((warp_idx == 0) && lane_predicate) {
     CollectiveMainloop::prefetch_tma_descriptors(mainloop_params);
     // CollectiveEpilogue::prefetch_tma_descriptors(params.epilogue);
-  }
-
-  if (threadIdx.x == 0) {
-    printf("smemLayoutA: \n"); print(typename CollectiveMainloop::SmemLayoutA{});
-    printf("smemLayoutB: \n"); print(typename CollectiveMainloop::SmemLayoutB{});
   }
 
   // Mainloop Load pipeline
