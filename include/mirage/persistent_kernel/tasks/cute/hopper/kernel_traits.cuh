@@ -90,6 +90,8 @@ struct MMAKernelTraits {
   using StrideC = cutlass::detail::TagToStrideC_t<GmemLayoutCTag>;
   using StrideD = cutlass::detail::TagToStrideC_t<GmemLayoutDTag>;
 
+  using IS_SWAPAB = IS_SWAPAB_;
+
   static constexpr int M = M_;
   static constexpr int N = N_;
   static constexpr int K = K_;
@@ -199,7 +201,7 @@ struct MMAKernelTraits {
                                          SmemLayoutAtomB,
                                          SmemLayoutAtomC>;
 
-    static constexpr bool SwapAB = IS_SWAPAB_::value;
+    static constexpr bool SwapAB = IS_SWAPAB::value;
 
 };
 

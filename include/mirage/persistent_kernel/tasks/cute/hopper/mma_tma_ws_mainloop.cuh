@@ -62,6 +62,10 @@ struct CollectiveMainloop {
 
   using TileScheduler = typename KernelTraits::TileScheduler;
 
+  using IS_SWAPAB = typename KernelTraits::IS_SWAPAB;
+  static constexpr int K_PIPE_MMAS = KernelTraits::K_PIPE_MMAS;
+  static constexpr int NUM_STAGES = KernelTraits::NUM_STAGES;
+
   struct SharedStorage {
     struct TensorStorage : cute::aligned_struct<128, _0> {
       cute::array_aligned<typename TiledMma::ValTypeA,
@@ -305,7 +309,7 @@ struct CollectiveMainloop {
     constexpr int MmaWarpGroups =
         size(TiledMma{}) / cutlass::NumThreadsPerWarpGroup;
     Layout warp_group_thread_layout = make_layout(
-        Int<MmaWarpGroups>{}, Int<cutlass::NumThreadsPerWarpGroup>{});
+      Int<MmaWarpGroups>{}, Int<cutlass::NumThreadsPerWarpGroup>{});
 
     int warp_group_idx = __shfl_sync(
         0xFFFFFFFF, thread_idx / cutlass::NumThreadsPerWarpGroup, 0);
