@@ -17,7 +17,7 @@ residual = torch.randn(batch_size, output_size, device="cuda", dtype=torch.bfloa
 
 output = torch.empty(batch_size, output_size, device="cuda", dtype=torch.bfloat16)
 
-runtime_kernel_cute_hopper.linear(weight, x, residual, output)
+runtime_kernel_cute_hopper.linear_mpk(weight, x, residual, output)
 
 # torch_out = torch.matmul(weight, x)
 torch_out = torch.matmul(x, weight.T)

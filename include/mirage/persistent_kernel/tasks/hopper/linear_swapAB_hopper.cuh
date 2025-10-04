@@ -209,6 +209,14 @@ __device__ __forceinline__ void
   // warp specialization data movement warpgroup
   if (warpgroup_id == NUM_WARPGROUPS - 1) {
     wg_decrease_regs<32>();
+    if (lane_id() == 0 && warp_idx == (NUM_WARPGROUPS * WARPGROUP_WARPS - 4)) {
+      prefetch_tma_descriptor(tma_a.desc_ptr);     
+      prefetch_tma_descriptor(tma_b.desc_ptr);     
+      prefetch_tma_descriptor(tma_out.desc_ptr); 
+      if constexpr (HAS_RESIDUAL) {
+        prefetch_tma_descriptor(tma_residual->desc_ptr);
+      }
+    }
     for (int output_atom_idx = 0; output_atom_idx < NUM_ITER_N;
          output_atom_idx++) {
       int slot_residual = output_atom_idx % Kstages;

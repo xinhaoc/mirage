@@ -100,6 +100,11 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
     // CollectiveEpilogue::prefetch_tma_descriptors(params.epilogue);
   }
 
+  if (threadIdx.x == 0) {
+    printf("smemLayoutA: \n"); print(typename CollectiveMainloop::SmemLayoutA{});
+    printf("smemLayoutB: \n"); print(typename CollectiveMainloop::SmemLayoutB{});
+  }
+
   // Mainloop Load pipeline
   using MainloopPipeline = typename CollectiveMainloop::MainloopPipeline;
   typename MainloopPipeline::Params mainloop_pipeline_params;
@@ -246,6 +251,16 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
     // not functional correctness.
     cutlass::arch::launch_dependent_grids();
 
+    #if 0
+    if (threadIdx.x == 128) {
+      printf("problem_shape_MNKL: \n"); print(problem_shape_MNKL); printf("\n");
+      printf("blk_shape: \n"); print(blk_shape); printf("\n");
+      printf("blk_coord: \n"); print(blk_coord); printf("\n");
+      printf("accumulators: \n"); print(accumulators); printf("\n");
+      printf("tiled_mma: \n"); print(tiled_mma); printf("\n");
+      printf("warp_group_thread_idx: \n"); print(warp_group_thread_idx); printf("\n");
+    }
+    #endif
     // Epilogue and write to gD
     auto [epi_load_pipe_consumer_state_next,
           epi_store_pipe_producer_state_next] =

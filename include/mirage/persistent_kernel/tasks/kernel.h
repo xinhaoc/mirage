@@ -20,4 +20,5 @@
 #include "hopper/multitoken_paged_attention_hopper.cuh"
 #include "hopper/rmsnorm_hopper.cuh"
 #include "cute/hopper/gemm_ws.cuh"
+#include "cute/hopper/gemm_ws_mpk.cuh"
 #include "cute/hopper/gemm_ws_cooperative.cuh"
