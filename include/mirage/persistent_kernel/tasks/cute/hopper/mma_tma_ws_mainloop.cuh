@@ -62,7 +62,7 @@ struct CollectiveMainloop {
 
   using TileScheduler = typename KernelTraits::TileScheduler;
 
-  using IS_SWAPAB = typename KernelTraits::IS_SWAPAB;
+  static constexpr bool SwapAB = KernelTraits::SwapAB;
   static constexpr int K_PIPE_MMAS = KernelTraits::K_PIPE_MMAS;
   static constexpr int NUM_STAGES = KernelTraits::NUM_STAGES;
 

@@ -379,7 +379,7 @@ struct CollectiveEpilogue {
                             store_pipe_producer_state);
   }
 
-private:
+// private:
   Arguments params;
   ThreadEpilogueOp epilogue_op;
 };

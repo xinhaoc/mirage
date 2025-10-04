@@ -46,10 +46,10 @@
  CUTLASS_DEVICE void linear_cutlass_ws_hopper(
      typename CollectiveMainloop::Params const &mainloop_params,
      typename CollectiveEpilogue::Params const &epilogue_params,
-     TMA_A const &tma_a,
-     TMA_B const &tma_b,
-     TMA_OUT const &tma_out,
-     TMA_RESIDUAL const *tma_residual = nullptr) {
+     const TMA_A &tma_a,
+     const TMA_B &tma_b,
+     const TMA_OUT &tma_out,
+     const TMA_RESIDUAL *tma_residual = nullptr) {
  
    struct SharedStorage {
      // Mainloop and epilogue don't use smem concurrently since kernel is
@@ -117,8 +117,8 @@
 
    auto mma_tiler = cute::make_shape(OUTPUT_SIZE, BATCH_SIZE, REDUCTION_SIZE);
 
-   T *shared_weight = shared_storage.tensors.mainloop.smem_A.begin();
-   T *shared_input = shared_storage.tensors.mainloop.smem_B.begin();
+   cutlass::bfloat16_t *shared_weight = shared_storage.tensors.mainloop.smem_A.begin();
+   cutlass::bfloat16_t *shared_input = shared_storage.tensors.mainloop.smem_B.begin();
   //  T_ *mm_output = shared_storage.tensors.epilogue.begin();
  
   //  Barrier *ab_full_mbar_ptr = reinterpret_cast<Barrier *>(shared_storage.ab_full_mbar_ptr);
@@ -136,7 +136,7 @@
   static_assert(BATCH_SIZE <= 16,
                 "Batch size must be smaller or equal to 16 in swapAB");
   constexpr int SMEM_M_SIZE = 16;
-    using InputSmem = smem_tma<T,
+    using InputSmem = smem_tma<cutlass::bfloat16_t,
                              B,
                              M,
                              S,
@@ -145,7 +145,7 @@
                              TILE_SIZE / INPUT_TMA_TILE_SIZE>;
    InputSmem input_smem(shared_input);
  
-   using WeightSmem = smem_tma<T,
+   using WeightSmem = smem_tma<cutlass::bfloat16_t,
                                B,
                                M,
                                S,
@@ -154,7 +154,7 @@
                                TILE_SIZE / WEIGHT_TMA_TILE_SIZE>;
    WeightSmem input_weight_smem(shared_weight);
  
-  //  using ResidualSmem = smem_tma<T,
+  //  using ResidualSmem = smem_tma<cutlass::bfloat16_t,
   //                                B,
   //                                M,
   //                                S,
@@ -404,7 +404,7 @@
                 //     tBgB(_, _, _, *k_tile_iter),
                 //     tBsB(_, _, _, write_stage));
 
-                ++k_iter;
+                // ++k_iter;
 
                 // Advance smem_pipe_write
                 ++mainloop_pipe_producer_state;
@@ -501,6 +501,26 @@
         int read_stage = smem_pipe_read.index();
         warpgroup_arrive();
         tiled_mma.accumulate_ = GMMA::ScaleOut::Zero;
+        #if 0
+
+        if (threadIdx.x == 128) {
+          printf("prologue_mma_count: %d\n", prologue_mma_count);
+          printf("BATCH_SIZE: %d, OUTPUT_SIZE: %d, REDUCTION_SIZE: %d\n", BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE);
+          printf("tCsA: ");
+          print(tCsA);
+          // print_tensor(tCsA);
+          printf("tCsB: ");
+          print(tCsB);
+          printf("tCrA: ");
+          print(tCrA);
+          printf("tCrB: ");
+          print(tCrB);
+          printf("accum: ");
+          print(accum);
+          printf("tiled_mma: ");
+          print(tiled_mma);
+        }
+        #endif
         // Unroll the K mode manually to set scale D to 1
         CUTLASS_PRAGMA_UNROLL
         for (int k_block = 0; k_block < size<2>(tCrA); ++k_block) {
@@ -586,10 +606,10 @@
      // the epilogue
     //  collective_mainloop.mma_tail(
     //      mainloop_pipeline, mainloop_pipe_consumer_state, k_tile_count);
-    {
+    // {
         // Prologue GMMAs
-        int prologue_mma_count = min(CollectiveMainloop::K_PIPE_MMAS, k_tile_count);
-        k_tile_count -= prologue_mma_count;
+        // int prologue_mma_count = min(CollectiveMainloop::K_PIPE_MMAS, k_tile_count);
+        // k_tile_count -= prologue_mma_count;
 
         smem_pipe_release.advance(k_tile_count);
 
@@ -601,7 +621,7 @@
                                                         // done _computing_ on it
         ++smem_pipe_release;
         }
-    }
+    // }
  
      // Hint on an early release of global memory resources.
      // The timing of calling this function only influences performance,
@@ -632,7 +652,7 @@
     //                                tiled_mma,
     //                                warp_group_thread_idx,
     //                                shared_storage.tensors.epilogue);
-    {
+    // {
         constexpr int BLK_M_RANK = cute::rank<0>(blk_shape);
         auto m_max_coord =
             unwrap(cute::transform(make_seq<BLK_M_RANK>{}, [&](auto i) {
@@ -673,7 +693,7 @@
         auto [m_coord, n_coord, k_coord, l_coord] = blk_coord;
         auto thr_mma = tiled_mma.get_thread_slice(thread_idx);
         if constexpr (::cutlass::gemm::kernel::detail::Has_SwapAB_v<CollectiveMainloop>) {
-            // Represent the full output tensor
+          // Represent the full output tensor
             Tensor mC_mnl = make_tensor(make_gmem_ptr<typename CollectiveEpilogue::DataTypeC>(epilogue_params.ptr_C),
             make_shape(M, N, L),
             stride_c); // (m,n,l)
@@ -715,15 +735,6 @@
 
             Tensor tCgD = thr_mma.partition_C(gD_T); // (VEC,THR_M,THR_N)
             Tensor tCgC = thr_mma.partition_C(gC_T); // (VEC,THR_M,THR_N)
-
-            // static_assert(is_static<typename epilogue_params::FrgLayout>::value,
-            // "Accumulator layout must be static");
-            // CUTE_STATIC_ASSERT_V(
-            // size(tCgC) == size(tCgD),
-            // "Source and destination must have the same number of elements.");
-            // CUTE_STATIC_ASSERT_V(
-            // size(tCgD) == size(accum),
-            // "Accumulator count must have the same destination element count.");
 
             // OOB predication for tile quantization "residue"
             // Absolute coordinate tensors (dynamic)
@@ -772,13 +783,13 @@
             bool pred = elem_less(tCcD(i), residue_tCcD);
             cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
             fragC, &tCgC(i), pred);
-            FragDType fragD = epilogue_op(accum(i), fragC);
+            FragDType fragD = collective_epilogue.epilogue_op(accum(i), fragC);
 
             cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
             fragD, &tCgD(i), pred);
             // }
             }
-        }
+        // }
     }
  
      // collective_epilogue.store_tail(epi_load_pipeline,
