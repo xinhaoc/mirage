@@ -63,6 +63,9 @@ struct CollectiveEpilogue {
   static constexpr Arguments
       to_underlying_arguments([[maybe_unused]] ProblemShape const &_,
                               Arguments const &args) {
+    // if (threadIdx.x == 0 && blockIdx.x == 10) {
+    //   printf("in to_underlying_arguments args.ptr_C: \n"); print(args.ptr_C); printf("\n");
+    // }
     return args;
   }
 
@@ -72,7 +75,12 @@ struct CollectiveEpilogue {
 
   CUTLASS_HOST_DEVICE
   CollectiveEpilogue(Arguments const &params_)
-      : params(params_), epilogue_op(params_.thread) {}
+      : params(params_), epilogue_op(params_.thread) {
+        // if (threadIdx.x == 0 && blockIdx.x == 10) {
+        //   printf("params_.ptr_C: \n"); print(params_.ptr_C); printf("\n");
+        //   printf("params.ptr_C: \n"); print(params.ptr_C); printf("\n");
+        // }
+      }
 
   template <class ProblemShapeMNKL,
             class BlockShapeMNK,

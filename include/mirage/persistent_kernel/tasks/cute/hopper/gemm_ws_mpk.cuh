@@ -357,7 +357,7 @@
     //                             lane_idx,
     //                             block_rank_in_cluster,
     //                             shared_storage.tensors.mainloop);
-       {
+      //  {
             int lane_predicate = cute::elect_one_sync();
 
             if (lane_predicate) {
@@ -397,11 +397,15 @@
             // Mainloop
             CUTLASS_PRAGMA_NO_UNROLL
             for (int k_iter = 0; k_iter < k_tile_count; k_iter++) {
-              // if (threadIdx.x == 0) {
+              // if (threadIdx.x == 0 && blockIdx.x == 10) {
               //   printf("blockIdx.x: %d, threadIdx.x: %d, Producer loop k_iter: %d\n", blockIdx.x, threadIdx.x, k_iter);
               // }
                 // LOCK smem_pipe_write for _writing_
                 mainloop_pipeline.producer_acquire(mainloop_pipe_producer_state);
+
+                // if (threadIdx.x == 0 && blockIdx.x == 10) {
+                //   printf("blockIdx.x: %d, threadIdx.x: %d, Producer loop k_iter: %d, Producer acquire\n", blockIdx.x, threadIdx.x, k_iter);
+                // }
 
                 //
                 // Copy gmem to smem for *k_iter
@@ -412,6 +416,10 @@
                     mainloop_pipeline.producer_get_barrier(mainloop_pipe_producer_state);
 
                 int write_stage = mainloop_pipe_producer_state.index();
+
+                // if (threadIdx.x == 0 && blockIdx.x == 10) {
+                //   printf("blockIdx.x: %d, threadIdx.x: %d, Producer loop k_iter: %d, Producer get barrier\n", blockIdx.x, threadIdx.x, k_iter);
+                // }
 
                   // wait(compute_done[slot], phase ^ 1);
                   int tma_coords_A[2] = {k_iter * TILE_SIZE,
@@ -424,7 +432,7 @@
                       *tma_barrier, input_weight_smem(0, 0), tma_coords_A);
                   tma_b.tma_cp_async(
                       *tma_barrier, input_smem(0, 0), tma_coords_B);
-                  // if (threadIdx.x == 0) {
+                  // if (threadIdx.x == 0 && blockIdx.x == 10) {
                   //   printf("blockIdx.x: %d, threadIdx.x: %d, Producer loop k_iter: %d, Tma cp async\n", blockIdx.x, threadIdx.x, k_iter);
                   // }
                 // printf("producer really start\n");
@@ -440,33 +448,34 @@
                 // Advance smem_pipe_write
                 ++mainloop_pipe_producer_state;
 
-                // if (threadIdx.x == 0) {
+                // if (threadIdx.x == 0  && blockIdx.x == 10) {
                 //   printf("blockIdx.x: %d, threadIdx.x: %d, Producer loop k_iter: %d, Advance smem_pipe_write\n", blockIdx.x, threadIdx.x, k_iter);
                 // }
 
             }
-        }
-
-
-
-
-
-       }
+        // }
+        
+        
+        
+        
+        
+      }
+      // return;
        // Update starting mainloop pipeline state for the pipeline drain
       //  mainloop_pipe_producer_state.advance(k_tile_count);
        // Make sure mainloop consumer has been waited upon before issuing
        // epilogue load
     //    collective_mainloop.load_tail(mainloop_pipeline,
     //                                  mainloop_pipe_producer_state);
-        {
-            int lane_predicate = cute::elect_one_sync();
+        // {
+            // int lane_predicate = cute::elect_one_sync();
 
             // Issue the epilogue waits
             if (lane_predicate) {
               //  pipeline.producer_tail(smem_pipe_write);
               mainloop_pipeline.producer_tail(mainloop_pipe_producer_state);
             }
-        }
+        // }
      }
    } else if (warp_group_role == WarpGroupRole::Consumer) {
     // if (threadIdx.x == 128) {
@@ -774,7 +783,7 @@
             // partitioning
             Tensor tCgD = thr_mma.partition_C(gD_T); // (VEC,THR_M,THR_N)
             Tensor tCgC = thr_mma.partition_C(gC_T); // (VEC,THR_M,THR_N)
-
+#if 0
             if (threadIdx.x == 128 && (blockIdx.x == 10 || blockIdx.x == 0)) {
               // printf("M: %d, N: %d, L: %d\n", M, N, L);
               printf("problem_shape_mnkl: \n"); print(problem_shape_mnkl); printf("\n");
@@ -792,60 +801,61 @@
               printf("tCgC: \n"); print(tCgC); printf("\n");
 
             }
+#endif
 
             // OOB predication for tile quantization "residue"
             // Absolute coordinate tensors (dynamic)
-            // auto shape_MN = make_shape(M, N);
-            // Tensor mD_crd = make_identity_tensor(shape_MN); // (M,N)
-            // Tensor cD_mn = local_tile(mD_crd,
-            // take<0, 2>(blk_shape),
-            // make_coord(m_coord, n_coord)); // (BLK_M,BLK_N)
-            // Tensor tCcD_mn = thr_mma.partition_C(cD_mn); // (VEC,THR_M,THR_N)
-            // // Relative coordinate tensors (static)
-            // Tensor cD = cute::make_coord_tensor(cD_mn.layout()); // (BLK_M,BLK_N)
-            // Tensor tCcD =
-            // cute::make_coord_tensor(tCcD_mn.layout()); // (VEC,THR_M,THR_N)
-            // // Subtract the global "bottom right" corner from the local "top left"
-            // // corner to get the max relative coordinate
-            // auto residue_cD = shape_MN - cD_mn(_0{});     // (m,n)
-            // auto residue_tCcD = shape_MN - tCcD_mn(_0{}); // (m,n)
+            auto shape_MN = make_shape(M, N);
+            Tensor mD_crd = make_identity_tensor(shape_MN); // (M,N)
+            Tensor cD_mn = local_tile(mD_crd,
+            take<0, 2>(blk_shape),
+            make_coord(m_coord, n_coord)); // (BLK_M,BLK_N)
+            Tensor tCcD_mn = thr_mma.partition_C(cD_mn); // (VEC,THR_M,THR_N)
+            // Relative coordinate tensors (static)
+            Tensor cD = cute::make_coord_tensor(cD_mn.layout()); // (BLK_M,BLK_N)
+            Tensor tCcD =
+            cute::make_coord_tensor(tCcD_mn.layout()); // (VEC,THR_M,THR_N)
+            // Subtract the global "bottom right" corner from the local "top left"
+            // corner to get the max relative coordinate
+            auto residue_cD = shape_MN - cD_mn(_0{});     // (m,n)
+            auto residue_tCcD = shape_MN - tCcD_mn(_0{}); // (m,n)
 
-            // // Fully OOB tile
+            // Fully OOB tile
             // if (not elem_less(repeat_like(residue_cD, _0{}), residue_cD)) {
             // return;
             // }
 
-            // using FragCType = remove_cvref_t<decltype(tCgC(0))>;
-            // using FragDType = remove_cvref_t<decltype(tCgD(0))>;
+            using FragCType = remove_cvref_t<decltype(tCgC(0))>;
+            using FragDType = remove_cvref_t<decltype(tCgD(0))>;
 
-            // // source is needed
-            // // if (epilogue_op.is_source_needed()) {
-            // //   CUTLASS_PRAGMA_UNROLL
-            // //   for (int i = 0; i < size(accumulators); ++i) {
-            // //     FragCType fragC;
-            // //     bool pred = elem_less(tCcD(i), residue_tCcD);
-            // //     cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
-            // //         fragC, &tCgC(i), pred);
-            // //     FragDType fragD = epilogue_op(accumulators(i), fragC);
-            // //     cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
-            // //         fragD, &tCgD(i), pred);
-            // //   }
-            // // }
-            // // source is not needed, avoid load
-            // // else {
-
-            // CUTLASS_PRAGMA_UNROLL
-            // for (int i = 0; i < size(accum); ++i) {
-            // FragCType fragC;
-            // bool pred = elem_less(tCcD(i), residue_tCcD);
-            // cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
-            // fragC, &tCgC(i), pred);
-            // FragDType fragD = collective_epilogue.epilogue_op(accum(i), fragC);
-
-            // cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
-            // fragD, &tCgD(i), pred);
-            // // }
+            // source is needed
+            // if (epilogue_op.is_source_needed()) {
+            //   CUTLASS_PRAGMA_UNROLL
+            //   for (int i = 0; i < size(accumulators); ++i) {
+            //     FragCType fragC;
+            //     bool pred = elem_less(tCcD(i), residue_tCcD);
+            //     cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
+            //         fragC, &tCgC(i), pred);
+            //     FragDType fragD = epilogue_op(accumulators(i), fragC);
+            //     cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
+            //         fragD, &tCgD(i), pred);
+            //   }
             // }
+            // source is not needed, avoid load
+            // else {
+
+            CUTLASS_PRAGMA_UNROLL
+            for (int i = 0; i < size(accum); ++i) {
+            FragCType fragC;
+            bool pred = elem_less(tCcD(i), residue_tCcD);
+            cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
+            fragC, &tCgC(i), pred);
+            FragDType fragD = collective_epilogue.epilogue_op(accum(i), fragC);
+
+            cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
+            fragD, &tCgD(i), pred);
+            // }
+            }
         // }
     }
  

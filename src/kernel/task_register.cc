@@ -1106,7 +1106,6 @@ int TaskRegister::register_linear_swapAB_hopper_task(
   int const SMEM_M_SIZE = 16; // batch size padded to 16
   int const output_tma_cp_size = output_size < 64 ? output_size : 64;
   int const output_atom_size = 64;
-  batch_size = 16;
   code.e("using TMA_B = kernel::tma::tma_2d<bfloat16, $, $, $, $, $, $, $, $, "
          "$, $, $, $, true>;",
          B,
@@ -1222,15 +1221,15 @@ int TaskRegister::register_linear_swapAB_hopper_task(
 
 int TaskRegister::register_linear_cutlass_hopper_task(
   threadblock::Graph const &bgraph,
-  std::vector<int> const &params) {
+  std::vector<int> const &params,
+  bool with_residual) {
 assert(params.size() == 0);
 int batch_size = 0, output_size = 0, reduction_size = 0, output_stride = 0;
 std::vector<tb::TBInputOp *> input_ops;
 std::vector<tb::TBInputOp *> output_ops;
-int num_inputs = 2;
+int num_inputs = with_residual ? 3 : 2;
 int num_outputs = 1;
 constexpr int KSTAGES = 4;
-bool with_residual = true;
 
 assert(bgraph.operators.size() == (size_t)num_inputs + num_outputs);
 for (auto const &op : bgraph.operators) {
@@ -1406,12 +1405,12 @@ code.e(
   }
   code.e(");");
 
-// if (with_residual) {
-  return register_task_variant(TASK_LINEAR_CUTLASS_HOPPER,
+if (with_residual) {
+  return register_task_variant(TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER,
                                code.to_string());
-// } else {
-//   return register_task_variant(TASK_LINEAR_SWAPAB_HOPPER, code.to_string());
-// }
+} else {
+  return register_task_variant(TASK_LINEAR_CUTLASS_HOPPER, code.to_string());
+}
 }
 
 } // namespace runtime

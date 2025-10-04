@@ -1316,6 +1316,8 @@ TaskGraphResult print_task_graph(
   task_type_to_name[TASK_LINEAR_SWAPAB_WITH_RESIDUAL_HOPPER] =
       "TASK_LINEAR_SWAPAB_WITH_RESIDUAL_HOPPER";
   task_type_to_name[TASK_LINEAR_CUTLASS_HOPPER] = "TASK_LINEAR_CUTLASS_HOPPER";
+  task_type_to_name[TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER] =
+      "TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER";
 
   code.e("__device__ __forceinline__");
   code.e("void _execute_task(TaskDesc const& task_desc,");

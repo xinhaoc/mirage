@@ -562,7 +562,8 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
       }
       break;
     }
-    case TASK_LINEAR_CUTLASS_HOPPER: {
+    case TASK_LINEAR_CUTLASS_HOPPER: 
+    case TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER: {
       int const cp_async_size = 64;
       const size_t smem_repeat_row = 1;
       constexpr int B = 3;
@@ -613,7 +614,7 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
                                             smem_repeat_row,
                                             smem_repeat_col);
       } else if (param_id == 2 && task_desc.task_type ==
-                                      TASK_LINEAR_CUTLASS_HOPPER) {
+                                      TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER) {
         // TMA_RESIDUAL
         int const batch_size = tensor_desc.dim[0];
         // int const batch_size = 16;
@@ -634,7 +635,8 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
                                             smem_repeat_row,
                                             smem_repeat_col);
       } else if (param_id == 3 && task_desc.task_type ==
-                                      TASK_LINEAR_CUTLASS_HOPPER) {
+                                      TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER ||
+                 param_id == 2 && task_desc.task_type == TASK_LINEAR_CUTLASS_HOPPER) {
         // TMA_OUT
         int const batch_size = tensor_desc.dim[0];
         // int const batch_size = 16;
@@ -686,7 +688,8 @@ __host__ inline void create_tma_desc_by_task(TaskDesc &task_desc) {
     case TASK_LINEAR_WITH_RESIDUAL_HOPPER:
     case TASK_LINEAR_SWAPAB_HOPPER:
     case TASK_LINEAR_SWAPAB_WITH_RESIDUAL_HOPPER: 
-    case TASK_LINEAR_CUTLASS_HOPPER: {
+    case TASK_LINEAR_CUTLASS_HOPPER: 
+    case TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER: {
       // all tensors have 1 tma_desc
       for (size_t param_id = 0;
            param_id < task_desc.num_inputs + task_desc.num_outputs;
