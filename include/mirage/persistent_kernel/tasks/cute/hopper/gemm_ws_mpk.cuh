@@ -32,11 +32,13 @@
  #include "cute/tensor.hpp"
  
  #include "cutlass/arch/grid_dependency_control.h"
+ #include "cutlass/arch/memory.h"
 
  // MPK Settings
  #include "../../hopper/tma.cuh"
  #include "../../hopper/smem_layout_tma.cuh"
  #include "../../hopper/utils.cuh"
+
  
  namespace kernel {
  
@@ -50,6 +52,9 @@
      const TMA_B &tma_b,
      const TMA_OUT &tma_out,
      const TMA_RESIDUAL *tma_residual = nullptr) {
+   if (threadIdx.x == 0) {
+    printf("Entering linear_cutlass_ws_hopper\n");
+   }
  
    struct SharedStorage {
      // Mainloop and epilogue don't use smem concurrently since kernel is
@@ -163,9 +168,9 @@
   //                                OUTPUT_ATOM_SIZE / OUTPUT_TMA_TILE_SIZE>;
   //  ResidualSmem residual_smem(shared_residual);
  
-    cute::Tensor mA = cute::make_coord_tensor(cute::make_layout(cute::make_shape(OUTPUT_SIZE, REDUCTION_SIZE), cute::make_stride(cute::E<1>{}, cute::E<0>{}))); // ArithTuple(_0,_0) o (output_size,reduction_size):(_1@1,_1@0)
-    cute::Tensor mB = cute::make_coord_tensor(cute::make_layout(cute::make_shape(BATCH_SIZE, REDUCTION_SIZE), cute::make_stride(cute::E<1>{}, cute::E<0>{}))); // ArithTuple(_0,_0) o (batch_size,reduction_size):(_1@1,_1@0)
-    cute::Tensor mC = cute::make_coord_tensor(cute::make_layout(cute::make_shape(BATCH_SIZE, OUTPUT_SIZE), cute::make_stride(cute::E<1>{}, cute::E<0>{}))); // ArithTuple(_0,_0) o (batch_size,output_size):(_1@1,_1@0)
+    // cute::Tensor mA = cute::make_coord_tensor(cute::make_layout(cute::make_shape(OUTPUT_SIZE, REDUCTION_SIZE), cute::make_stride(cute::E<1>{}, cute::E<0>{}))); // ArithTuple(_0,_0) o (output_size,reduction_size):(_1@1,_1@0)
+    // cute::Tensor mB = cute::make_coord_tensor(cute::make_layout(cute::make_shape(BATCH_SIZE, REDUCTION_SIZE), cute::make_stride(cute::E<1>{}, cute::E<0>{}))); // ArithTuple(_0,_0) o (batch_size,reduction_size):(_1@1,_1@0)
+    // cute::Tensor mC = cute::make_coord_tensor(cute::make_layout(cute::make_shape(BATCH_SIZE, OUTPUT_SIZE), cute::make_stride(cute::E<1>{}, cute::E<0>{}))); // ArithTuple(_0,_0) o (batch_size,output_size):(_1@1,_1@0)
  
  
    int thread_idx = int(threadIdx.x);
@@ -207,6 +212,11 @@
    mainloop_pipeline_params.num_consumers = cutlass::NumThreadsPerWarpGroup;
    mainloop_pipeline_params.transaction_bytes =
        mainloop_params.tma_transaction_bytes;
+  if (threadIdx.x == 128) {
+    printf("transaction_bytes: %d\n", mainloop_pipeline_params.transaction_bytes);
+    printf("smemLayoutA: \n"); print(SmemLayoutA{});
+    printf("smemLayoutB: \n"); print(SmemLayoutB{});
+  }
    MainloopPipeline mainloop_pipeline(shared_storage.pipelines.mainloop,
                                       mainloop_pipeline_params,
                                       ClusterShape{});

@@ -7,7 +7,7 @@ torch.set_printoptions(sci_mode=False)
 g = torch.Generator(device="cuda").manual_seed(1234)
 
 reduction_size = 4096
-batch_size = 16
+batch_size = 8
 output_size = 64
 
 x = torch.randn((batch_size, reduction_size), device="cuda", dtype=torch.bfloat16, generator=g)

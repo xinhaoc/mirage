@@ -100,6 +100,11 @@ CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
     // CollectiveEpilogue::prefetch_tma_descriptors(params.epilogue);
   }
 
+  if (threadIdx.x == 0) {
+    printf("smemLayoutA: \n"); print(typename CollectiveMainloop::SmemLayoutA{});
+    printf("smemLayoutB: \n"); print(typename CollectiveMainloop::SmemLayoutB{});
+  }
+
   // Mainloop Load pipeline
   using MainloopPipeline = typename CollectiveMainloop::MainloopPipeline;
   typename MainloopPipeline::Params mainloop_pipeline_params;

@@ -131,7 +131,7 @@ struct CollectiveMainloop {
   // Methods
   //
 
-  template <class ProblemShape>
+  template <class ProblemShape, bool onHost = true>
   static constexpr Params
       to_underlying_arguments(ProblemShape const &problem_shape,
                               Arguments const &args) {
@@ -144,23 +144,29 @@ struct CollectiveMainloop {
     auto ptr_A = reinterpret_cast<DataType const *>(args.ptr_A);
     auto ptr_B = reinterpret_cast<DataType const *>(args.ptr_B);
 
+
+
     Tensor tensor_a =
         make_tensor(ptr_A, make_layout(make_shape(M, K, L), args.dA));
     Tensor tensor_b =
         make_tensor(ptr_B, make_layout(make_shape(N, K, L), args.dB));
 
-    typename Params::TMA_A tma_load_a =
-        make_tma_copy_A_sm90(GmemTiledCopyA{},
-                             tensor_a,
-                             SmemLayoutA{}(_, _, cute::Int<0>{}),
-                             TileShape{},
-                             ClusterShape{});
-    typename Params::TMA_B tma_load_b =
-        make_tma_copy_B_sm90(GmemTiledCopyB{},
-                             tensor_b,
-                             SmemLayoutB{}(_, _, cute::Int<0>{}),
-                             TileShape{},
-                             ClusterShape{});
+    typename Params::TMA_A tma_load_a;
+    typename Params::TMA_B tma_load_b;
+    if constexpr (onHost) {
+      tma_load_a =
+          make_tma_copy_A_sm90(GmemTiledCopyA{},
+                                tensor_a,
+                                SmemLayoutA{}(_, _, cute::Int<0>{}),
+                                TileShape{},
+                                ClusterShape{});
+      tma_load_b =
+          make_tma_copy_B_sm90(GmemTiledCopyB{},
+                                tensor_b,
+                                SmemLayoutB{}(_, _, cute::Int<0>{}),
+                                TileShape{},
+                                ClusterShape{});
+    }
     uint32_t transaction_bytes_mk = TmaTransactionBytesMK;
     uint32_t transaction_bytes_nk = TmaTransactionBytesNK;
     uint32_t transaction_bytes = transaction_bytes_mk + transaction_bytes_nk;
