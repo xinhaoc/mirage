@@ -259,6 +259,7 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
       constexpr int B = 3;
       constexpr int M = 3;
       constexpr int S = 3;
+      constexpr int TILE_SIZE = 128;
 
       if (param_id == 0) {
         // TMA_INPUT
@@ -269,7 +270,6 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
         uint64_t gmem_stride[2] = {1, static_cast<uint64_t>(reduction_size)};
         uint32_t smem_shape[2] = {static_cast<uint32_t>(batch_size),
                                   static_cast<uint32_t>(cp_async_size)};
-        constexpr int TILE_SIZE = 128;
 
         size_t smem_repeat_col =
             (TILE_SIZE + cp_async_size - 1) / cp_async_size;
@@ -294,7 +294,6 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
         uint64_t gmem_stride[2] = {1, static_cast<uint64_t>(reduction_size)};
         uint32_t smem_shape[2] = {static_cast<uint32_t>(output_atom_size),
                                   static_cast<uint32_t>(cp_async_size)};
-        constexpr int TILE_SIZE = 128;
         size_t smem_repeat_col =
             (TILE_SIZE + cp_async_size - 1) / cp_async_size;
         fill_tma_desc<bfloat16, B, M, S, 2>(tma_desc,
@@ -475,6 +474,7 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
       constexpr int M = 3;
       constexpr int S = 3;
       constexpr int output_atom_size = 64;
+      constexpr int TILE_SIZE = 128;
 
       if (param_id == 0) {
         // TMA_INPUT
@@ -485,7 +485,6 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
         uint64_t gmem_stride[2] = {1, static_cast<uint64_t>(reduction_size)};
         uint32_t smem_shape[2] = {static_cast<uint32_t>(batch_size),
                                   static_cast<uint32_t>(cp_async_size)};
-        constexpr int TILE_SIZE = 128;
 
         size_t smem_repeat_col =
             (TILE_SIZE + cp_async_size - 1) / cp_async_size;
@@ -507,7 +506,6 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
         // output_atom_size as padding
         uint32_t smem_shape[2] = {static_cast<uint32_t>(output_atom_size),
                                   static_cast<uint32_t>(cp_async_size)};
-        constexpr int TILE_SIZE = 128;
         size_t smem_repeat_col =
             (TILE_SIZE + cp_async_size - 1) / cp_async_size;
         fill_tma_desc<bfloat16, B, M, S, 2>(tma_desc,
@@ -570,6 +568,7 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
       constexpr int M = 3;
       constexpr int S = 3;
       constexpr int output_atom_size = 64;
+      constexpr int TILE_SIZE = 128;
 
       if (param_id == 0) {
         // TMA_INPUT
@@ -581,7 +580,6 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
         uint64_t gmem_stride[2] = {1, static_cast<uint64_t>(reduction_size)};
         uint32_t smem_shape[2] = {static_cast<uint32_t>(batch_size),
                                   static_cast<uint32_t>(cp_async_size)};
-        constexpr int TILE_SIZE = 64;
 
         size_t smem_repeat_col =
             (TILE_SIZE + cp_async_size - 1) / cp_async_size;
@@ -603,7 +601,6 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
         // output_atom_size as padding
         uint32_t smem_shape[2] = {static_cast<uint32_t>(output_atom_size),
                                   static_cast<uint32_t>(cp_async_size)};
-        constexpr int TILE_SIZE = 64;
         size_t smem_repeat_col =
             (TILE_SIZE + cp_async_size - 1) / cp_async_size;
         fill_tma_desc<bfloat16, B, M, S, 2>(tma_desc,
@@ -613,51 +610,7 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
                                             smem_shape,
                                             smem_repeat_row,
                                             smem_repeat_col);
-      } else if (param_id == 2 && task_desc.task_type ==
-                                      TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER) {
-        // TMA_RESIDUAL
-        int const batch_size = tensor_desc.dim[0];
-        // int const batch_size = 16;
-        int const output_size = tensor_desc.dim[1];
-        int const output_stride = (tensor_desc.stride[0]);
-        int const output_tma_cp_size = output_size < 64 ? output_size : 64;
-        uint64_t gmem_shape[2] = {static_cast<uint64_t>(batch_size),
-                                  static_cast<uint64_t>(output_size)};
-        uint64_t gmem_stride[2] = {1, static_cast<uint64_t>(output_stride)};
-        uint32_t smem_shape[2] = {static_cast<uint32_t>(batch_size),
-                                  static_cast<uint32_t>(output_tma_cp_size)};
-        size_t smem_repeat_col = 1;
-        fill_tma_desc<bfloat16, B, M, S, 2>(tma_desc,
-                                            tensor_desc.base_ptr,
-                                            gmem_shape,
-                                            gmem_stride,
-                                            smem_shape,
-                                            smem_repeat_row,
-                                            smem_repeat_col);
-      } else if (param_id == 3 && task_desc.task_type ==
-                                      TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER ||
-                 param_id == 2 && task_desc.task_type == TASK_LINEAR_CUTLASS_HOPPER) {
-        // TMA_OUT
-        int const batch_size = tensor_desc.dim[0];
-        // int const batch_size = 16;
-        int const output_size = tensor_desc.dim[1];
-        int const output_stride = (tensor_desc.stride[0]);
-        int const output_tma_cp_size = output_size < 64 ? output_size : 64;
-        uint64_t gmem_shape[2] = {static_cast<uint64_t>(batch_size),
-                                  static_cast<uint64_t>(output_size)};
-        uint64_t gmem_stride[2] = {1, static_cast<uint64_t>(output_stride)};
-        uint32_t smem_shape[2] = {static_cast<uint32_t>(batch_size),
-                                  static_cast<uint32_t>(output_tma_cp_size)};
-        size_t smem_repeat_col = 1;
-        fill_tma_desc<bfloat16, B, M, S, 2>(tma_desc,
-                                            tensor_desc.base_ptr,
-                                            gmem_shape,
-                                            gmem_stride,
-                                            smem_shape,
-                                            smem_repeat_row,
-                                            smem_repeat_col);
-      }
-      break;
+      } 
     }
     default:
       assert(false);
@@ -687,9 +640,7 @@ __host__ inline void create_tma_desc_by_task(TaskDesc &task_desc) {
     case TASK_LINEAR_HOPPER:
     case TASK_LINEAR_WITH_RESIDUAL_HOPPER:
     case TASK_LINEAR_SWAPAB_HOPPER:
-    case TASK_LINEAR_SWAPAB_WITH_RESIDUAL_HOPPER: 
-    case TASK_LINEAR_CUTLASS_HOPPER: 
-    case TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER: {
+    case TASK_LINEAR_SWAPAB_WITH_RESIDUAL_HOPPER: {
       // all tensors have 1 tma_desc
       for (size_t param_id = 0;
            param_id < task_desc.num_inputs + task_desc.num_outputs;
@@ -725,6 +676,20 @@ __host__ inline void create_tma_desc_by_task(TaskDesc &task_desc) {
         }
       }
       break;
+    }
+    case TASK_LINEAR_CUTLASS_HOPPER: 
+    case TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER: {
+            // only A and B have 1 tma_desc
+            for (size_t param_id = 0;
+              param_id < 2;
+              param_id++) {
+           TensorDesc &tensor_desc =
+               (param_id < task_desc.num_inputs)
+                   ? task_desc.inputs[param_id]
+                   : task_desc.outputs[param_id - task_desc.num_inputs];
+           create_tma_desc_for_tensor(task_desc, tensor_desc, param_id, 0);
+         }
+         break;
     }
     case TASK_RMS_NORM_HOPPER: {
       // no TMA needed

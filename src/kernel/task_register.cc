@@ -1249,13 +1249,14 @@ assert(output_ops[0]->dtensor.owner_op->op_type == type::KN_INPUT_OP);
 kn::KNInputOp *kn_input_op =
     static_cast<kn::KNInputOp *>(output_ops[0]->dtensor.owner_op);
 output_stride = static_cast<int>(kn_input_op->input_strides[0]);
+constexpr int TILE_SIZE = 128;
 
 mirage::transpiler::CodeKeeper code;
 code.inc_indent();
 // NOTE: output_size and batch_size are swapped here
 code.e("auto problem_shape = cute::Shape<cute::Int<$>, cute::Int<$>, cute::Int<$>>{};", output_size, batch_size, reduction_size);
 // NOTE: output_size and batch_size are swapped here
-code.e("using KernelTraits = kernel::MMAKernelTraits<cutlass::bfloat16_t, $, $, $, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor, cutlass::layout::RowMajor, cutlass::layout::RowMajor, $, $, $, $, decltype(problem_shape), $, $>;", output_size, batch_size, reduction_size, 8, 64, batch_size, 64, batch_size, KSTAGES);
+code.e("using KernelTraits = kernel::MMAKernelTraits<cutlass::bfloat16_t, $, $, $, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor, cutlass::layout::RowMajor, cutlass::layout::RowMajor, $, $, $, $, decltype(problem_shape), $, $>;", output_size, batch_size, reduction_size, 8, 64, batch_size, TILE_SIZE, batch_size, KSTAGES);
 code.e("using Mainloop = kernel::CollectiveMainloop<KernelTraits>;");
 code.e("using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;");
 code.e("using StrideA = typename KernelTraits::StrideA;");
@@ -1288,7 +1289,6 @@ code.e("typename Epilogue::Params epilogue_params = Epilogue::to_underlying_argu
  constexpr int M = 3;
  constexpr int S = 3;
  constexpr int TMA_CP_ASYNC_SIZE = 64;
- constexpr int TILE_SIZE = 64;
  constexpr int Kstages = 5;
  assert(batch_size <= 16);
  int const SMEM_M_SIZE = batch_size;
@@ -1329,41 +1329,6 @@ code.e("typename Epilogue::Params epilogue_params = Epilogue::to_underlying_argu
         output_atom_size * TMA_CP_ASYNC_SIZE /*SMEM_STRIDE_*/
  );
 
- if (with_residual) {
-   code.e(
-       "using TMA_RESIDUAL = kernel::tma::tma_2d<cutlass::bfloat16_t, $, $, $, $, $, $, "
-       "$, $, $, $, $, $, true>;",
-       0,
-       0,
-       0,
-       batch_size,                      /*GMEM_ROW_*/
-       output_size,                     /*GMEM_COL_*/
-       batch_size,                      /*SMEM_ROW_*/
-       output_tma_cp_size,              /*SMEM_COL_*/
-       output_stride,                   /*GMEM_STRIDE_ROW_*/
-       1,                               /*GMEM_STRIDE_COL_*/
-       1,                               /*SMEM_REPEAT_ROW_*/
-       1,                               /*SMEM_REPEAT_COL_*/
-       SMEM_M_SIZE * output_tma_cp_size /*SMEM_STRIDE_*/
-   );
- }
-
- code.e("using TMA_OUT = kernel::tma::tma_2d<cutlass::bfloat16_t, $, $, $, $, $, $, $, "
-        "$, $, $, $, $, true>;",
-        B,
-        M,
-        S,
-        batch_size,         /*GMEM_ROW_*/
-        output_size,        /*GMEM_COL_*/
-        batch_size,         /*SMEM_ROW_*/
-        output_tma_cp_size, /*SMEM_COL_*/
-        output_stride,      /*GMEM_STRIDE_ROW_*/
-        1,                  /*GMEM_STRIDE_COL_*/
-        1,                  /*SMEM_REPEAT_ROW_*/
-        (output_atom_size + output_tma_cp_size - 1) /
-            output_tma_cp_size,         /*SMEM_REPEAT_COL_*/
-        SMEM_M_SIZE * TMA_CP_ASYNC_SIZE /*SMEM_STRIDE_*/
- );
  code.inc_indent();
  code.e("TMA_A "
         "tma_a(static_cast<CUtensorMap*>(task_desc.inputs[1].tma_desc_ptrs[0])"
@@ -1371,38 +1336,18 @@ code.e("typename Epilogue::Params epilogue_params = Epilogue::to_underlying_argu
  code.e("TMA_B "
         "tma_b(static_cast<CUtensorMap*>(task_desc.inputs[0].tma_desc_ptrs[0])"
         ");");
- if (with_residual) {
-   code.e(
-       "TMA_RESIDUAL "
-       "tma_residual(static_cast<CUtensorMap*>(task_desc.inputs[2].tma_desc_"
-       "ptrs[0]));");
- }
- code.e("TMA_OUT "
-        "tma_out(static_cast<CUtensorMap*>(task_desc.outputs[0].tma_desc_ptrs["
-        "0]));");
-
-
-
-// code.e(
-//     "kernel::linear_cutlass_ws_hopper<Mainloop, Epilogue>(mainloop_params, epilogue_params);");
 
 code.e(
       "kernel::linear_cutlass_ws_hopper<Mainloop, Epilogue, false, cutlass::bfloat16_t, $, $, $, TMA_A, TMA_B, "
-      "TMA_OUT, $, $>(mainloop_params, epilogue_params,",
+      "$, $>(mainloop_params, epilogue_params,",
       batch_size,
       output_size,
       reduction_size,
-      with_residual ? "TMA_RESIDUAL" : "void",
-      output_stride
+      output_stride,
+      with_residual
     );
   code.e("    tma_a,");
-  code.e("    tma_b,");
-  code.e("    tma_out, ");
-  if (with_residual) {
-    code.e("    &tma_residual");
-  } else {
-    code.e("    nullptr");
-  }
+  code.e("    tma_b");
   code.e(");");
 
 if (with_residual) {

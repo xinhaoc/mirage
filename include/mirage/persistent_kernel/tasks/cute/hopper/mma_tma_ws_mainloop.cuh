@@ -165,7 +165,6 @@ struct CollectiveMainloop {
   static Params<onHost>
   to_underlying_arguments(ProblemShapeT const &problem_shape,
                           Arguments const &args) {
-    // 统一设置 transaction bytes
     uint32_t transaction_bytes_mk = TmaTransactionBytesMK;
     uint32_t transaction_bytes_nk = TmaTransactionBytesNK;
     uint32_t transaction_bytes    = transaction_bytes_mk + transaction_bytes_nk;
@@ -212,14 +211,13 @@ struct CollectiveMainloop {
   /// Issue Tma Descriptor Prefetch -- ideally from a single thread for best
   /// performance
   CUTLASS_DEVICE
-  static void prefetch_tma_descriptors(Params<true> const &mainloop_params) { // ★
+  static void prefetch_tma_descriptors(Params<true> const &mainloop_params) {
     cute::prefetch_tma_descriptor(
         mainloop_params.tma_load_a.get_tma_descriptor());
     cute::prefetch_tma_descriptor(
         mainloop_params.tma_load_b.get_tma_descriptor());
   }
 
-  // ★ 需要 TMA 的 init：接收 Params<true>
   template <class ProblemShape_MNKL>
   CUTLASS_DEVICE auto load_init(ProblemShape_MNKL const &problem_shape_MNKL,
                                 Params<true> const &mainloop_params) const {

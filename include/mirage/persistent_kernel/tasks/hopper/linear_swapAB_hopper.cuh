@@ -51,6 +51,7 @@ __device__ __forceinline__ void
       REDUCTION_SIZE < TMA_A::SMEM_COL * TMA_A::SMEM_REPEAT_COL
           ? REDUCTION_SIZE
           : TMA_A::SMEM_COL * TMA_A::SMEM_REPEAT_COL;
+          
   constexpr int CONSUMER_WARPGROUPS = 1;
   constexpr int PRODUCER_WARPGROUPS = 1;
   constexpr int NUM_WARPGROUPS = CONSUMER_WARPGROUPS + PRODUCER_WARPGROUPS;

@@ -245,19 +245,17 @@ void linear_kernel(torch::Tensor weight,
   }
 }
 
-template <typename CollectiveMainloop, typename CollectiveEpilogue, typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE, typename TMA_A, typename TMA_B, typename TMA_OUT, typename TMA_RESIDUAL = void>
+template <typename CollectiveMainloop, typename CollectiveEpilogue, typename T, int BATCH_SIZE, int OUTPUT_SIZE, int REDUCTION_SIZE, typename TMA_A, typename TMA_B>
 __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_mpk_wrapper(
     CUTE_GRID_CONSTANT
     typename CollectiveMainloop::template Params<true> const mainloop_params,
     CUTE_GRID_CONSTANT
     typename CollectiveEpilogue::Params const epilogue_params,
     const __grid_constant__ TMA_A tma_a,
-    const __grid_constant__ TMA_B tma_b,
-    const __grid_constant__ TMA_OUT tma_out,
-    const __grid_constant__ TMA_RESIDUAL tma_residual) {
+    const __grid_constant__ TMA_B tma_b) {
   kernel::linear_cutlass_ws_hopper<CollectiveMainloop,
-                                           CollectiveEpilogue, true, T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, TMA_OUT, TMA_RESIDUAL>(mainloop_params,
-                                                               epilogue_params, tma_a, tma_b, tma_out, &tma_residual);
+                                           CollectiveEpilogue, true, T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, OUTPUT_SIZE, true>(mainloop_params,
+                                                               epilogue_params, tma_a, tma_b);
 }
 
 template <typename T, int OUTPUT_SIZE, int BATCH_SIZE, int REDUCTION_SIZE>
@@ -338,10 +336,7 @@ MainloopParamsHost mainloop_params =
       constexpr int TMA_CP_ASYNC_REPEAT_COL =
           (TILE_SIZE + TMA_CP_ASYNC_SIZE - 1) / TMA_CP_ASYNC_SIZE;
     
-      constexpr int OUTPUT_ATOM_SIZE = 64; // this is padded
-      constexpr int OUTPUT_TMA_CP_SIZE = OUTPUT_SIZE < 64 ? OUTPUT_SIZE : 64;
-      constexpr int OUTPUT_ATOM_REPEAT_COL = 1;
-    
+      constexpr int OUTPUT_ATOM_SIZE = 64; // this is padded    
       constexpr int SMEM_M_SIZE = BATCH_SIZE;
       using TMA_B =
           kernel::tma::tma_2d<T,
@@ -373,45 +368,15 @@ MainloopParamsHost mainloop_params =
                               TMA_CP_ASYNC_REPEAT_COL, /*SMEM_REPEAT_COL_*/
                               OUTPUT_ATOM_SIZE * TMA_CP_ASYNC_SIZE, /*SMEM_STRIDE_*/
                               true>;
-      using TMA_RESIDUAL = kernel::tma::tma_2d<T,
-                                               0,
-                                               0,
-                                               0,
-                                               SMEM_M_SIZE,
-                                               OUTPUT_SIZE,
-                                               SMEM_M_SIZE,
-                                               OUTPUT_TMA_CP_SIZE,
-                                               OUTPUT_SIZE,
-                                               1,
-                                               1,
-                                               OUTPUT_ATOM_REPEAT_COL,
-                                               SMEM_M_SIZE * OUTPUT_TMA_CP_SIZE,
-                                               true>;
-    
-      using TMA_OUT = kernel::tma::tma_2d<T,
-                                          B,
-                                          M,
-                                          S,
-                                          SMEM_M_SIZE,
-                                          OUTPUT_SIZE,
-                                          SMEM_M_SIZE,
-                                          OUTPUT_TMA_CP_SIZE,
-                                          OUTPUT_SIZE,
-                                          1,
-                                          1,
-                                          OUTPUT_ATOM_REPEAT_COL,
-                                          SMEM_M_SIZE * TMA_CP_ASYNC_SIZE,
-                                          true>;
+
       TMA_A tma_a(weight_ptr);
       TMA_B tma_b(input_ptr);
-      TMA_RESIDUAL tma_residual(residual_ptr);
-      TMA_OUT tma_out(output_ptr);
 
   dim3 grid(1);
   dim3 block(256);
 
   size_t shared_mem_size = 100000;
-  cudaFuncSetAttribute(linear_kernel_hopper_cute_mpk_wrapper<Mainloop, Epilogue, cutlass::bfloat16_t, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, TMA_OUT, TMA_RESIDUAL>,
+  cudaFuncSetAttribute(linear_kernel_hopper_cute_mpk_wrapper<Mainloop, Epilogue, cutlass::bfloat16_t, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B>,
                        cudaFuncAttributeMaxDynamicSharedMemorySize,
                        shared_mem_size);
   // linear_kernel_hopper_cute_wrapper<Mainloop, Epilogue>
@@ -427,8 +392,8 @@ MainloopParamsHost mainloop_params =
   printf("=== Kernel Performance Profiling ===\n");
 
   for (int i = 0; i < WARMUP_RUNS; i++) {
-    linear_kernel_hopper_cute_mpk_wrapper<Mainloop, Epilogue, T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, TMA_OUT, TMA_RESIDUAL>
-        <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params, tma_a, tma_b, tma_out, tma_residual);
+    linear_kernel_hopper_cute_mpk_wrapper<Mainloop, Epilogue, T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B>
+        <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params, tma_a, tma_b);
   }
   cudaDeviceSynchronize(); // Wait for all warmup runs to complete
 
@@ -439,8 +404,8 @@ MainloopParamsHost mainloop_params =
 
   for (int i = 0; i < BENCHMARK_RUNS; i++) {
     cudaEventRecord(start);
-    linear_kernel_hopper_cute_mpk_wrapper<Mainloop, Epilogue, T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B, TMA_OUT, TMA_RESIDUAL>
-        <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params, tma_a, tma_b, tma_out, tma_residual);
+    linear_kernel_hopper_cute_mpk_wrapper<Mainloop, Epilogue, T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, TMA_A, TMA_B>
+        <<<grid, block, shared_mem_size>>>(mainloop_params, epilogue_params, tma_a, tma_b);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 
