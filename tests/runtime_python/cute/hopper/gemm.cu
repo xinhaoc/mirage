@@ -259,14 +259,14 @@ template <typename CollectiveMainloop,
           typename TMA_B>
 __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_mpk_wrapper(
     CUTE_GRID_CONSTANT
-    typename CollectiveMainloop::template Params<true> const mainloop_params,
+    typename CollectiveMainloop::template Params<false> const mainloop_params,
     CUTE_GRID_CONSTANT
     typename CollectiveEpilogue::Params const epilogue_params,
     const __grid_constant__ TMA_A tma_a,
     const __grid_constant__ TMA_B tma_b) {
   kernel::linear_cutlass_ws_hopper<CollectiveMainloop,
                                    CollectiveEpilogue,
-                                   true,
+                                   false,
                                    T,
                                    BATCH_SIZE,
                                    OUTPUT_SIZE,
@@ -288,6 +288,9 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
   auto problem_shape =
       Shape<Int<OUTPUT_SIZE>, Int<BATCH_SIZE>, Int<REDUCTION_SIZE>>{};
 
+  constexpr int TILE_SIZE =
+      128; // we should modify this param if we want larger tile size
+
   using KernelTraits =
       kernel::MMAKernelTraits<T,
                               OUTPUT_SIZE,
@@ -300,7 +303,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                               8,                            // NUM_WARPS
                               64,                           // M
                               BATCH_SIZE,                   // N
-                              64,                           // K
+                              TILE_SIZE,                           // K
                               decltype(problem_shape),
                               OUTPUT_SIZE, // O_STRIDE
                               4>;          // NUM_STAGES
@@ -340,9 +343,9 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
   // typename Mainloop::Params mainloop_params =
   // Mainloop::template to_underlying_arguments</*onHost=*/true>(problem_shape,
   // mainloop_args);
-  using MainloopParamsHost = typename Mainloop::template Params<true>;
+  using MainloopParamsHost = typename Mainloop::template Params<false>;
   MainloopParamsHost mainloop_params =
-      Mainloop::template to_underlying_arguments<true>(problem_shape,
+      Mainloop::template to_underlying_arguments<false>(problem_shape,
                                                        mainloop_args);
   typename Epilogue::Params epilogue_params =
       Epilogue::to_underlying_arguments(problem_shape, epilogue_args);
@@ -353,8 +356,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
 
   constexpr int TMA_CP_ASYNC_SIZE =
       64; // note that if swizzle 128 is used, 64 is maximal cp size
-  constexpr int TILE_SIZE =
-      64; // we should modify this param if we want larger tile size
+
   constexpr int TMA_CP_ASYNC_REPEAT_COL =
       (TILE_SIZE + TMA_CP_ASYNC_SIZE - 1) / TMA_CP_ASYNC_SIZE;
 
