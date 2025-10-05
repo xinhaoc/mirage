@@ -201,8 +201,7 @@ struct MMAKernelTraits {
                                          SmemLayoutAtomB,
                                          SmemLayoutAtomC>;
 
-    static constexpr bool SwapAB = IS_SWAPAB::value;
-
+  static constexpr bool SwapAB = IS_SWAPAB::value;
 };
 
 } // namespace kernel

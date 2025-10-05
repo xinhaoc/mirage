@@ -474,7 +474,7 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
       constexpr int M = 3;
       constexpr int S = 3;
       constexpr int output_atom_size = 64;
-      constexpr int TILE_SIZE = 128;
+      constexpr int TILE_SIZE = 256;
 
       if (param_id == 0) {
         // TMA_INPUT
@@ -560,7 +560,7 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
       }
       break;
     }
-    case TASK_LINEAR_CUTLASS_HOPPER: 
+    case TASK_LINEAR_CUTLASS_HOPPER:
     case TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER: {
       int const cp_async_size = 64;
       const size_t smem_repeat_row = 1;
@@ -610,7 +610,7 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
                                             smem_shape,
                                             smem_repeat_row,
                                             smem_repeat_col);
-      } 
+      }
     }
     default:
       assert(false);
@@ -677,19 +677,17 @@ __host__ inline void create_tma_desc_by_task(TaskDesc &task_desc) {
       }
       break;
     }
-    case TASK_LINEAR_CUTLASS_HOPPER: 
+    case TASK_LINEAR_CUTLASS_HOPPER:
     case TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER: {
-            // only A and B have 1 tma_desc
-            for (size_t param_id = 0;
-              param_id < 2;
-              param_id++) {
-           TensorDesc &tensor_desc =
-               (param_id < task_desc.num_inputs)
-                   ? task_desc.inputs[param_id]
-                   : task_desc.outputs[param_id - task_desc.num_inputs];
-           create_tma_desc_for_tensor(task_desc, tensor_desc, param_id, 0);
-         }
-         break;
+      // only A and B have 1 tma_desc
+      for (size_t param_id = 0; param_id < 2; param_id++) {
+        TensorDesc &tensor_desc =
+            (param_id < task_desc.num_inputs)
+                ? task_desc.inputs[param_id]
+                : task_desc.outputs[param_id - task_desc.num_inputs];
+        create_tma_desc_for_tensor(task_desc, tensor_desc, param_id, 0);
+      }
+      break;
     }
     case TASK_RMS_NORM_HOPPER: {
       // no TMA needed

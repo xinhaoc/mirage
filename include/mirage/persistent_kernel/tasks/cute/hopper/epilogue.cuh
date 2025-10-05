@@ -59,13 +59,9 @@ struct CollectiveEpilogue {
   using Params = Arguments;
 
   template <class ProblemShape>
-  CUTLASS_HOST_DEVICE
-  static constexpr Arguments
+  CUTLASS_HOST_DEVICE static constexpr Arguments
       to_underlying_arguments([[maybe_unused]] ProblemShape const &_,
                               Arguments const &args) {
-    // if (threadIdx.x == 0 && blockIdx.x == 10) {
-    //   printf("in to_underlying_arguments args.ptr_C: \n"); print(args.ptr_C); printf("\n");
-    // }
     return args;
   }
 
@@ -75,12 +71,7 @@ struct CollectiveEpilogue {
 
   CUTLASS_HOST_DEVICE
   CollectiveEpilogue(Arguments const &params_)
-      : params(params_), epilogue_op(params_.thread) {
-        // if (threadIdx.x == 0 && blockIdx.x == 10) {
-        //   printf("params_.ptr_C: \n"); print(params_.ptr_C); printf("\n");
-        //   printf("params.ptr_C: \n"); print(params.ptr_C); printf("\n");
-        // }
-      }
+      : params(params_), epilogue_op(params_.thread) {}
 
   template <class ProblemShapeMNKL,
             class BlockShapeMNK,
@@ -121,138 +112,140 @@ struct CollectiveEpilogue {
     auto [m_coord, n_coord, k_coord, l_coord] = blk_coord_mnkl;
     auto thr_mma = tiled_mma.get_thread_slice(thread_idx);
     if constexpr (::cutlass::gemm::kernel::detail::Has_SwapAB_v<Ktraits>) {
-        // Represent the full output tensor
-        Tensor mC_mnl = make_tensor(make_gmem_ptr<DataTypeC>(params.ptr_C),
-        make_shape(M, N, L),
-        stride_c); // (m,n,l)
-        Tensor mD_mnl = make_tensor(
-        make_gmem_ptr(params.ptr_D), make_shape(M, N, L), stride_d); // (m,n,l)
-        Tensor gC_mnl = local_tile(mC_mnl,
-        blk_shape_MNK,
-        make_coord(_, _, _),
-        Step<_1, _1, X>{}); // (BLK_M,BLK_N,m,n,l)
-        Tensor gD_mnl = local_tile(mD_mnl,
-        blk_shape_MNK,
-        make_coord(_, _, _),
-        Step<_1, _1, X>{}); // (BLK_M,BLK_N,m,n,l)
+      // Represent the full output tensor
+      Tensor mC_mnl = make_tensor(make_gmem_ptr<DataTypeC>(params.ptr_C),
+                                  make_shape(M, N, L),
+                                  stride_c); // (m,n,l)
+      Tensor mD_mnl = make_tensor(make_gmem_ptr(params.ptr_D),
+                                  make_shape(M, N, L),
+                                  stride_d); // (m,n,l)
+      Tensor gC_mnl = local_tile(mC_mnl,
+                                 blk_shape_MNK,
+                                 make_coord(_, _, _),
+                                 Step<_1, _1, X>{}); // (BLK_M,BLK_N,m,n,l)
+      Tensor gD_mnl = local_tile(mD_mnl,
+                                 blk_shape_MNK,
+                                 make_coord(_, _, _),
+                                 Step<_1, _1, X>{}); // (BLK_M,BLK_N,m,n,l)
 
-        // Slice to get the tile this CTA is responsible for
-        Tensor gC = gC_mnl(_, _, m_coord, n_coord, l_coord); // (BLK_M,BLK_N)
-        Tensor gD = gD_mnl(_, _, m_coord, n_coord, l_coord); // (BLK_M,BLK_N)
+      // Slice to get the tile this CTA is responsible for
+      Tensor gC = gC_mnl(_, _, m_coord, n_coord, l_coord); // (BLK_M,BLK_N)
+      Tensor gD = gD_mnl(_, _, m_coord, n_coord, l_coord); // (BLK_M,BLK_N)
 
+      auto dD_T = cute::make_stride(
+          cute::Int<1>{}, M, get<2>(params.dD)); // transpose dD
+      Tensor mD_mnl_T = cute::make_tensor(
+          cute::make_gmem_ptr(params.ptr_D), cute::make_shape(M, N, L), dD_T);
+      Tensor gD_T = local_tile(
+          mD_mnl_T, blk_shape_MNK, make_coord(_, _, _), Step<_1, _1, X>{})(
+          _, _, m_coord, n_coord, l_coord); // (BLK_M, BLK_N)
 
-        auto dD_T = cute::make_stride(cute::Int<1>{}, M, get<2>(params.dD));   // transpose dD
-        Tensor mD_mnl_T = cute::make_tensor(
-          cute::make_gmem_ptr(params.ptr_D),
-          cute::make_shape(M, N, L),
-          dD_T
-        );
-        Tensor gD_T = local_tile(mD_mnl_T, blk_shape_MNK, make_coord(_,_,_), Step<_1,_1,X>{})
-                (_,_, m_coord, n_coord, l_coord);   // (BLK_M, BLK_N)
+      auto dC_T = cute::make_stride(cute::Int<1>{}, M, get<2>(params.dC));
+      Tensor mC_mnl_T =
+          cute::make_tensor(cute::make_gmem_ptr<DataTypeC>(params.ptr_C),
+                            cute::make_shape(M, N, L),
+                            dC_T);
+      Tensor gC_T = local_tile(
+          mC_mnl_T, blk_shape_MNK, make_coord(_, _, _), Step<_1, _1, X>{})(
+          _, _, m_coord, n_coord, l_coord);
 
-        auto dC_T = cute::make_stride(cute::Int<1>{}, M, get<2>(params.dC));
-        Tensor mC_mnl_T = cute::make_tensor(cute::make_gmem_ptr<DataTypeC>(params.ptr_C),
-                                            cute::make_shape(M, N, L), dC_T);
-        Tensor gC_T = local_tile(mC_mnl_T, blk_shape_MNK, make_coord(_,_,_), Step<_1,_1,X>{})
-                        (_,_, m_coord, n_coord, l_coord);
+      // Partition source and destination tiles to match the accumulator
+      // partitioning
+      // Tensor tCgD = thr_mma.partition_C(gD); // (VEC,THR_M,THR_N)
+      // Tensor tCgC = thr_mma.partition_C(gC); // (VEC,THR_M,THR_N)
 
-        // Partition source and destination tiles to match the accumulator
-        // partitioning
-        // Tensor tCgD = thr_mma.partition_C(gD); // (VEC,THR_M,THR_N)
-        // Tensor tCgC = thr_mma.partition_C(gC); // (VEC,THR_M,THR_N)
+      Tensor tCgD = thr_mma.partition_C(gD_T); // (VEC,THR_M,THR_N)
+      Tensor tCgC = thr_mma.partition_C(gC_T); // (VEC,THR_M,THR_N)
 
-        Tensor tCgD = thr_mma.partition_C(gD_T); // (VEC,THR_M,THR_N)
-        Tensor tCgC = thr_mma.partition_C(gC_T); // (VEC,THR_M,THR_N)
+      static_assert(is_static<FrgLayout>::value,
+                    "Accumulator layout must be static");
+      CUTE_STATIC_ASSERT_V(
+          size(tCgC) == size(tCgD),
+          "Source and destination must have the same number of elements.");
+      CUTE_STATIC_ASSERT_V(
+          size(tCgD) == size(accumulators),
+          "Accumulator count must have the same destination element count.");
 
-        static_assert(is_static<FrgLayout>::value,
-        "Accumulator layout must be static");
-        CUTE_STATIC_ASSERT_V(
-        size(tCgC) == size(tCgD),
-        "Source and destination must have the same number of elements.");
-        CUTE_STATIC_ASSERT_V(
-        size(tCgD) == size(accumulators),
-        "Accumulator count must have the same destination element count.");
+      // OOB predication for tile quantization "residue"
+      // Absolute coordinate tensors (dynamic)
+      auto shape_MN = make_shape(M, N);
+      Tensor mD_crd = make_identity_tensor(shape_MN); // (M,N)
+      Tensor cD_mn = local_tile(mD_crd,
+                                take<0, 2>(blk_shape_MNK),
+                                make_coord(m_coord, n_coord)); // (BLK_M,BLK_N)
+      Tensor tCcD_mn = thr_mma.partition_C(cD_mn); // (VEC,THR_M,THR_N)
+      // Relative coordinate tensors (static)
+      Tensor cD = cute::make_coord_tensor(cD_mn.layout()); // (BLK_M,BLK_N)
+      Tensor tCcD =
+          cute::make_coord_tensor(tCcD_mn.layout()); // (VEC,THR_M,THR_N)
+      // Subtract the global "bottom right" corner from the local "top left"
+      // corner to get the max relative coordinate
+      auto residue_cD = shape_MN - cD_mn(_0{});     // (m,n)
+      auto residue_tCcD = shape_MN - tCcD_mn(_0{}); // (m,n)
 
-        // OOB predication for tile quantization "residue"
-        // Absolute coordinate tensors (dynamic)
-        auto shape_MN = make_shape(M, N);
-        Tensor mD_crd = make_identity_tensor(shape_MN); // (M,N)
-        Tensor cD_mn = local_tile(mD_crd,
-        take<0, 2>(blk_shape_MNK),
-        make_coord(m_coord, n_coord)); // (BLK_M,BLK_N)
-        Tensor tCcD_mn = thr_mma.partition_C(cD_mn); // (VEC,THR_M,THR_N)
-        // Relative coordinate tensors (static)
-        Tensor cD = cute::make_coord_tensor(cD_mn.layout()); // (BLK_M,BLK_N)
-        Tensor tCcD =
-        cute::make_coord_tensor(tCcD_mn.layout()); // (VEC,THR_M,THR_N)
-        // Subtract the global "bottom right" corner from the local "top left"
-        // corner to get the max relative coordinate
-        auto residue_cD = shape_MN - cD_mn(_0{});     // (m,n)
-        auto residue_tCcD = shape_MN - tCcD_mn(_0{}); // (m,n)
-
-        // Fully OOB tile
-        if (not elem_less(repeat_like(residue_cD, _0{}), residue_cD)) {
+      // Fully OOB tile
+      if (not elem_less(repeat_like(residue_cD, _0{}), residue_cD)) {
         return;
-        }
+      }
 
-        using FragCType = remove_cvref_t<decltype(tCgC(0))>;
-        using FragDType = remove_cvref_t<decltype(tCgD(0))>;
+      using FragCType = remove_cvref_t<decltype(tCgC(0))>;
+      using FragDType = remove_cvref_t<decltype(tCgD(0))>;
 
-        // source is needed
-        // if (epilogue_op.is_source_needed()) {
-        //   CUTLASS_PRAGMA_UNROLL
-        //   for (int i = 0; i < size(accumulators); ++i) {
-        //     FragCType fragC;
-        //     bool pred = elem_less(tCcD(i), residue_tCcD);
-        //     cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
-        //         fragC, &tCgC(i), pred);
-        //     FragDType fragD = epilogue_op(accumulators(i), fragC);
-        //     cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
-        //         fragD, &tCgD(i), pred);
-        //   }
-        // }
-        // source is not needed, avoid load
-        // else {
+      // source is needed
+      // if (epilogue_op.is_source_needed()) {
+      //   CUTLASS_PRAGMA_UNROLL
+      //   for (int i = 0; i < size(accumulators); ++i) {
+      //     FragCType fragC;
+      //     bool pred = elem_less(tCcD(i), residue_tCcD);
+      //     cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
+      //         fragC, &tCgC(i), pred);
+      //     FragDType fragD = epilogue_op(accumulators(i), fragC);
+      //     cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
+      //         fragD, &tCgD(i), pred);
+      //   }
+      // }
+      // source is not needed, avoid load
+      // else {
 
-        CUTLASS_PRAGMA_UNROLL
-        for (int i = 0; i < size(accumulators); ++i) {
+      CUTLASS_PRAGMA_UNROLL
+      for (int i = 0; i < size(accumulators); ++i) {
         FragCType fragC;
         bool pred = elem_less(tCcD(i), residue_tCcD);
         cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
-        fragC, &tCgC(i), pred);
+            fragC, &tCgC(i), pred);
         FragDType fragD = epilogue_op(accumulators(i), fragC);
 
         cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
-        fragD, &tCgD(i), pred);
+            fragD, &tCgD(i), pred);
         // }
-        }
-    }
-    else {
-    // Represent the full output tensor
-    Tensor mC_mnl = make_tensor(make_gmem_ptr<DataTypeC>(params.ptr_C),
-                                make_shape(M, N, L),
-                                stride_c); // (m,n,l)
-    Tensor mD_mnl = make_tensor(
-        make_gmem_ptr(params.ptr_D), make_shape(M, N, L), stride_d); // (m,n,l)
-    Tensor gC_mnl = local_tile(mC_mnl,
-                               blk_shape_MNK,
-                               make_coord(_, _, _),
-                               Step<_1, _1, X>{}); // (BLK_M,BLK_N,m,n,l)
-    Tensor gD_mnl = local_tile(mD_mnl,
-                               blk_shape_MNK,
-                               make_coord(_, _, _),
-                               Step<_1, _1, X>{}); // (BLK_M,BLK_N,m,n,l)
+      }
+    } else {
+      // Represent the full output tensor
+      Tensor mC_mnl = make_tensor(make_gmem_ptr<DataTypeC>(params.ptr_C),
+                                  make_shape(M, N, L),
+                                  stride_c); // (m,n,l)
+      Tensor mD_mnl = make_tensor(make_gmem_ptr(params.ptr_D),
+                                  make_shape(M, N, L),
+                                  stride_d); // (m,n,l)
+      Tensor gC_mnl = local_tile(mC_mnl,
+                                 blk_shape_MNK,
+                                 make_coord(_, _, _),
+                                 Step<_1, _1, X>{}); // (BLK_M,BLK_N,m,n,l)
+      Tensor gD_mnl = local_tile(mD_mnl,
+                                 blk_shape_MNK,
+                                 make_coord(_, _, _),
+                                 Step<_1, _1, X>{}); // (BLK_M,BLK_N,m,n,l)
 
-    // Slice to get the tile this CTA is responsible for
-    Tensor gC = gC_mnl(_, _, m_coord, n_coord, l_coord); // (BLK_M,BLK_N)
-    Tensor gD = gD_mnl(_, _, m_coord, n_coord, l_coord); // (BLK_M,BLK_N)
+      // Slice to get the tile this CTA is responsible for
+      Tensor gC = gC_mnl(_, _, m_coord, n_coord, l_coord); // (BLK_M,BLK_N)
+      Tensor gD = gD_mnl(_, _, m_coord, n_coord, l_coord); // (BLK_M,BLK_N)
 
-    // Partition source and destination tiles to match the accumulator
-    // partitioning
-    Tensor tCgD = thr_mma.partition_C(gD); // (VEC,THR_M,THR_N)
-    Tensor tCgC = thr_mma.partition_C(gC); // (VEC,THR_M,THR_N)
+      // Partition source and destination tiles to match the accumulator
+      // partitioning
+      Tensor tCgD = thr_mma.partition_C(gD); // (VEC,THR_M,THR_N)
+      Tensor tCgC = thr_mma.partition_C(gC); // (VEC,THR_M,THR_N)
 
-    #if 0
+#if 0
     if (threadIdx.x == 128) {
       printf("\n");
       printf("dD: \n"); print(stride_d); printf("\n");
@@ -271,70 +264,70 @@ struct CollectiveEpilogue {
       printf("tCgC: \n"); print(tCgC); printf("\n");
       printf("\n");
     }
-    #endif
+#endif
 
-    static_assert(is_static<FrgLayout>::value,
-                  "Accumulator layout must be static");
-    CUTE_STATIC_ASSERT_V(
-        size(tCgC) == size(tCgD),
-        "Source and destination must have the same number of elements.");
-    CUTE_STATIC_ASSERT_V(
-        size(tCgD) == size(accumulators),
-        "Accumulator count must have the same destination element count.");
+      static_assert(is_static<FrgLayout>::value,
+                    "Accumulator layout must be static");
+      CUTE_STATIC_ASSERT_V(
+          size(tCgC) == size(tCgD),
+          "Source and destination must have the same number of elements.");
+      CUTE_STATIC_ASSERT_V(
+          size(tCgD) == size(accumulators),
+          "Accumulator count must have the same destination element count.");
 
-    // OOB predication for tile quantization "residue"
-    // Absolute coordinate tensors (dynamic)
-    auto shape_MN = make_shape(M, N);
-    Tensor mD_crd = make_identity_tensor(shape_MN); // (M,N)
-    Tensor cD_mn = local_tile(mD_crd,
-                              take<0, 2>(blk_shape_MNK),
-                              make_coord(m_coord, n_coord)); // (BLK_M,BLK_N)
-    Tensor tCcD_mn = thr_mma.partition_C(cD_mn); // (VEC,THR_M,THR_N)
-    // Relative coordinate tensors (static)
-    Tensor cD = cute::make_coord_tensor(cD_mn.layout()); // (BLK_M,BLK_N)
-    Tensor tCcD =
-        cute::make_coord_tensor(tCcD_mn.layout()); // (VEC,THR_M,THR_N)
-    // Subtract the global "bottom right" corner from the local "top left"
-    // corner to get the max relative coordinate
-    auto residue_cD = shape_MN - cD_mn(_0{});     // (m,n)
-    auto residue_tCcD = shape_MN - tCcD_mn(_0{}); // (m,n)
+      // OOB predication for tile quantization "residue"
+      // Absolute coordinate tensors (dynamic)
+      auto shape_MN = make_shape(M, N);
+      Tensor mD_crd = make_identity_tensor(shape_MN); // (M,N)
+      Tensor cD_mn = local_tile(mD_crd,
+                                take<0, 2>(blk_shape_MNK),
+                                make_coord(m_coord, n_coord)); // (BLK_M,BLK_N)
+      Tensor tCcD_mn = thr_mma.partition_C(cD_mn); // (VEC,THR_M,THR_N)
+      // Relative coordinate tensors (static)
+      Tensor cD = cute::make_coord_tensor(cD_mn.layout()); // (BLK_M,BLK_N)
+      Tensor tCcD =
+          cute::make_coord_tensor(tCcD_mn.layout()); // (VEC,THR_M,THR_N)
+      // Subtract the global "bottom right" corner from the local "top left"
+      // corner to get the max relative coordinate
+      auto residue_cD = shape_MN - cD_mn(_0{});     // (m,n)
+      auto residue_tCcD = shape_MN - tCcD_mn(_0{}); // (m,n)
 
-    // Fully OOB tile
-    if (not elem_less(repeat_like(residue_cD, _0{}), residue_cD)) {
-      return;
-    }
+      // Fully OOB tile
+      if (not elem_less(repeat_like(residue_cD, _0{}), residue_cD)) {
+        return;
+      }
 
-    using FragCType = remove_cvref_t<decltype(tCgC(0))>;
-    using FragDType = remove_cvref_t<decltype(tCgD(0))>;
+      using FragCType = remove_cvref_t<decltype(tCgC(0))>;
+      using FragDType = remove_cvref_t<decltype(tCgD(0))>;
 
-    // source is needed
-    // if (epilogue_op.is_source_needed()) {
-    //   CUTLASS_PRAGMA_UNROLL
-    //   for (int i = 0; i < size(accumulators); ++i) {
-    //     FragCType fragC;
-    //     bool pred = elem_less(tCcD(i), residue_tCcD);
-    //     cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
-    //         fragC, &tCgC(i), pred);
-    //     FragDType fragD = epilogue_op(accumulators(i), fragC);
-    //     cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
-    //         fragD, &tCgD(i), pred);
-    //   }
-    // }
-    // source is not needed, avoid load
-    // else {
-
-    CUTLASS_PRAGMA_UNROLL
-    for (int i = 0; i < size(accumulators); ++i) {
-      FragCType fragC;
-      bool pred = elem_less(tCcD(i), residue_tCcD);
-      cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
-          fragC, &tCgC(i), pred);
-      FragDType fragD = epilogue_op(accumulators(i), fragC);
-
-      cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
-          fragD, &tCgD(i), pred);
+      // source is needed
+      // if (epilogue_op.is_source_needed()) {
+      //   CUTLASS_PRAGMA_UNROLL
+      //   for (int i = 0; i < size(accumulators); ++i) {
+      //     FragCType fragC;
+      //     bool pred = elem_less(tCcD(i), residue_tCcD);
+      //     cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
+      //         fragC, &tCgC(i), pred);
+      //     FragDType fragD = epilogue_op(accumulators(i), fragC);
+      //     cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
+      //         fragD, &tCgD(i), pred);
+      //   }
       // }
-    }
+      // source is not needed, avoid load
+      // else {
+
+      CUTLASS_PRAGMA_UNROLL
+      for (int i = 0; i < size(accumulators); ++i) {
+        FragCType fragC;
+        bool pred = elem_less(tCcD(i), residue_tCcD);
+        cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
+            fragC, &tCgC(i), pred);
+        FragDType fragD = epilogue_op(accumulators(i), fragC);
+
+        cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
+            fragD, &tCgD(i), pred);
+        // }
+      }
     }
   }
 
@@ -387,7 +380,7 @@ struct CollectiveEpilogue {
                             store_pipe_producer_state);
   }
 
-// private:
+  // private:
   Arguments params;
   ThreadEpilogueOp epilogue_op;
 };

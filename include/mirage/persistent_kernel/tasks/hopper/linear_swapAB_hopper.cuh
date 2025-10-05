@@ -51,7 +51,7 @@ __device__ __forceinline__ void
       REDUCTION_SIZE < TMA_A::SMEM_COL * TMA_A::SMEM_REPEAT_COL
           ? REDUCTION_SIZE
           : TMA_A::SMEM_COL * TMA_A::SMEM_REPEAT_COL;
-          
+
   constexpr int CONSUMER_WARPGROUPS = 1;
   constexpr int PRODUCER_WARPGROUPS = 1;
   constexpr int NUM_WARPGROUPS = CONSUMER_WARPGROUPS + PRODUCER_WARPGROUPS;
@@ -211,9 +211,9 @@ __device__ __forceinline__ void
   if (warpgroup_id == NUM_WARPGROUPS - 1) {
     wg_decrease_regs<32>();
     if (lane_id() == 0 && warp_idx == (NUM_WARPGROUPS * WARPGROUP_WARPS - 4)) {
-      prefetch_tma_descriptor(tma_a.desc_ptr);     
-      prefetch_tma_descriptor(tma_b.desc_ptr);     
-      prefetch_tma_descriptor(tma_out.desc_ptr); 
+      prefetch_tma_descriptor(tma_a.desc_ptr);
+      prefetch_tma_descriptor(tma_b.desc_ptr);
+      prefetch_tma_descriptor(tma_out.desc_ptr);
       if constexpr (HAS_RESIDUAL) {
         prefetch_tma_descriptor(tma_residual->desc_ptr);
       }

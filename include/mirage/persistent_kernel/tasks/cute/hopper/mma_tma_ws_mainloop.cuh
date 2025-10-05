@@ -32,22 +32,22 @@ namespace kernel {
 
 using namespace cute;
 
-
 template <class KernelTraits, bool OnHost>
 struct MainloopParamsImpl;
 
-// NOTE(Yu): this is for normal mainloop where tma is allocated on host and pass from global function
+// NOTE(Yu): this is for normal mainloop where tma is allocated on host and pass
+// from global function
 template <class KernelTraits>
-struct MainloopParamsImpl<KernelTraits, /*OnHost*/true> {
-  using DataType      = typename KernelTraits::DataType;
-  using ProblemShape  = typename KernelTraits::ProblemShape;
+struct MainloopParamsImpl<KernelTraits, /*OnHost*/ true> {
+  using DataType = typename KernelTraits::DataType;
+  using ProblemShape = typename KernelTraits::ProblemShape;
 
-  using StrideA       = typename KernelTraits::StrideA;
-  using StrideB       = typename KernelTraits::StrideB;
-  using SmemLayoutA   = typename KernelTraits::SmemLayoutA; // (BLK_M,BLK_K,PIPE)
-  using SmemLayoutB   = typename KernelTraits::SmemLayoutB; // (BLK_N,BLK_K,PIPE)
-  using TileShape     = typename KernelTraits::TileShape_MNK;
-  using ClusterShape  = typename KernelTraits::ClusterShape_MNK;
+  using StrideA = typename KernelTraits::StrideA;
+  using StrideB = typename KernelTraits::StrideB;
+  using SmemLayoutA = typename KernelTraits::SmemLayoutA; // (BLK_M,BLK_K,PIPE)
+  using SmemLayoutB = typename KernelTraits::SmemLayoutB; // (BLK_N,BLK_K,PIPE)
+  using TileShape = typename KernelTraits::TileShape_MNK;
+  using ClusterShape = typename KernelTraits::ClusterShape_MNK;
 
   using GmemTiledCopyA = cute::SM90_TMA_LOAD;
   using GmemTiledCopyB = cute::SM90_TMA_LOAD;
@@ -78,19 +78,16 @@ struct MainloopParamsImpl<KernelTraits, /*OnHost*/true> {
   ProblemShape problem_shape;
 };
 
-
 // NOTE(Yu): this is for mpk device call
 template <class KernelTraits>
-struct MainloopParamsImpl<KernelTraits, /*OnHost*/false> {
-  using ProblemShape  = typename KernelTraits::ProblemShape;
+struct MainloopParamsImpl<KernelTraits, /*OnHost*/ false> {
+  using ProblemShape = typename KernelTraits::ProblemShape;
 
   uint32_t tma_transaction_bytes;
   uint32_t tma_transaction_bytes_mk;
   uint32_t tma_transaction_bytes_nk;
   ProblemShape problem_shape;
 };
-
-
 
 template <typename KernelTraits>
 struct CollectiveMainloop {
@@ -159,15 +156,13 @@ struct CollectiveMainloop {
   template <bool onHost>
   using Params = MainloopParamsImpl<KernelTraits, onHost>;
 
-
-  template <bool onHost=false, class ProblemShapeT>
-  CUTLASS_HOST_DEVICE
-  static Params<onHost>
-  to_underlying_arguments(ProblemShapeT const &problem_shape,
-                          Arguments const &args) {
+  template <bool onHost = false, class ProblemShapeT>
+  CUTLASS_HOST_DEVICE static Params<onHost>
+      to_underlying_arguments(ProblemShapeT const &problem_shape,
+                              Arguments const &args) {
     uint32_t transaction_bytes_mk = TmaTransactionBytesMK;
     uint32_t transaction_bytes_nk = TmaTransactionBytesNK;
-    uint32_t transaction_bytes    = transaction_bytes_mk + transaction_bytes_nk;
+    uint32_t transaction_bytes = transaction_bytes_mk + transaction_bytes_nk;
 
     if constexpr (onHost) {
       auto problem_shape_MNKL = append<4>(problem_shape, 1);
@@ -176,34 +171,36 @@ struct CollectiveMainloop {
       auto ptr_A = reinterpret_cast<DataType const *>(args.ptr_A);
       auto ptr_B = reinterpret_cast<DataType const *>(args.ptr_B);
 
-      Tensor tensor_a = make_tensor(ptr_A,
-          make_layout(make_shape(M, K, L), args.dA));
-      Tensor tensor_b = make_tensor(ptr_B,
-          make_layout(make_shape(N, K, L), args.dB));
+      Tensor tensor_a =
+          make_tensor(ptr_A, make_layout(make_shape(M, K, L), args.dA));
+      Tensor tensor_b =
+          make_tensor(ptr_B, make_layout(make_shape(N, K, L), args.dB));
 
       Params<true> p{};
-      p.problem_shape             = problem_shape;
-      p.tma_transaction_bytes     = transaction_bytes;
-      p.tma_transaction_bytes_mk  = transaction_bytes_mk;
-      p.tma_transaction_bytes_nk  = transaction_bytes_nk;
+      p.problem_shape = problem_shape;
+      p.tma_transaction_bytes = transaction_bytes;
+      p.tma_transaction_bytes_mk = transaction_bytes_mk;
+      p.tma_transaction_bytes_nk = transaction_bytes_nk;
 
-      p.tma_load_a = make_tma_copy_A_sm90(
-          GmemTiledCopyA{}, tensor_a,
-          SmemLayoutA{}(_, _, cute::Int<0>{}),
-          TileShape{}, ClusterShape{});
+      p.tma_load_a = make_tma_copy_A_sm90(GmemTiledCopyA{},
+                                          tensor_a,
+                                          SmemLayoutA{}(_, _, cute::Int<0>{}),
+                                          TileShape{},
+                                          ClusterShape{});
 
-      p.tma_load_b = make_tma_copy_B_sm90(
-          GmemTiledCopyB{}, tensor_b,
-          SmemLayoutB{}(_, _, cute::Int<0>{}),
-          TileShape{}, ClusterShape{});
+      p.tma_load_b = make_tma_copy_B_sm90(GmemTiledCopyB{},
+                                          tensor_b,
+                                          SmemLayoutB{}(_, _, cute::Int<0>{}),
+                                          TileShape{},
+                                          ClusterShape{});
 
       return p;
     } else {
       Params<false> p{};
-      p.problem_shape             = problem_shape;
-      p.tma_transaction_bytes     = transaction_bytes;
-      p.tma_transaction_bytes_mk  = transaction_bytes_mk;
-      p.tma_transaction_bytes_nk  = transaction_bytes_nk;
+      p.problem_shape = problem_shape;
+      p.tma_transaction_bytes = transaction_bytes;
+      p.tma_transaction_bytes_mk = transaction_bytes_mk;
+      p.tma_transaction_bytes_nk = transaction_bytes_nk;
       return p;
     }
   }
@@ -344,7 +341,7 @@ struct CollectiveMainloop {
     constexpr int MmaWarpGroups =
         size(TiledMma{}) / cutlass::NumThreadsPerWarpGroup;
     Layout warp_group_thread_layout = make_layout(
-      Int<MmaWarpGroups>{}, Int<cutlass::NumThreadsPerWarpGroup>{});
+        Int<MmaWarpGroups>{}, Int<cutlass::NumThreadsPerWarpGroup>{});
 
     int warp_group_idx = __shfl_sync(
         0xFFFFFFFF, thread_idx / cutlass::NumThreadsPerWarpGroup, 0);

@@ -1100,7 +1100,7 @@ int TaskRegister::register_linear_swapAB_hopper_task(
   constexpr int M = 3;
   constexpr int S = 3;
   constexpr int TMA_CP_ASYNC_SIZE = 64;
-  constexpr int TILE_SIZE = 128;
+  constexpr int TILE_SIZE = 256;
   constexpr int Kstages = 5;
   assert(batch_size <= 16);
   int const SMEM_M_SIZE = 16; // batch size padded to 16
@@ -1220,142 +1220,171 @@ int TaskRegister::register_linear_swapAB_hopper_task(
 }
 
 int TaskRegister::register_linear_cutlass_hopper_task(
-  threadblock::Graph const &bgraph,
-  std::vector<int> const &params,
-  bool with_residual) {
-assert(params.size() == 0);
-int batch_size = 0, output_size = 0, reduction_size = 0, output_stride = 0;
-std::vector<tb::TBInputOp *> input_ops;
-std::vector<tb::TBInputOp *> output_ops;
-int num_inputs = with_residual ? 3 : 2;
-int num_outputs = 1;
-constexpr int KSTAGES = 4;
+    threadblock::Graph const &bgraph,
+    std::vector<int> const &params,
+    bool with_residual) {
+  assert(params.size() == 0);
+  int batch_size = 0, output_size = 0, reduction_size = 0, output_stride = 0;
+  std::vector<tb::TBInputOp *> input_ops;
+  std::vector<tb::TBInputOp *> output_ops;
+  int num_inputs = with_residual ? 3 : 2;
+  int num_outputs = 1;
+  constexpr int KSTAGES = 4;
 
-assert(bgraph.operators.size() == (size_t)num_inputs + num_outputs);
-for (auto const &op : bgraph.operators) {
-  assert(op->op_type == mirage::type::TB_INPUT_OP);
-  if (input_ops.size() < (size_t)num_inputs) {
-    input_ops.push_back(static_cast<tb::TBInputOp *>(op));
-  } else {
-    output_ops.push_back(static_cast<tb::TBInputOp *>(op));
+  assert(bgraph.operators.size() == (size_t)num_inputs + num_outputs);
+  for (auto const &op : bgraph.operators) {
+    assert(op->op_type == mirage::type::TB_INPUT_OP);
+    if (input_ops.size() < (size_t)num_inputs) {
+      input_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    } else {
+      output_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    }
   }
-}
-assert(output_ops[0]->output_tensors[0].num_dims == 2);
-batch_size = output_ops[0]->output_tensors[0].dim[0];
-output_size = output_ops[0]->output_tensors[0].dim[1];
-assert(input_ops[0]->dtensor.num_dims == 2);
-reduction_size = input_ops[0]->dtensor.dim[1];
-assert(output_ops[0]->dtensor.owner_op->op_type == type::KN_INPUT_OP);
-kn::KNInputOp *kn_input_op =
-    static_cast<kn::KNInputOp *>(output_ops[0]->dtensor.owner_op);
-output_stride = static_cast<int>(kn_input_op->input_strides[0]);
-constexpr int TILE_SIZE = 128;
+  assert(output_ops[0]->output_tensors[0].num_dims == 2);
+  batch_size = output_ops[0]->output_tensors[0].dim[0];
+  output_size = output_ops[0]->output_tensors[0].dim[1];
+  assert(input_ops[0]->dtensor.num_dims == 2);
+  reduction_size = input_ops[0]->dtensor.dim[1];
+  assert(output_ops[0]->dtensor.owner_op->op_type == type::KN_INPUT_OP);
+  kn::KNInputOp *kn_input_op =
+      static_cast<kn::KNInputOp *>(output_ops[0]->dtensor.owner_op);
+  output_stride = static_cast<int>(kn_input_op->input_strides[0]);
+  constexpr int TILE_SIZE = 128;
 
-mirage::transpiler::CodeKeeper code;
-code.inc_indent();
-// NOTE: output_size and batch_size are swapped here
-code.e("auto problem_shape = cute::Shape<cute::Int<$>, cute::Int<$>, cute::Int<$>>{};", output_size, batch_size, reduction_size);
-// NOTE: output_size and batch_size are swapped here
-code.e("using KernelTraits = kernel::MMAKernelTraits<cutlass::bfloat16_t, $, $, $, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor, cutlass::layout::RowMajor, cutlass::layout::RowMajor, $, $, $, $, decltype(problem_shape), $, $>;", output_size, batch_size, reduction_size, 8, 64, batch_size, TILE_SIZE, batch_size, KSTAGES);
-code.e("using Mainloop = kernel::CollectiveMainloop<KernelTraits>;");
-code.e("using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;");
-code.e("using StrideA = typename KernelTraits::StrideA;");
-code.e("using StrideB = typename KernelTraits::StrideB;");
-code.e("using StrideC = typename KernelTraits::StrideC;");
-code.e("using StrideD = typename KernelTraits::StrideD;");
-code.e("StrideA stride_A = cutlass::make_cute_packed_stride(StrideA{}, {KernelTraits::OUTPUT_SIZE, KernelTraits::REDUCTION_SIZE, 1});");
-code.e("StrideB stride_B = cutlass::make_cute_packed_stride(StrideB{}, {KernelTraits::BATCH_SIZE, KernelTraits::REDUCTION_SIZE, 1});");
-code.e("StrideC stride_C = cutlass::make_cute_packed_stride(StrideC{}, {KernelTraits::BATCH_SIZE, KernelTraits::OUTPUT_SIZE, 1});");
-code.e("StrideD stride_D = cutlass::make_cute_packed_stride(StrideD{}, {KernelTraits::BATCH_SIZE, KernelTraits::OUTPUT_SIZE, 1});");
-code.e("typename Mainloop::Arguments mainloop_args{");
-code.e("    static_cast<cutlass::bfloat16_t const *>(task_desc.inputs[1].base_ptr),");
-code.e("    stride_A,");
-code.e("    static_cast<cutlass::bfloat16_t const *>(task_desc.inputs[0].base_ptr),");
-code.e("    stride_B,");
-code.e("};");
-code.e("typename Epilogue::Arguments epilogue_args{");
-code.e("    static_cast<cutlass::bfloat16_t const *>(task_desc.inputs[2].base_ptr),");
-code.e("    stride_C,");
-code.e("    static_cast<cutlass::bfloat16_t *>(task_desc.outputs[0].base_ptr),");
-code.e("    stride_C,");
-code.e("    {1.0f, 1.0f},");
-code.e("};");
-code.e("using MainloopParamsDevice = typename Mainloop::template Params<false>;");
-code.e("MainloopParamsDevice mainloop_params = Mainloop::to_underlying_arguments<false>(problem_shape, mainloop_args);");
-code.e("typename Epilogue::Params epilogue_params = Epilogue::to_underlying_arguments(problem_shape, epilogue_args);");
+  mirage::transpiler::CodeKeeper code;
+  code.inc_indent();
+  // NOTE: output_size and batch_size are swapped here
+  code.e("auto problem_shape = cute::Shape<cute::Int<$>, cute::Int<$>, "
+         "cute::Int<$>>{};",
+         output_size,
+         batch_size,
+         reduction_size);
+  // NOTE: output_size and batch_size are swapped here
+  code.e("using KernelTraits = kernel::MMAKernelTraits<cutlass::bfloat16_t, $, "
+         "$, $, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor, "
+         "cutlass::layout::RowMajor, cutlass::layout::RowMajor, $, $, $, $, "
+         "decltype(problem_shape), $, $>;",
+         output_size,
+         batch_size,
+         reduction_size,
+         8,
+         64,
+         batch_size,
+         TILE_SIZE,
+         batch_size,
+         KSTAGES);
+  code.e("using Mainloop = kernel::CollectiveMainloop<KernelTraits>;");
+  code.e("using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;");
+  code.e("using StrideA = typename KernelTraits::StrideA;");
+  code.e("using StrideB = typename KernelTraits::StrideB;");
+  code.e("using StrideC = typename KernelTraits::StrideC;");
+  code.e("using StrideD = typename KernelTraits::StrideD;");
+  code.e("StrideA stride_A = cutlass::make_cute_packed_stride(StrideA{}, "
+         "{KernelTraits::OUTPUT_SIZE, KernelTraits::REDUCTION_SIZE, 1});");
+  code.e("StrideB stride_B = cutlass::make_cute_packed_stride(StrideB{}, "
+         "{KernelTraits::BATCH_SIZE, KernelTraits::REDUCTION_SIZE, 1});");
+  code.e("StrideC stride_C = cutlass::make_cute_packed_stride(StrideC{}, "
+         "{KernelTraits::BATCH_SIZE, KernelTraits::OUTPUT_SIZE, 1});");
+  code.e("StrideD stride_D = cutlass::make_cute_packed_stride(StrideD{}, "
+         "{KernelTraits::BATCH_SIZE, KernelTraits::OUTPUT_SIZE, 1});");
+  code.e("typename Mainloop::Arguments mainloop_args{");
+  code.e("    static_cast<cutlass::bfloat16_t const "
+         "*>(task_desc.inputs[1].base_ptr),");
+  code.e("    stride_A,");
+  code.e("    static_cast<cutlass::bfloat16_t const "
+         "*>(task_desc.inputs[0].base_ptr),");
+  code.e("    stride_B,");
+  code.e("};");
+  code.e("typename Epilogue::Arguments epilogue_args{");
+  code.e("    static_cast<cutlass::bfloat16_t const "
+         "*>(task_desc.inputs[2].base_ptr),");
+  code.e("    stride_C,");
+  code.e(
+      "    static_cast<cutlass::bfloat16_t *>(task_desc.outputs[0].base_ptr),");
+  code.e("    stride_C,");
+  code.e("    {1.0f, 1.0f},");
+  code.e("};");
+  code.e("using MainloopParamsDevice = typename Mainloop::template "
+         "Params<false>;");
+  code.e("MainloopParamsDevice mainloop_params = "
+         "Mainloop::to_underlying_arguments<false>(problem_shape, "
+         "mainloop_args);");
+  code.e("typename Epilogue::Params epilogue_params = "
+         "Epilogue::to_underlying_arguments(problem_shape, epilogue_args);");
 
- // define TMAs
- constexpr int B = 3;
- constexpr int M = 3;
- constexpr int S = 3;
- constexpr int TMA_CP_ASYNC_SIZE = 64;
- constexpr int Kstages = 5;
- assert(batch_size <= 16);
- int const SMEM_M_SIZE = batch_size;
- int const output_tma_cp_size = output_size < 64 ? output_size : 64;
- int const output_atom_size = 64;
+  // define TMAs
+  constexpr int B = 3;
+  constexpr int M = 3;
+  constexpr int S = 3;
+  constexpr int TMA_CP_ASYNC_SIZE = 64;
+  constexpr int Kstages = 5;
+  assert(batch_size <= 16);
+  int const SMEM_M_SIZE = batch_size;
+  int const output_tma_cp_size = output_size < 64 ? output_size : 64;
+  int const output_atom_size = 64;
 
- code.e("using TMA_B = kernel::tma::tma_2d<cutlass::bfloat16_t, $, $, $, $, $, $, $, $, "
-        "$, $, $, $, true>;",
-        B,
-        M,
-        S,
-        batch_size,        /*GMEM_ROW_*/
-        reduction_size,    /*GMEM_COL_*/
-        batch_size,        /*SMEM_ROW_*/
-        TMA_CP_ASYNC_SIZE, /*SMEM_COL_*/
-        reduction_size,    /*GMEM_STRIDE_ROW_*/
-        1,                 /*GMEM_STRIDE_COL_*/
-        1,                 /*SMEM_REPEAT_ROW_*/
-        (TILE_SIZE + TMA_CP_ASYNC_SIZE - 1) /
-            TMA_CP_ASYNC_SIZE,          /*SMEM_REPEAT_COL_*/
-        SMEM_M_SIZE * TMA_CP_ASYNC_SIZE /*SMEM_STRIDE_*/
- );
+  code.e("using TMA_B = kernel::tma::tma_2d<cutlass::bfloat16_t, $, $, $, $, "
+         "$, $, $, $, "
+         "$, $, $, $, true>;",
+         B,
+         M,
+         S,
+         batch_size,        /*GMEM_ROW_*/
+         reduction_size,    /*GMEM_COL_*/
+         batch_size,        /*SMEM_ROW_*/
+         TMA_CP_ASYNC_SIZE, /*SMEM_COL_*/
+         reduction_size,    /*GMEM_STRIDE_ROW_*/
+         1,                 /*GMEM_STRIDE_COL_*/
+         1,                 /*SMEM_REPEAT_ROW_*/
+         (TILE_SIZE + TMA_CP_ASYNC_SIZE - 1) /
+             TMA_CP_ASYNC_SIZE,          /*SMEM_REPEAT_COL_*/
+         SMEM_M_SIZE * TMA_CP_ASYNC_SIZE /*SMEM_STRIDE_*/
+  );
 
- code.e("using TMA_A = kernel::tma::tma_2d<cutlass::bfloat16_t, $, $, $, $, $, $, $, $, "
-        "$, $, $, $, true>;",
-        B,
-        M,
-        S,
-        output_size,       /*GMEM_ROW_*/
-        reduction_size,    /*GMEM_COL_*/
-        output_atom_size,  /*SMEM_ROW_*/
-        TMA_CP_ASYNC_SIZE, /*SMEM_COL_*/
-        reduction_size,    /*GMEM_STRIDE_ROW_*/
-        1,                 /*GMEM_STRIDE_COL_*/
-        1,                 /*SMEM_REPEAT_ROW_*/
-        (TILE_SIZE + TMA_CP_ASYNC_SIZE - 1) /
-            TMA_CP_ASYNC_SIZE,               /*SMEM_REPEAT_COL_*/
-        output_atom_size * TMA_CP_ASYNC_SIZE /*SMEM_STRIDE_*/
- );
+  code.e("using TMA_A = kernel::tma::tma_2d<cutlass::bfloat16_t, $, $, $, $, "
+         "$, $, $, $, "
+         "$, $, $, $, true>;",
+         B,
+         M,
+         S,
+         output_size,       /*GMEM_ROW_*/
+         reduction_size,    /*GMEM_COL_*/
+         output_atom_size,  /*SMEM_ROW_*/
+         TMA_CP_ASYNC_SIZE, /*SMEM_COL_*/
+         reduction_size,    /*GMEM_STRIDE_ROW_*/
+         1,                 /*GMEM_STRIDE_COL_*/
+         1,                 /*SMEM_REPEAT_ROW_*/
+         (TILE_SIZE + TMA_CP_ASYNC_SIZE - 1) /
+             TMA_CP_ASYNC_SIZE,               /*SMEM_REPEAT_COL_*/
+         output_atom_size * TMA_CP_ASYNC_SIZE /*SMEM_STRIDE_*/
+  );
 
- code.inc_indent();
- code.e("TMA_A "
-        "tma_a(static_cast<CUtensorMap*>(task_desc.inputs[1].tma_desc_ptrs[0])"
-        ");");
- code.e("TMA_B "
-        "tma_b(static_cast<CUtensorMap*>(task_desc.inputs[0].tma_desc_ptrs[0])"
-        ");");
+  code.inc_indent();
+  code.e("TMA_A "
+         "tma_a(static_cast<CUtensorMap*>(task_desc.inputs[1].tma_desc_ptrs[0])"
+         ");");
+  code.e("TMA_B "
+         "tma_b(static_cast<CUtensorMap*>(task_desc.inputs[0].tma_desc_ptrs[0])"
+         ");");
 
-code.e(
-      "kernel::linear_cutlass_ws_hopper<Mainloop, Epilogue, false, cutlass::bfloat16_t, $, $, $, TMA_A, TMA_B, "
-      "$, $>(mainloop_params, epilogue_params,",
-      batch_size,
-      output_size,
-      reduction_size,
-      output_stride,
-      with_residual
-    );
+  code.e("kernel::linear_cutlass_ws_hopper<Mainloop, Epilogue, false, "
+         "cutlass::bfloat16_t, $, $, $, TMA_A, TMA_B, "
+         "$, $>(mainloop_params, epilogue_params,",
+         batch_size,
+         output_size,
+         reduction_size,
+         output_stride,
+         with_residual);
   code.e("    tma_a,");
   code.e("    tma_b");
   code.e(");");
 
-if (with_residual) {
-  return register_task_variant(TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER,
-                               code.to_string());
-} else {
-  return register_task_variant(TASK_LINEAR_CUTLASS_HOPPER, code.to_string());
-}
+  if (with_residual) {
+    return register_task_variant(TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER,
+                                 code.to_string());
+  } else {
+    return register_task_variant(TASK_LINEAR_CUTLASS_HOPPER, code.to_string());
+  }
 }
 
 } // namespace runtime
