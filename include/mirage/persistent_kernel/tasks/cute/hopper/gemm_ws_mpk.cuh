@@ -110,8 +110,6 @@ CUTLASS_DEVICE void linear_cutlass_ws_hopper(
   T *d_output = static_cast<T *>(output_ptr);
   T const *d_residual = static_cast<T const *>(residual_ptr);
 
-  auto mma_tiler = cute::make_shape(OUTPUT_SIZE, BATCH_SIZE, REDUCTION_SIZE);
-
   cutlass::bfloat16_t *shared_weight =
       shared_storage.tensors.mainloop.smem_A.begin();
   cutlass::bfloat16_t *shared_input =
@@ -148,14 +146,12 @@ CUTLASS_DEVICE void linear_cutlass_ws_hopper(
   WeightSmem input_weight_smem(shared_weight);
 
   int thread_idx = int(threadIdx.x);
-  int lane_idx = cutlass::canonical_lane_idx();
   int warp_idx = cutlass::canonical_warp_idx_sync();
   int warp_idx_in_warp_group = warp_idx % cutlass::NumWarpsPerWarpGroup;
   int warp_group_thread_idx = thread_idx % cutlass::NumThreadsPerWarpGroup;
   auto warp_group_role = WarpGroupRole(cutlass::canonical_warp_group_idx());
   auto producer_warp_role = ProducerWarpRole(warp_idx_in_warp_group);
   int lane_predicate = cute::elect_one_sync();
-  uint32_t block_rank_in_cluster = cute::block_rank_in_cluster();
 
   // Issue Tma Descriptor Prefetch from a single thread
   if ((warp_idx == 0) && lane_predicate) {
@@ -330,7 +326,6 @@ CUTLASS_DEVICE void linear_cutlass_ws_hopper(
 
     // Prologue GMMAs
     int prologue_mma_count = min(CollectiveMainloop::K_PIPE_MMAS, k_tile_count);
-    assert(k_tile_count >= 1);
     tiled_mma.accumulate_ = GMMA::ScaleOut::Zero;
     warpgroup_fence_operand(accum);
     {
@@ -444,22 +439,6 @@ CUTLASS_DEVICE void linear_cutlass_ws_hopper(
     // The timing of calling this function only influences performance,
     // not functional correctness.
     cutlass::arch::launch_dependent_grids();
-
-    constexpr int BLK_M_RANK = cute::rank<0>(blk_shape);
-    auto m_max_coord =
-        unwrap(cute::transform(make_seq<BLK_M_RANK>{}, [&](auto i) {
-          return get<0, i>(problem_shape_mnkl) -
-                 get<0, i>(blk_shape) * get<0, i>(blk_coord);
-        }));
-
-    constexpr int BLK_N_RANK = cute::rank<1>(blk_shape);
-    auto n_max_coord =
-        unwrap(cute::transform(make_seq<BLK_N_RANK>{}, [&](auto i) {
-          return get<1, i>(problem_shape_mnkl) -
-                 get<1, i>(blk_shape) * get<1, i>(blk_coord);
-        }));
-
-    auto residue_mnk = make_tuple(m_max_coord, n_max_coord, Int<0>{});
 
     // start store op
     using X = Underscore;
