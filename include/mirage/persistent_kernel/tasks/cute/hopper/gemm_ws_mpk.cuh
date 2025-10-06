@@ -54,11 +54,10 @@ template <class CollectiveMainloop,
           int OUTPUT_STRIDE = OUTPUT_SIZE,
           bool WITH_RESIDUAL = false>
 CUTLASS_DEVICE void linear_cutlass_ws_hopper(
-    typename CollectiveMainloop::template Params<TMAOnHost> const
-        &mainloop_params,
-    typename CollectiveEpilogue::Params const &epilogue_params,
     const TMA_A &tma_a,
-    const TMA_B &tma_b) {
+    const TMA_B &tma_b,
+    void *output_ptr,
+    void const *residual_ptr) {
 
   struct SharedStorage {
     // Mainloop and epilogue don't use smem concurrently since kernel is
@@ -108,6 +107,8 @@ CUTLASS_DEVICE void linear_cutlass_ws_hopper(
   // Kernel level shared memory storage
   SharedStorage &shared_storage =
       *reinterpret_cast<SharedStorage *>(aligned_smem);
+  T *d_output = static_cast<T *>(output_ptr);
+  T const *d_residual = static_cast<T const *>(residual_ptr);
 
   auto mma_tiler = cute::make_shape(OUTPUT_SIZE, BATCH_SIZE, REDUCTION_SIZE);
 
@@ -178,59 +179,65 @@ CUTLASS_DEVICE void linear_cutlass_ws_hopper(
 
   mainloop_pipeline_params.is_leader = warp_group_thread_idx == 0;
   mainloop_pipeline_params.num_consumers = cutlass::NumThreadsPerWarpGroup;
-  mainloop_pipeline_params.transaction_bytes =
-      mainloop_params.tma_transaction_bytes;
+  // compute tma transaction bytes
+  static constexpr uint32_t TmaTransactionBytesMK = 
+    size<0>(SmemLayoutA{}) * size<1>(SmemLayoutA{}) * sizeof(T);
+  static constexpr uint32_t TmaTransactionBytesNK = 
+      size<0>(SmemLayoutB{}) * size<1>(SmemLayoutB{}) * sizeof(T);
+  static constexpr uint32_t TmaTransactionBytes =
+      TmaTransactionBytesMK + TmaTransactionBytesNK;
+
+    mainloop_pipeline_params.transaction_bytes =
+    TmaTransactionBytes;
+  // mainloop_pipeline_params.transaction_bytes =
+  //     mainloop_params.tma_transaction_bytes;
   MainloopPipeline mainloop_pipeline(shared_storage.pipelines.mainloop,
                                      mainloop_pipeline_params,
                                      ClusterShape{});
 
   // Epilogue Load pipeline
-  using EpiLoadPipeline = typename CollectiveEpilogue::LoadPipeline;
-  typename EpiLoadPipeline::Params epi_load_pipeline_params;
-  if (warp_group_role == WarpGroupRole::Producer &&
-      producer_warp_role == ProducerWarpRole::MainloopEpilogue) {
-    epi_load_pipeline_params.role = EpiLoadPipeline::ThreadCategory::Producer;
-  }
-  if (warp_group_role == WarpGroupRole::Consumer) {
-    epi_load_pipeline_params.role = EpiLoadPipeline::ThreadCategory::Consumer;
-  }
-  epi_load_pipeline_params.dst_blockid = cute::block_rank_in_cluster();
-  epi_load_pipeline_params.producer_arv_count = cutlass::NumThreadsPerWarp;
-  epi_load_pipeline_params.consumer_arv_count = cutlass::NumThreadsPerWarpGroup;
-  if constexpr (CollectiveEpilogue::RequiresTransactionBytes) {
-    epi_load_pipeline_params.transaction_bytes =
-        epilogue_params.tma_transaction_bytes;
-  }
-  EpiLoadPipeline epi_load_pipeline(shared_storage.pipelines.epi_load,
-                                    epi_load_pipeline_params);
+  // using EpiLoadPipeline = typename CollectiveEpilogue::LoadPipeline;
+  // typename EpiLoadPipeline::Params epi_load_pipeline_params;
+  // if (warp_group_role == WarpGroupRole::Producer &&
+  //     producer_warp_role == ProducerWarpRole::MainloopEpilogue) {
+  //   epi_load_pipeline_params.role = EpiLoadPipeline::ThreadCategory::Producer;
+  // }
+  // if (warp_group_role == WarpGroupRole::Consumer) {
+  //   epi_load_pipeline_params.role = EpiLoadPipeline::ThreadCategory::Consumer;
+  // }
+  // epi_load_pipeline_params.dst_blockid = cute::block_rank_in_cluster();
+  // epi_load_pipeline_params.producer_arv_count = cutlass::NumThreadsPerWarp;
+  // epi_load_pipeline_params.consumer_arv_count = cutlass::NumThreadsPerWarpGroup;
+  // if constexpr (CollectiveEpilogue::RequiresTransactionBytes) {
+    // epi_load_pipeline_params.transaction_bytes =
+    //     epilogue_params.tma_transaction_bytes;
+  // }
+  // EpiLoadPipeline epi_load_pipeline(shared_storage.pipelines.epi_load,
+  //                                   epi_load_pipeline_params);
   // Epilogue Store pipeline
-  using EpiStorePipeline = typename CollectiveEpilogue::StorePipeline;
-  typename EpiStorePipeline::Params epi_store_pipeline_params;
-  epi_store_pipeline_params.always_wait = true;
-  EpiStorePipeline epi_store_pipeline(epi_store_pipeline_params);
+  // using EpiStorePipeline = typename CollectiveEpilogue::StorePipeline;
+  // typename EpiStorePipeline::Params epi_store_pipeline_params;
+  // epi_store_pipeline_params.always_wait = true;
+  // EpiStorePipeline epi_store_pipeline(epi_store_pipeline_params);
   // Initialize starting pipeline states for the collectives
   // Epilogue store pipe is producer-only (consumer is TMA unit, waits via
   // scoreboarding)
   typename CollectiveMainloop::PipelineState smem_pipe_read;
   typename CollectiveMainloop::PipelineState smem_pipe_release = smem_pipe_read;
-  typename CollectiveEpilogue::LoadPipelineState epi_load_pipe_consumer_state;
+  // typename CollectiveEpilogue::LoadPipelineState epi_load_pipe_consumer_state;
 
   // For the DMA Load (producer) we start with an opposite phase
   // i.e., we skip all waits since we know that the buffer is indeed empty
   cutlass::PipelineState mainloop_pipe_producer_state =
       cutlass::make_producer_start_state<MainloopPipeline>();
-  cutlass::PipelineState epi_load_pipe_producer_state =
-      cutlass::make_producer_start_state<EpiLoadPipeline>();
-  cutlass::PipelineState epi_store_pipe_producer_state =
-      cutlass::make_producer_start_state<EpiStorePipeline>();
+  // cutlass::PipelineState epi_load_pipe_producer_state =
+  //     cutlass::make_producer_start_state<EpiLoadPipeline>();
+  // cutlass::PipelineState epi_store_pipe_producer_state =
+  //     cutlass::make_producer_start_state<EpiStorePipeline>();
   auto blk_shape = TileShape{}; // (BLK_M,BLK_N,BLK_K)
   TiledMma tiled_mma;
 
-  auto problem_shape_mnkl =
-      append<4>(mainloop_params.problem_shape, cute::Int<1>{});
-
-  CollectiveMainloop collective_mainloop;
-  CollectiveEpilogue collective_epilogue(epilogue_params);
+  constexpr auto problem_shape_mnkl = make_shape(cute::Int<OUTPUT_SIZE>{}, cute::Int<BATCH_SIZE>{}, cute::Int<REDUCTION_SIZE>{}, cute::Int<1>{});
 
   auto blk_coord = make_coord(Int<0>{}, Int<0>{}, _, Int<0>{});
 
@@ -438,16 +445,6 @@ CUTLASS_DEVICE void linear_cutlass_ws_hopper(
     // not functional correctness.
     cutlass::arch::launch_dependent_grids();
 
-#if 0
-     if (threadIdx.x == 128) {
-       printf("problem_shape_MNKL: \n"); print(problem_shape_MNKL); printf("\n");
-       printf("blk_shape: \n"); print(blk_shape); printf("\n");
-       printf("blk_coord: \n"); print(blk_coord); printf("\n");
-       printf("accumulators: \n"); print(accum); printf("\n");
-       printf("tiled_mma: \n"); print(tiled_mma); printf("\n");
-       printf("warp_group_thread_idx: \n"); print(warp_group_thread_idx); printf("\n");
-     }
-#endif
     constexpr int BLK_M_RANK = cute::rank<0>(blk_shape);
     auto m_max_coord =
         unwrap(cute::transform(make_seq<BLK_M_RANK>{}, [&](auto i) {
@@ -486,18 +483,19 @@ CUTLASS_DEVICE void linear_cutlass_ws_hopper(
       auto dD_T = cute::make_stride(
           get<1>(stride_d), get<0>(stride_d), get<2>(stride_d));
       Tensor mD_mnl_T =
-          cute::make_tensor(cute::make_gmem_ptr(epilogue_params.ptr_D),
-                            cute::make_shape(M, N, L),
-                            dD_T);
+      cute::make_tensor(cute::make_gmem_ptr(d_output),
+                        cute::make_shape(M, N, L),
+                        dD_T);
+
       Tensor gD_T = local_tile(
           mD_mnl_T, blk_shape, make_coord(_, _, _), Step<_1, _1, X>{})(
           _, _, m_coord, n_coord, l_coord); // (BLK_M, BLK_N)
 
       Tensor mC_mnl_T = cute::make_tensor(
-          cute::make_gmem_ptr<typename CollectiveEpilogue::DataTypeC>(
-              epilogue_params.ptr_C),
-          cute::make_shape(M, N, L),
-          dC_T);
+        cute::make_gmem_ptr<typename CollectiveEpilogue::DataTypeC>(
+            d_residual),
+        cute::make_shape(M, N, L),
+        dC_T);
       Tensor gC_T = local_tile(
           mC_mnl_T, blk_shape, make_coord(_, _, _), Step<_1, _1, X>{})(
           _, _, m_coord, n_coord, l_coord);
@@ -506,25 +504,6 @@ CUTLASS_DEVICE void linear_cutlass_ws_hopper(
       // partitioning
       Tensor tCgD = thr_mma.partition_C(gD_T); // (VEC,THR_M,THR_N)
       Tensor tCgC = thr_mma.partition_C(gC_T); // (VEC,THR_M,THR_N)
-#if 0
-            if (threadIdx.x == 128 && (blockIdx.x == 10 || blockIdx.x == 0)) {
-              // printf("M: %d, N: %d, L: %d\n", M, N, L);
-              printf("problem_shape_mnkl: \n"); print(problem_shape_mnkl); printf("\n");
-              printf("M: \n"); print(M); printf("\n");
-              printf("N: \n"); print(N); printf("\n");
-              printf("L: \n"); print(L); printf("\n");
-              printf("M_STRIDE: \n"); print(M_STRIDE); printf("\n");
-              printf("stride_d: \n"); print(stride_d); printf("\n");
-              printf("stride_c: \n"); print(stride_c); printf("\n");
-              printf("epilogue_params.dD: \n"); print(epilogue_params.dD); printf("\n");
-              printf("epilogue_params.dC: \n"); print(epilogue_params.dC); printf("\n");
-              printf("gC_T: \n"); print(gC_T); printf("\n");
-              printf("gD_T: \n"); print(gD_T); printf("\n");
-              printf("tCgD: \n"); print(tCgD); printf("\n");
-              printf("tCgC: \n"); print(tCgC); printf("\n");
-
-            }
-#endif
 
       // OOB predication for tile quantization "residue"
       // Absolute coordinate tensors (dynamic)
@@ -551,6 +530,13 @@ CUTLASS_DEVICE void linear_cutlass_ws_hopper(
       using FragCType = remove_cvref_t<decltype(tCgC(0))>;
       using FragDType = remove_cvref_t<decltype(tCgD(0))>;
 
+      using ThreadOp = typename CollectiveEpilogue::ThreadEpilogueOp;
+
+      typename ThreadOp::Params thread_params{};
+      thread_params.alpha = 1.0f;
+      thread_params.beta  = WITH_RESIDUAL ? 1.0f : 0.0f;
+      ThreadOp epilogue_op(thread_params);
+
       // source is needed
       if constexpr (WITH_RESIDUAL) {
         CUTLASS_PRAGMA_UNROLL
@@ -559,7 +545,7 @@ CUTLASS_DEVICE void linear_cutlass_ws_hopper(
           bool pred = elem_less(tCcD(i), residue_tCcD);
           cutlass::arch::global_load<FragCType, sizeof(FragCType)>(
               fragC, &tCgC(i), pred);
-          FragDType fragD = collective_epilogue.epilogue_op(accum(i), fragC);
+          FragDType fragD = epilogue_op(accum(i), fragC);
 
           cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
               fragD, &tCgD(i), pred);
@@ -573,7 +559,7 @@ CUTLASS_DEVICE void linear_cutlass_ws_hopper(
         for (int i = 0; i < size(accum); ++i) {
           FragCType fragC;
           bool pred = elem_less(tCcD(i), residue_tCcD);
-          FragDType fragD = collective_epilogue.epilogue_op(accum(i), fragC);
+          FragDType fragD = epilogue_op(accum(i), fragC);
           cutlass::arch::global_store<FragDType, sizeof(FragDType)>(
               fragD, &tCgD(i), pred);
         }
