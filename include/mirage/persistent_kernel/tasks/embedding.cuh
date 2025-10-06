@@ -25,11 +25,15 @@ __device__ __forceinline__ void
                             long long *tokens) {
   // int64_t const *__restrict__ input_ids =
   //     static_cast<int64_t const *>(input_ptr);
+  if (threadIdx.x < CONSUMER_NUM_THREADS) {
+    return;
+  }
   T const *__restrict__ embedding = static_cast<T const *>(embedding_ptr);
   T *__restrict__ output = static_cast<T *>(output_ptr);
   constexpr int BATCH_SIZE = 1;
 
-  for (int i = threadIdx.x; i < BATCH_SIZE * OUT_DIM; i += NUM_THREADS) {
+  for (int i = threadIdx.x; i < BATCH_SIZE * OUT_DIM;
+       i += CONSUMER_NUM_THREADS) {
     // int idx = i / OUT_DIM;
     int off = i % OUT_DIM;
     // int64_t wordIdx = input_ids[idx];
@@ -43,6 +47,7 @@ __device__ __forceinline__ void
     embedding_kernel(void const *__restrict__ input_ptr,
                      void const *__restrict__ embedding_ptr,
                      void *__restrict__ output_ptr) {
+  // if (threadIdx.x < CONSUMER_NUM_THREADS) return;
   int64_t const *__restrict__ input_ids =
       static_cast<int64_t const *>(input_ptr);
   T const *__restrict__ embedding = static_cast<T const *>(embedding_ptr);
@@ -53,14 +58,14 @@ __device__ __forceinline__ void
     int64_t wordIdx = input_ids[batch_idx];
     if (wordIdx >= 0) {
 #pragma unroll
-      for (int i = threadIdx.x; i < CHUNK_SIZE; i += NUM_THREADS) {
+      for (int i = threadIdx.x; i < CHUNK_SIZE; i += CONSUMER_NUM_THREADS) {
         output[batch_idx * OUTPUT_DIM_SIZE + i] =
             embedding[wordIdx * OUTPUT_DIM_SIZE + i];
       }
     } else {
       // TODO: This might not be necessary
       for (int i = threadIdx.x; i < CHUNK_SIZE;
-           i += NUM_THREADS) { // writing 0 to output
+           i += CONSUMER_NUM_THREADS) { // writing 0 to output
         output[batch_idx * OUTPUT_DIM_SIZE + i] = T(0.0f);
       }
     }

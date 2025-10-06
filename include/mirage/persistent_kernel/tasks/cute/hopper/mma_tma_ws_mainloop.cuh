@@ -28,13 +28,67 @@
 #include "cute/numeric/arithmetic_tuple.hpp"
 #include "kernel_traits.cuh"
 
-/////////////////////////////////////////////////////////////////////////////////////////////////
-
 namespace kernel {
 
 using namespace cute;
 
-// WarpSpecialized Mainloop
+template <class KernelTraits, bool OnHost>
+struct MainloopParamsImpl;
+
+// NOTE(Yu): this is for normal mainloop where tma is allocated on host and pass
+// from global function
+template <class KernelTraits>
+struct MainloopParamsImpl<KernelTraits, /*OnHost*/ true> {
+  using DataType = typename KernelTraits::DataType;
+  using ProblemShape = typename KernelTraits::ProblemShape;
+
+  using StrideA = typename KernelTraits::StrideA;
+  using StrideB = typename KernelTraits::StrideB;
+  using SmemLayoutA = typename KernelTraits::SmemLayoutA; // (BLK_M,BLK_K,PIPE)
+  using SmemLayoutB = typename KernelTraits::SmemLayoutB; // (BLK_N,BLK_K,PIPE)
+  using TileShape = typename KernelTraits::TileShape_MNK;
+  using ClusterShape = typename KernelTraits::ClusterShape_MNK;
+
+  using GmemTiledCopyA = cute::SM90_TMA_LOAD;
+  using GmemTiledCopyB = cute::SM90_TMA_LOAD;
+
+  using TMA_A = decltype(make_tma_copy_A_sm90(
+      GmemTiledCopyA{},
+      make_tensor(static_cast<DataType const *>(nullptr),
+                  repeat_like(StrideA{}, int32_t(0)),
+                  StrideA{}),
+      SmemLayoutA{}(_, _, cute::Int<0>{}),
+      TileShape{},
+      ClusterShape{}));
+
+  using TMA_B = decltype(make_tma_copy_B_sm90(
+      GmemTiledCopyB{},
+      make_tensor(static_cast<DataType const *>(nullptr),
+                  repeat_like(StrideB{}, int32_t(0)),
+                  StrideB{}),
+      SmemLayoutB{}(_, _, cute::Int<0>{}),
+      TileShape{},
+      ClusterShape{}));
+
+  TMA_A tma_load_a;
+  TMA_B tma_load_b;
+  uint32_t tma_transaction_bytes;
+  uint32_t tma_transaction_bytes_mk;
+  uint32_t tma_transaction_bytes_nk;
+  ProblemShape problem_shape;
+};
+
+// NOTE(Yu): this is for mpk device call
+template <class KernelTraits>
+struct MainloopParamsImpl<KernelTraits, /*OnHost*/ false> {
+  using ProblemShape = typename KernelTraits::ProblemShape;
+
+  uint32_t tma_transaction_bytes;
+  uint32_t tma_transaction_bytes_mk;
+  uint32_t tma_transaction_bytes_nk;
+  ProblemShape problem_shape;
+};
+
 template <typename KernelTraits>
 struct CollectiveMainloop {
   // Tile along modes in a way that maximizes the TMA box size.
@@ -61,6 +115,10 @@ struct CollectiveMainloop {
   using ProblemShape = typename KernelTraits::ProblemShape;
 
   using TileScheduler = typename KernelTraits::TileScheduler;
+
+  static constexpr bool SwapAB = KernelTraits::SwapAB;
+  static constexpr int K_PIPE_MMAS = KernelTraits::K_PIPE_MMAS;
+  static constexpr int NUM_STAGES = KernelTraits::NUM_STAGES;
 
   struct SharedStorage {
     struct TensorStorage : cute::aligned_struct<128, _0> {
@@ -95,84 +153,62 @@ struct CollectiveMainloop {
     StrideB dB;
   };
 
-  // Device side kernel params
-  struct Params {
-    // Assumption: StrideA is congruent with Problem_MK
-    using TMA_A = decltype(make_tma_copy_A_sm90(
-        GmemTiledCopyA{},
-        make_tensor(static_cast<DataType const *>(nullptr),
-                    repeat_like(StrideA{}, int32_t(0)),
-                    StrideA{}),
-        SmemLayoutA{}(_, _, cute::Int<0>{}),
-        TileShape{},
-        ClusterShape{}));
-    // Assumption: StrideB is congruent with Problem_NK
-    using TMA_B = decltype(make_tma_copy_B_sm90(
-        GmemTiledCopyB{},
-        make_tensor(static_cast<DataType const *>(nullptr),
-                    repeat_like(StrideB{}, int32_t(0)),
-                    StrideB{}),
-        SmemLayoutB{}(_, _, cute::Int<0>{}),
-        TileShape{},
-        ClusterShape{}));
-    TMA_A tma_load_a;
-    TMA_B tma_load_b;
-    uint32_t tma_transaction_bytes = TmaTransactionBytes;
-    uint32_t tma_transaction_bytes_mk = TmaTransactionBytesMK;
-    uint32_t tma_transaction_bytes_nk = TmaTransactionBytesNK;
-    ProblemShape problem_shape;
-  };
+  template <bool onHost>
+  using Params = MainloopParamsImpl<KernelTraits, onHost>;
 
-  //
-  // Methods
-  //
-
-  template <class ProblemShape>
-  static constexpr Params
-      to_underlying_arguments(ProblemShape const &problem_shape,
+  template <bool onHost = false, class ProblemShapeT>
+  CUTLASS_HOST_DEVICE static Params<onHost>
+      to_underlying_arguments(ProblemShapeT const &problem_shape,
                               Arguments const &args) {
-
-    // Optionally append 1s until problem shape is rank-4 (MNKL), in case it is
-    // only rank-3 (MNK)
-    auto problem_shape_MNKL = append<4>(problem_shape, 1);
-    auto [M, N, K, L] = problem_shape_MNKL;
-
-    auto ptr_A = reinterpret_cast<DataType const *>(args.ptr_A);
-    auto ptr_B = reinterpret_cast<DataType const *>(args.ptr_B);
-
-    Tensor tensor_a =
-        make_tensor(ptr_A, make_layout(make_shape(M, K, L), args.dA));
-    Tensor tensor_b =
-        make_tensor(ptr_B, make_layout(make_shape(N, K, L), args.dB));
-
-    typename Params::TMA_A tma_load_a =
-        make_tma_copy_A_sm90(GmemTiledCopyA{},
-                             tensor_a,
-                             SmemLayoutA{}(_, _, cute::Int<0>{}),
-                             TileShape{},
-                             ClusterShape{});
-    typename Params::TMA_B tma_load_b =
-        make_tma_copy_B_sm90(GmemTiledCopyB{},
-                             tensor_b,
-                             SmemLayoutB{}(_, _, cute::Int<0>{}),
-                             TileShape{},
-                             ClusterShape{});
     uint32_t transaction_bytes_mk = TmaTransactionBytesMK;
     uint32_t transaction_bytes_nk = TmaTransactionBytesNK;
     uint32_t transaction_bytes = transaction_bytes_mk + transaction_bytes_nk;
 
-    return {tma_load_a,
-            tma_load_b,
-            transaction_bytes,
-            transaction_bytes_mk,
-            transaction_bytes_nk,
-            problem_shape};
+    if constexpr (onHost) {
+      auto problem_shape_MNKL = append<4>(problem_shape, 1);
+      auto [M, N, K, L] = problem_shape_MNKL;
+
+      auto ptr_A = reinterpret_cast<DataType const *>(args.ptr_A);
+      auto ptr_B = reinterpret_cast<DataType const *>(args.ptr_B);
+
+      Tensor tensor_a =
+          make_tensor(ptr_A, make_layout(make_shape(M, K, L), args.dA));
+      Tensor tensor_b =
+          make_tensor(ptr_B, make_layout(make_shape(N, K, L), args.dB));
+
+      Params<true> p{};
+      p.problem_shape = problem_shape;
+      p.tma_transaction_bytes = transaction_bytes;
+      p.tma_transaction_bytes_mk = transaction_bytes_mk;
+      p.tma_transaction_bytes_nk = transaction_bytes_nk;
+
+      p.tma_load_a = make_tma_copy_A_sm90(GmemTiledCopyA{},
+                                          tensor_a,
+                                          SmemLayoutA{}(_, _, cute::Int<0>{}),
+                                          TileShape{},
+                                          ClusterShape{});
+
+      p.tma_load_b = make_tma_copy_B_sm90(GmemTiledCopyB{},
+                                          tensor_b,
+                                          SmemLayoutB{}(_, _, cute::Int<0>{}),
+                                          TileShape{},
+                                          ClusterShape{});
+
+      return p;
+    } else {
+      Params<false> p{};
+      p.problem_shape = problem_shape;
+      p.tma_transaction_bytes = transaction_bytes;
+      p.tma_transaction_bytes_mk = transaction_bytes_mk;
+      p.tma_transaction_bytes_nk = transaction_bytes_nk;
+      return p;
+    }
   }
 
   /// Issue Tma Descriptor Prefetch -- ideally from a single thread for best
   /// performance
   CUTLASS_DEVICE
-  static void prefetch_tma_descriptors(Params const &mainloop_params) {
+  static void prefetch_tma_descriptors(Params<true> const &mainloop_params) {
     cute::prefetch_tma_descriptor(
         mainloop_params.tma_load_a.get_tma_descriptor());
     cute::prefetch_tma_descriptor(
@@ -181,7 +217,7 @@ struct CollectiveMainloop {
 
   template <class ProblemShape_MNKL>
   CUTLASS_DEVICE auto load_init(ProblemShape_MNKL const &problem_shape_MNKL,
-                                Params const &mainloop_params) const {
+                                Params<true> const &mainloop_params) const {
     using X = Underscore;
     auto [M, N, K, L] = problem_shape_MNKL;
     Tensor mA_mkl = mainloop_params.tma_load_a.get_tma_tensor(
@@ -203,7 +239,7 @@ struct CollectiveMainloop {
   /// Perform a collective-scoped matrix multiply-accumulate
   /// Producer Perspective
   template <class TensorA, class TensorB, class KTileIterator, class BlockCoord>
-  CUTLASS_DEVICE void load(Params const &mainloop_params,
+  CUTLASS_DEVICE void load(Params<true> const &mainloop_params,
                            MainloopPipeline pipeline,
                            PipelineState smem_pipe_write,
                            cute::tuple<TensorA, TensorB> const &load_inputs,
@@ -296,7 +332,7 @@ struct CollectiveMainloop {
                           int k_tile_count,
                           int thread_idx,
                           TensorStorage &shared_tensors,
-                          Params const &mainloop_params) {
+                          Params<true> const & /*mainloop_params*/) {
 
     Tensor sA = make_tensor(make_smem_ptr(shared_tensors.smem_A.data()),
                             SmemLayoutA{}); // (BLK_M,BLK_K,PIPE)

@@ -71,7 +71,8 @@ template <typename DataType_,
           int K_,
           typename ProblemShape_,
           int O_STRIDE = OUTPUT_SIZE_,
-          int NUM_STAGES_ = 3>
+          int NUM_STAGES_ = 3,
+          typename IS_SWAPAB_ = cute::true_type>
 struct MMAKernelTraits {
   using DataType = DataType_;
   using DTypeAccum = float;
@@ -88,6 +89,8 @@ struct MMAKernelTraits {
   using StrideB = cutlass::detail::TagToStrideB_t<GmemLayoutBTag>;
   using StrideC = cutlass::detail::TagToStrideC_t<GmemLayoutCTag>;
   using StrideD = cutlass::detail::TagToStrideC_t<GmemLayoutDTag>;
+
+  using IS_SWAPAB = IS_SWAPAB_;
 
   static constexpr int M = M_;
   static constexpr int N = N_;
@@ -197,6 +200,8 @@ struct MMAKernelTraits {
                                          SmemLayoutAtomA,
                                          SmemLayoutAtomB,
                                          SmemLayoutAtomC>;
+
+  static constexpr bool SwapAB = IS_SWAPAB::value;
 };
 
 } // namespace kernel

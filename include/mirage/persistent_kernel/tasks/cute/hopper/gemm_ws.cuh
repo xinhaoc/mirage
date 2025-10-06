@@ -39,7 +39,7 @@ using namespace cute;
 
 template <class CollectiveMainloop, class CollectiveEpilogue>
 CUTLASS_DEVICE void gemm_kernel_tma_warp_specialized(
-    typename CollectiveMainloop::Params const &mainloop_params,
+    typename CollectiveMainloop::template Params<true> const &mainloop_params,
     typename CollectiveEpilogue::Params const &epilogue_params) {
 
   struct SharedStorage {

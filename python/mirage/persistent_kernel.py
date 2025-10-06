@@ -610,7 +610,17 @@ class PersistentKernel:
         tb_graph.new_input(weight, (0, -1, -1), 1, True)
         tb_graph.new_input(output, (1, -1, -1), -1, True)
         self.kn_graph.customized([input, weight, output], tb_graph)
-        self.kn_graph.register_task(tb_graph, "linear_cutlass_hopper" if self.target_cc == 90 else "linear")
+        if self.target_cc == 90:
+            if weight.dim(0) // grid_dim[0] <= 64:
+                self.kn_graph.register_task(tb_graph, "linear_swapAB_hopper")
+                # self.kn_graph.register_task(tb_graph, "linear_cutlass_hopper")
+            else:
+                self.kn_graph.register_task(tb_graph, "linear_swapAB_hopper")
+        elif self.target_cc == 80:
+
+            self.kn_graph.register_task(tb_graph, "linear")
+        else:
+            assert False
 
     def linear_with_residual_layer(
         self,
@@ -632,7 +642,16 @@ class PersistentKernel:
         tb_graph.new_input(residual, (1, -1, -1), -1, True)
         tb_graph.new_input(output, (1, -1, -1), -1, True)
         self.kn_graph.customized([input, weight, residual, output], tb_graph)
-        self.kn_graph.register_task(tb_graph, "linear_swapAB_with_residual_hopper" if self.target_cc == 90 else "linear_with_residual")
+        if self.target_cc == 90:
+            if weight.dim(0) // grid_dim[0] <= 64:
+                self.kn_graph.register_task(tb_graph, "linear_cutlass_with_residual_hopper")
+                # self.kn_graph.register_task(tb_graph, "linear_swapAB_with_residual_hopper")
+            else:
+                self.kn_graph.register_task(tb_graph, "linear_swapAB_with_residual_hopper")
+        elif self.target_cc == 80:
+            self.kn_graph.register_task(tb_graph, "linear_with_residual")
+        else:
+            assert False
 
     def allreduce_layer(
         self,

@@ -25,10 +25,10 @@
 #include <nvshmem.h>
 #include <nvshmemx.h>
 #endif
+#include "cutlass_headers.cuh"
 #include <thread>
 #include <unistd.h>
 #include <vector>
-#include "cutlass_headers.cuh"
 
 using bfloat16 = type::bfloat16_t;
 using namespace mirage::runtime;
@@ -41,6 +41,7 @@ using namespace mirage::runtime;
 
 #if defined(MIRAGE_GRACE_HOPPER)
 #define WORKER_THREADS 256
+#define CONSUMER_THREADS 128
 #define SINGLE_KERNEL_THREADS 256
 #else
 #define WORKER_THREADS 128
@@ -257,12 +258,12 @@ __device__ __forceinline__ bool
   *config.page_queue_head = page_queue_head;
   *config.page_queue_tail = page_queue_tail;
 
-  //printf("Next batch: steps[%d %d %d %d] num_active_tokens(%d)\n",
-  //       config.step[0],
-  //       config.step[1],
-  //       config.step[2],
-  //       config.step[3],
-  //       config.qo_indptr_buffer[MPK_MAX_NUM_BATCHED_REQUESTS]);
+  // printf("Next batch: steps[%d %d %d %d] num_active_tokens(%d)\n",
+  //        config.step[0],
+  //        config.step[1],
+  //        config.step[2],
+  //        config.step[3],
+  //        config.qo_indptr_buffer[MPK_MAX_NUM_BATCHED_REQUESTS]);
 
   if (num_tokens == 0) {
     return false;
@@ -411,7 +412,7 @@ __device__ __forceinline__ void execute_worker(RuntimeConfig config) {
   PROFILER_INIT(static_cast<uint64_t *>(config.profiler_buffer),
                 0,
                 1,
-                (threadIdx.x % 128 == 0));
+                (threadIdx.x % WORKER_THREADS == 0));
 #endif
 
   int worker_id = blockIdx.x;
@@ -666,7 +667,8 @@ __device__ __forceinline__ void execute_worker(RuntimeConfig config) {
 }
 
 // need to alter as there is only one warp per block
-__device__ __forceinline__ void execute_scheduler(RuntimeConfig config, int offset) {
+__device__ __forceinline__ void execute_scheduler(RuntimeConfig config,
+                                                  int offset) {
   int num_schedulers =
       config.num_local_schedulers + config.num_remote_schedulers;
   int warp_thread_id = threadIdx.x % 32;
@@ -909,8 +911,15 @@ __device__ __forceinline__ void execute_scheduler(RuntimeConfig config, int offs
   }
 }
 
-__global__ void persistent_kernel(RuntimeConfig config) {
+__global__ __launch_bounds__(WORKER_THREADS,
+                             1) void persistent_kernel(RuntimeConfig config) {
   persistent_checker(config);
+#if defined(MIRAGE_GRACE_HOPPER)
+  if (threadIdx.x / WORKER_THREADS == 0) {
+    wg_increase_regs<256>();
+  }
+#endif
+
   if (blockIdx.x < config.num_workers) {
     execute_worker(config);
   } else {
@@ -918,7 +927,14 @@ __global__ void persistent_kernel(RuntimeConfig config) {
   }
 }
 
-__global__ void worker_kernel(RuntimeConfig config) {
+__global__ __launch_bounds__(WORKER_THREADS,
+                             1) void worker_kernel(RuntimeConfig config) {
+
+#if defined(MIRAGE_GRACE_HOPPER)
+  if (threadIdx.x / WORKER_THREADS == 0) {
+    wg_increase_regs<256>();
+  }
+#endif
   worker_checker(config);
   execute_worker(config);
 }
