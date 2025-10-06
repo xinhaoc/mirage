@@ -1254,11 +1254,11 @@ int TaskRegister::register_linear_cutlass_hopper_task(
   mirage::transpiler::CodeKeeper code;
   code.inc_indent();
   // NOTE: output_size and batch_size are swapped here
-  // code.e("auto problem_shape = cute::Shape<cute::Int<$>, cute::Int<$>, "
-  //        "cute::Int<$>>{};",
-  //        output_size,
-  //        batch_size,
-  //        reduction_size);
+  code.e("auto problem_shape = cute::Shape<cute::Int<$>, cute::Int<$>, "
+         "cute::Int<$>>{};",
+         output_size,
+         batch_size,
+         reduction_size);
   // NOTE: output_size and batch_size are swapped here
   code.e("using KernelTraits = kernel::MMAKernelTraits<cutlass::bfloat16_t, $, "
          "$, $, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor, "
