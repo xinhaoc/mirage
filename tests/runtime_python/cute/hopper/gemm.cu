@@ -303,7 +303,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                               8,                            // NUM_WARPS
                               64,                           // M
                               BATCH_SIZE,                   // N
-                              TILE_SIZE,                           // K
+                              TILE_SIZE,                    // K
                               decltype(problem_shape),
                               OUTPUT_SIZE, // O_STRIDE
                               4>;          // NUM_STAGES
@@ -346,7 +346,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
   using MainloopParamsHost = typename Mainloop::template Params<false>;
   MainloopParamsHost mainloop_params =
       Mainloop::template to_underlying_arguments<false>(problem_shape,
-                                                       mainloop_args);
+                                                        mainloop_args);
   typename Epilogue::Params epilogue_params =
       Epilogue::to_underlying_arguments(problem_shape, epilogue_args);
 

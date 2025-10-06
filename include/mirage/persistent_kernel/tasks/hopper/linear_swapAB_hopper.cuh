@@ -209,7 +209,7 @@ __device__ __forceinline__ void
 
   // warp specialization data movement warpgroup
   if (warpgroup_id == NUM_WARPGROUPS - 1) {
-    wg_decrease_regs<32>();
+    // wg_decrease_regs<32>();
     if (lane_id() == 0 && warp_idx == (NUM_WARPGROUPS * WARPGROUP_WARPS - 4)) {
       prefetch_tma_descriptor(tma_a.desc_ptr);
       prefetch_tma_descriptor(tma_b.desc_ptr);
@@ -264,7 +264,7 @@ __device__ __forceinline__ void
     }
   } else {
     // warp specialization compute warpgroup
-    wg_increase_regs<160>();
+    // wg_increase_regs<160>();
     float s_frag[SMEM_M_SIZE / 2];
     for (int output_atom_idx = 0; output_atom_idx < NUM_ITER_N;
          output_atom_idx++) {

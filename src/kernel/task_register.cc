@@ -1300,7 +1300,8 @@ int TaskRegister::register_linear_cutlass_hopper_task(
   //        "*>(task_desc.inputs[2].base_ptr),");
   // code.e("    stride_C,");
   // code.e(
-  //     "    static_cast<cutlass::bfloat16_t *>(task_desc.outputs[0].base_ptr),");
+  //     "    static_cast<cutlass::bfloat16_t
+  //     *>(task_desc.outputs[0].base_ptr),");
   // code.e("    stride_C,");
   // code.e("    {1.0f, 1.0f},");
   // code.e("};");
