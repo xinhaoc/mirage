@@ -3,15 +3,15 @@
 
 static constexpr int SINGLE_KERNEL_THREADS = 128;
 static constexpr int MAX_SHARE_MEMORY_SIZE = 160 * 1024;
-static constexpr size_t NUM_LAYERS = 45;
+static constexpr size_t NUM_LAYERS = 30;
 static constexpr size_t SM_COUNT = 96;
 static constexpr size_t OUTPUT_SIZE = 64;
 static constexpr size_t REDUCTION_SIZE = 4096;
 static constexpr size_t BATCH_SIZE = 16;
-static constexpr bool USE_PIPELINE = true;
+static constexpr bool USE_PIPELINE = false;
 using bfloat16 = type::bfloat16_t;
 
-__global__ void main_kernel(void *d_input, void *d_weight, void *d_output) {
+__global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_t *clock_cycles_mem, size_t *clock_cycles_compute) {
     extern __shared__ char smem[];
   
     if constexpr (USE_PIPELINE) {
@@ -48,13 +48,16 @@ __global__ void main_kernel(void *d_input, void *d_weight, void *d_output) {
         void * weight_ptr = (bfloat16 *)d_weight + (layer_num * REDUCTION_SIZE * OUTPUT_SIZE * SM_COUNT) + (blockIdx.x * OUTPUT_SIZE);
         void * output_ptr = (bfloat16 *)d_output + (layer_num * BATCH_SIZE * OUTPUT_SIZE * SM_COUNT) + (blockIdx.x * OUTPUT_SIZE);
 
-        kernel::linear_kernel<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(
+        kernel::linear_kernel<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT, 2>(
         input_ptr,
         weight_ptr,
         nullptr,
         output_ptr,
         BATCH_SIZE,
-        false);
+        false,
+        clock_cycles_mem + layer_num * (REDUCTION_SIZE / 128),
+        clock_cycles_compute + layer_num * (REDUCTION_SIZE / 128)
+        );
       }
     }
 
@@ -110,11 +113,18 @@ int main() {
 
   free(h_input);
   free(h_weight);
+
+  // Allocate device memory for clock_cycles_mem and clock_cycles_compute
+  size_t *d_clock_cycles_mem = nullptr;
+  size_t *d_clock_cycles_compute = nullptr;
+  cudaMalloc(&d_clock_cycles_mem, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t));
+  cudaMalloc(&d_clock_cycles_compute, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t));
     
   // Launcher persistent kernel
   cudaFuncSetAttribute(main_kernel,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         MAX_SHARE_MEMORY_SIZE);
+  
 
   cudaEvent_t start, stop;
   cudaEventCreate(&start);
@@ -122,7 +132,7 @@ int main() {
   cudaEventRecord(start);
   main_kernel<<<dim3(sm_count, 1, 1),
                       dim3(SINGLE_KERNEL_THREADS, 1, 1),
-                      MAX_SHARE_MEMORY_SIZE /*smem*/>>>(d_input, d_weight, d_output);
+                      MAX_SHARE_MEMORY_SIZE /*smem*/>>>(d_input, d_weight, d_output, d_clock_cycles_mem, d_clock_cycles_compute);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   cudaError_t err = cudaDeviceSynchronize();
@@ -143,8 +153,21 @@ int main() {
   for (size_t i = 0; i < output_size / sizeof(bfloat16); ++i) {
     if (h_output[i] != static_cast<bfloat16>(REDUCTION_SIZE)) {
       printf("Error: h_output[%zu] = %f\n", i, float(h_output[i]));
+      return 1;
     }
   }
+
+  // Write the clock_cycles_mem and clock_cycles_compute to a file
+  size_t *h_clock_cycles_mem = (size_t*)malloc(NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t));
+  size_t *h_clock_cycles_compute = (size_t*)malloc(NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t));
+  cudaMemcpy(h_clock_cycles_mem, d_clock_cycles_mem, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t), cudaMemcpyDeviceToHost);
+  cudaMemcpy(h_clock_cycles_compute, d_clock_cycles_compute, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t), cudaMemcpyDeviceToHost);
+  for (size_t i = 0; i < NUM_LAYERS * (REDUCTION_SIZE / 128); ++i) {
+    printf("clock_cycles_mem[%zu] = %zu\n", i, h_clock_cycles_mem[i]);
+    printf("clock_cycles_compute[%zu] = %zu\n", i, h_clock_cycles_compute[i]);
+  }
+  free(h_clock_cycles_mem);
+  free(h_clock_cycles_compute);
 
 
 }

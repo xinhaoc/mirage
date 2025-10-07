@@ -23,6 +23,8 @@
 #include "reduction.cuh"
 #include "smem_layout.cuh"
 #include "utils.cuh"
+#include "profiler.h"
+
 namespace kernel {
 
 using bfloat16 = type::bfloat16_t;
@@ -38,7 +40,10 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
                                               void const *residual_ptr,
                                               void *output_ptr,
                                               int num_active_tokens,
-                                              bool residual) {
+                                              bool residual,
+                                              size_t *clock_cycles_mem,
+                                              size_t *clock_cycles_compute
+                                              ) {
 
   constexpr int CHUNK_SIZE = 16 / sizeof(T);
   constexpr int OUTPUT_ATOM_SIZE = OUTPUT_SIZE <= 128 ? OUTPUT_SIZE : 128;
@@ -52,6 +57,8 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
 
   constexpr int TOTAL_WEIGHT_BLOCKS_TO_LOAD = FORLOOP_RANGE * NUM_OUTPUT_ATOMS; // For global pipe loading
   constexpr int WEIGHT_PIPE_MAX = PIPE_MAX < TOTAL_WEIGHT_BLOCKS_TO_LOAD ? PIPE_MAX : TOTAL_WEIGHT_BLOCKS_TO_LOAD;
+  static_assert(TOTAL_WEIGHT_BLOCKS_TO_LOAD == FORLOOP_RANGE);
+
   constexpr int INPUT_PIPE_MAX = WEIGHT_PIPE_MAX;
 
   constexpr int NUM_CHUNKS_A = BATCH_SIZE * TILE_SIZE / CHUNK_SIZE;
@@ -80,6 +87,9 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
 
   constexpr int log2_NUM_WARPS_N = log2_constexpr(NUM_WARPS_N);
   constexpr int log2_NUM_ITERS_K = log2_constexpr(NUM_ITERS_K);
+
+  size_t l_clock_cycles_mem[TOTAL_WEIGHT_BLOCKS_TO_LOAD];
+  size_t l_clock_cycles_compute[TOTAL_WEIGHT_BLOCKS_TO_LOAD];
 
   int warp_idx = warp_id();
   int warp_row = warp_idx >> log2_NUM_WARPS_N;
@@ -127,8 +137,6 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
   // sizeof(T) * BATCH_SIZE * OUTPUT_SIZE
 
 
-  constexpr size_t END_OFFSET = 
-        SHARED_OUTPUT_OFFSET + sizeof(T) * BATCH_SIZE * OUTPUT_SIZE;
 
   // zero buffer
   T *zero_buf = (T *)(smem + ZERO_BUFFER_OFFSET);
@@ -170,9 +178,12 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
   }
 
   // Warm up weight and input tiles for the first WEIGHT_PIPE_MAX - 1 atoms
+  size_t start_warmup, end_warmup;
+  // start_warmup = clock();
   int global_pipe_idx = 0;
-//#pragma unroll 0
+// #pragma unroll
   for (; global_pipe_idx < WEIGHT_PIPE_MAX - 1; ++global_pipe_idx) {
+    start_warmup = tb::get_timestamp();
     int src_stage_offset = (global_pipe_idx % NUM_OUTPUT_ATOMS) << log2_OUTPUT_ATOM_SIZE;
     int buffer_stage_offset = (global_pipe_idx % WEIGHT_PIPE_MAX) << log2_OUTPUT_ATOM_SIZE;
     int global_pipe_row = global_pipe_idx  / NUM_OUTPUT_ATOMS;
@@ -181,7 +192,7 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
 
     // int buffer_stage = global_pipe_idx % WEIGHT_PIPE_MAX;
     if (global_pipe_idx % NUM_OUTPUT_ATOMS == 0) {
-      #pragma unroll
+      // #pragma unroll
       for (int i = threadIdx.x; i < NUM_CHUNKS_A; i += NUM_THREADS) {
         int src_row = i >> log2_CHUNKS_PER_ROW_A;
         int dst_row = src_row + input_pipe_offset;
@@ -191,7 +202,7 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
         load_smem(input_smem(dst_row, dst_col), input_dmem(src_row, src_col));
       }
     }
-    #pragma unroll
+    // #pragma unroll
     for (int i = threadIdx.x; i < NUM_CHUNKS_B; i += NUM_THREADS) {
       int dst_row = (i & (CHUNKS_PER_COL_B - 1)) << log2_CHUNK_SIZE;
       int src_row = dst_row + global_pipe_offset;
@@ -202,9 +213,12 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
 
       load_smem(weight_smem(dst_row, dst_col), weight_dmem(src_row, src_col));
     }
-    cp_async_fence();
+    // cp_async_fence();
+    end_warmup = tb::get_timestamp();
   }
-
+  cp_async_fence();
+  // end_warmup = clock();
+  // cp_async_fence();
   // Outer loop over K tiles; inner loop over output atoms
   // accumulator
   float s_frag[NUM_OUTPUT_ATOMS][NUM_ITERS_M][NUM_ITERS_N][8];
@@ -259,11 +273,15 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
                     weight_dmem(src_row, src_col));
         }
         cp_async_fence();
+        size_t start = tb::get_timestamp();
         cp_async_wait<WEIGHT_PIPE_MAX - 1>();
+        size_t end = tb::get_timestamp();
+        l_clock_cycles_mem[global_pipe_idx] = (size_t)(end - start);
       } else if (global_pipe_idx == TOTAL_WEIGHT_BLOCKS_TO_LOAD) {
         cp_async_wait<0>();
       }
       __syncthreads();
+      size_t start = tb::get_timestamp();
 
       // MMA using the loaded input and weight tiles
       uint32_t a_frag[4], b_frag[4];
@@ -302,7 +320,9 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
           }
         }
       }
+      size_t end = tb::get_timestamp();
       __syncthreads();
+      l_clock_cycles_compute[for_idx] = (size_t)(end - start);
     }
   }
   // Accumulate this atom's contribution into the full output_smem at offset
@@ -336,6 +356,16 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
     int row = i / CHUNKS_PER_ROW_C;
     int col = (i % CHUNKS_PER_ROW_C) << log2_CHUNK_SIZE;
     *((__uint128_t *)((void *)&output_dmem.at(row, col))) = *((__uint128_t *)((void *)&output_smem.at(row, col)));
+  }
+
+  l_clock_cycles_mem[7] = (size_t)(end_warmup - start_warmup);
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    for (int i = 0; i < TOTAL_WEIGHT_BLOCKS_TO_LOAD; i++) {
+      clock_cycles_mem[i] = l_clock_cycles_mem[i];
+    }
+    for (int i = 0; i < FORLOOP_RANGE; i++) {
+      clock_cycles_compute[i] = l_clock_cycles_compute[i];
+    }
   }
 }
 
