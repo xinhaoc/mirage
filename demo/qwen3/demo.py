@@ -571,7 +571,8 @@ if __name__ == "__main__":
             input=rmsnorm_out,
             weight=w_proj,
             output=argmax_in,
-            grid_dim=(grid_for_rmsnorm_linear_layer(w_proj.dim(0)), 1, 1),
+            # grid_dim=(grid_for_rmsnorm_linear_layer(w_proj.dim(0)), 1, 1),
+            grid_dim=(vocab_size // 256, 1, 1),
             block_dim=(128, 1, 1),
         )
         #mpk.rmsnorm_linear_layer(

@@ -25,7 +25,6 @@
 #include <nvshmem.h>
 #include <nvshmemx.h>
 #endif
-#include "cutlass_headers.cuh"
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -914,12 +913,6 @@ __device__ __forceinline__ void execute_scheduler(RuntimeConfig config,
 __global__ __launch_bounds__(WORKER_THREADS,
                              1) void persistent_kernel(RuntimeConfig config) {
   persistent_checker(config);
-#if defined(MIRAGE_GRACE_HOPPER)
-  if (threadIdx.x / WORKER_THREADS == 0) {
-    wg_increase_regs<256>();
-  }
-#endif
-
   if (blockIdx.x < config.num_workers) {
     execute_worker(config);
   } else {
@@ -929,12 +922,6 @@ __global__ __launch_bounds__(WORKER_THREADS,
 
 __global__ __launch_bounds__(WORKER_THREADS,
                              1) void worker_kernel(RuntimeConfig config) {
-
-#if defined(MIRAGE_GRACE_HOPPER)
-  if (threadIdx.x / WORKER_THREADS == 0) {
-    wg_increase_regs<256>();
-  }
-#endif
   worker_checker(config);
   execute_worker(config);
 }

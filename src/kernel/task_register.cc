@@ -1164,16 +1164,15 @@ int TaskRegister::register_linear_swapAB_hopper_task(
          B,
          M,
          S,
-         batch_size,         /*GMEM_ROW_*/
-         output_size,        /*GMEM_COL_*/
-         batch_size,         /*SMEM_ROW_*/
-         output_tma_cp_size, /*SMEM_COL_*/
-         output_stride,      /*GMEM_STRIDE_ROW_*/
-         1,                  /*GMEM_STRIDE_COL_*/
-         1,                  /*SMEM_REPEAT_ROW_*/
-         (output_atom_size + output_tma_cp_size - 1) /
-             output_tma_cp_size,         /*SMEM_REPEAT_COL_*/
-         SMEM_M_SIZE * TMA_CP_ASYNC_SIZE /*SMEM_STRIDE_*/
+         batch_size,                      /*GMEM_ROW_*/
+         output_size,                     /*GMEM_COL_*/
+         batch_size,                      /*SMEM_ROW_*/
+         output_tma_cp_size,              /*SMEM_COL_*/
+         output_stride,                   /*GMEM_STRIDE_ROW_*/
+         1,                               /*GMEM_STRIDE_COL_*/
+         1,                               /*SMEM_REPEAT_ROW_*/
+         1,                               /*SMEM_REPEAT_COL_*/
+         SMEM_M_SIZE * output_tma_cp_size /*SMEM_STRIDE_*/
   );
   code.inc_indent();
   code.e("TMA_A "
@@ -1388,6 +1387,93 @@ int TaskRegister::register_linear_cutlass_hopper_task(
   } else {
     return register_task_variant(TASK_LINEAR_CUTLASS_HOPPER, code.to_string());
   }
+}
+
+int TaskRegister::register_silu_mul_hopper_task(
+    threadblock::Graph const &bgraph, std::vector<int> const &params) {
+  assert(params.size() == 0);
+  int batch_size = 0, output_size = 0, input_stride, output_stride;
+  std::vector<tb::TBInputOp *> input_ops;
+  std::vector<tb::TBInputOp *> output_ops;
+  int num_inputs = 1;
+  int num_outputs = 1;
+  assert(bgraph.operators.size() == (size_t)num_inputs + num_outputs);
+  for (auto const &op : bgraph.operators) {
+    assert(op->op_type == mirage::type::TB_INPUT_OP);
+    if (input_ops.size() < (size_t)num_inputs) {
+      input_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    } else {
+      output_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    }
+  }
+  assert(output_ops[0]->output_tensors[0].num_dims == 2);
+  batch_size = output_ops[0]->output_tensors[0].dim[0];
+  output_size = output_ops[0]->output_tensors[0].dim[1];
+  assert(input_ops[0]->dtensor.num_dims == 2);
+  assert(input_ops[0]->output_tensors[0].dim[1] == output_size * 2);
+  // get input stride
+  assert(input_ops[0]->dtensor.owner_op->op_type == type::KN_INPUT_OP);
+  kn::KNInputOp *kn_input_op =
+      static_cast<kn::KNInputOp *>(input_ops[0]->dtensor.owner_op);
+  input_stride = input_ops[0]->dtensor.dim[1];
+  assert(input_stride == static_cast<int>(kn_input_op->input_strides[0]));
+  // get output stride
+  assert(output_ops[0]->dtensor.owner_op->op_type == type::KN_INPUT_OP);
+  kn_input_op = static_cast<kn::KNInputOp *>(output_ops[0]->dtensor.owner_op);
+  output_stride = static_cast<int>(kn_input_op->input_strides[0]);
+  mirage::transpiler::CodeKeeper code;
+  code.inc_indent();
+  code.e("kernel::silu_mul_task_impl_hopper<bfloat16, $, $, $, $>(",
+         batch_size,
+         output_size,
+         input_stride,
+         output_stride);
+  code.e("    task_desc.inputs[0].base_ptr,");
+  code.e("    task_desc.outputs[0].base_ptr,");
+  code.e("    runtime_config.qo_indptr_buffer[MPK_MAX_NUM_BATCHED_REQUESTS]);");
+  return register_task_variant(TASK_SILU_MUL_HOPPER, code.to_string());
+}
+
+int TaskRegister::register_embedding_hopper_task(
+    threadblock::Graph const &bgraph, std::vector<int> const &params) {
+  assert(params.size() == 1);
+  // params[0]: input source (0: tokens, 1: input_token)
+  int batch_size = 0, output_size = 0, output_stride = 0;
+  std::vector<tb::TBInputOp *> input_ops;
+  std::vector<tb::TBInputOp *> output_ops;
+  int num_inputs = 2;
+  int num_outputs = 1;
+
+  assert(bgraph.operators.size() == (size_t)num_inputs + num_outputs);
+  for (auto const &op : bgraph.operators) {
+    assert(op->op_type == mirage::type::TB_INPUT_OP);
+    if (input_ops.size() < (size_t)num_inputs) {
+      input_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    } else {
+      output_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    }
+  }
+  assert(output_ops[0]->output_tensors[0].num_dims == 2);
+  batch_size = output_ops[0]->output_tensors[0].dim[0];
+  output_size = output_ops[0]->output_tensors[0].dim[1];
+  kn::KNInputOp *kn_input_op =
+      static_cast<kn::KNInputOp *>(output_ops[0]->dtensor.owner_op);
+  output_stride = static_cast<int>(kn_input_op->input_strides[0]);
+
+  mirage::transpiler::CodeKeeper code;
+  code.inc_indent();
+  code.e("kernel::embedding_kernel_hopper<bfloat16, $, $, $>(",
+         batch_size,
+         output_size,
+         output_stride);
+  if (params[0] == 0) {
+    code.e("    runtime_config.tokens + runtime_config.step[0], ");
+  } else if (params[0] == 1) {
+    code.e("    task_desc.inputs[0].base_ptr,");
+  }
+  code.e("    task_desc.inputs[1].base_ptr,");
+  code.e("    task_desc.outputs[0].base_ptr);");
+  return register_task_variant(TASK_EMBEDDING_HOPPER, code.to_string());
 }
 
 } // namespace runtime
