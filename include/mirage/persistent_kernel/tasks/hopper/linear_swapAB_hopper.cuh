@@ -269,8 +269,10 @@ __device__ __forceinline__ void
     float s_frag[SMEM_M_SIZE / 2];
     for (int output_atom_idx = 0; output_atom_idx < NUM_ITER_N;
          output_atom_idx++) {
+
+  constexpr int CLEAR_ITERS = SMEM_M_SIZE / 16 <= 0 ? 1 : SMEM_M_SIZE / 16;
 #pragma unroll
-      for (int i = 0; i < SMEM_M_SIZE / 16; i++) {
+      for (int i = 0; i < CLEAR_ITERS; i++) {
         clear_8_floats(s_frag + i * 8);
       }
 
@@ -288,27 +290,6 @@ __device__ __forceinline__ void
         input_smem.set_ptr(shared_input + (slot)*SMEM_M_SIZE * TILE_SIZE);
         A_DESC a_desc(input_weight_smem(0, 0));
         B_DESC b_desc(input_smem(0, 0));
-
-       if (threadIdx.x == 0) {
-         printf("i: %d\n", i);
-         printf("input_smem ptr: %p\n", input_smem(0, 0));
-         printf("input_weight_smem ptr: %p\n", input_weight_smem(0, 0));
-         printf("input_smem\n");
-         for (int j = 0; j < BATCH_SIZE; j++) {
-           for (int k = 0; k < TILE_SIZE; k++) {
-             printf("%f ", (float)input_smem.at(j, k));
-           }
-           printf("\n");
-         }
-         printf("input_weight_smem\n");
-         for (int j = 0; j < OUTPUT_ATOM_SIZE; j++) {
-           for (int k = 0; k < TILE_SIZE; k++) {
-             printf("%f ", (float)input_weight_smem.at(j, k));
-           }
-           printf("\n");
-         }
-       }
-
         wgmma::warpgroup_fence_fragment(s_frag);
         wgmma::warpgroup_arrive();
         // wgmma
