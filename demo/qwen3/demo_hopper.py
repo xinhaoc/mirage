@@ -410,7 +410,8 @@ if __name__ == "__main__":
                 input=rmsnorm_out,
                 weight=w_qkv,
                 output=attn_in,
-                grid_dim=(grid_for_rmsnorm_linear_layer(w_qkv.dim(0)), 1, 1),
+                # grid_dim=(grid_for_rmsnorm_linear_layer(w_qkv.dim(0)), 1, 1),
+                grid_dim=(w_qkv.dim(0) // 64, 1, 1),
                 block_dim=(256, 1, 1),
             )
             #mpk.rmsnorm_linear_layer(
@@ -515,6 +516,7 @@ if __name__ == "__main__":
                 weight=w_gatedup,
                 output=mlp_mid,
                 grid_dim=(rmsnorm_num_tasks, 1, 1),
+                # grid_dim=((w_gate_proj.dim(0) + w_up_proj.dim(0)) // 64, 1, 1),
                 block_dim=(256, 1, 1),
             )
             #mpk.rmsnorm_linear_layer(
@@ -571,7 +573,8 @@ if __name__ == "__main__":
             input=rmsnorm_out,
             weight=w_proj,
             output=argmax_in,
-            grid_dim=(grid_for_rmsnorm_linear_layer(w_proj.dim(0)), 1, 1),
+            # grid_dim=(grid_for_rmsnorm_linear_layer(w_proj.dim(0)), 1, 1),
+            grid_dim=(w_proj.dim(0) // 256, 1, 1),
             block_dim=(256, 1, 1),
         )
         #mpk.rmsnorm_linear_layer(

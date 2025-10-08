@@ -1319,6 +1319,7 @@ TaskGraphResult print_task_graph(
   task_type_to_name[TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER] =
       "TASK_LINEAR_CUTLASS_WITH_RESIDUAL_HOPPER";
   task_type_to_name[TASK_SILU_MUL_HOPPER] = "TASK_SILU_MUL_HOPPER";
+  task_type_to_name[TASK_EMBEDDING_HOPPER] = "TASK_EMBEDDING_HOPPER";
 
   code.e("__device__ __forceinline__");
   code.e("void _execute_task(TaskDesc const& task_desc,");

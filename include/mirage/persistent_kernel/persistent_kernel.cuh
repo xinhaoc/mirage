@@ -39,15 +39,13 @@ using namespace mirage::runtime;
 // #define MPK_PAGE_SIZE 64
 
 #if defined(MIRAGE_GRACE_HOPPER)
-#define WORKER_THREADS 256
-#define CONSUMER_THREADS 128
-#define SINGLE_KERNEL_THREADS 256
+#define WORKER_NUM_THREADS 256
+#define SINGLE_KERNEL_NUM_THREADS 256
 #else
-#define WORKER_THREADS 128
-#define SINGLE_KERNEL_THREADS 128
+#define WORKER_NUM_THREADS 128
+#define SINGLE_KERNEL_NUM_THREADS 128
 #endif
-#define INIT_THREADS 128
-#define SCHEDULER_THREADS 128
+#define INIT_NUM_THREADS 128
 
 __device__ __forceinline__ void
     _execute_task(TaskDesc const &task_desc,
@@ -357,6 +355,16 @@ __device__ __forceinline__ void terminate_schedulers(RuntimeConfig config) {
   }
 }
 
+__device__ __forceinline__ void adjust_registers() {
+#ifdef MIRAGE_GRACE_HOPPER
+  // if (threadIdx.x < CONSUMER_NUM_THREADS) {
+  //   wg_increase_regs<256>();
+  // } else {
+    // wg_decrease_regs<96>();
+  // }
+#endif
+}
+
 __device__ __forceinline__ void worker_checker(RuntimeConfig config) {
   assert(gridDim.y == 1);
   assert(gridDim.z == 1);
@@ -411,7 +419,7 @@ __device__ __forceinline__ void execute_worker(RuntimeConfig config) {
   PROFILER_INIT(static_cast<uint64_t *>(config.profiler_buffer),
                 0,
                 1,
-                (threadIdx.x % WORKER_THREADS == 0));
+                (threadIdx.x % WORKER_NUM_THREADS == 0));
 #endif
 
   int worker_id = blockIdx.x;
@@ -910,7 +918,7 @@ __device__ __forceinline__ void execute_scheduler(RuntimeConfig config,
   }
 }
 
-__global__ __launch_bounds__(WORKER_THREADS,
+__global__ __launch_bounds__(WORKER_NUM_THREADS,
                              1) void persistent_kernel(RuntimeConfig config) {
   persistent_checker(config);
   if (blockIdx.x < config.num_workers) {
@@ -920,9 +928,10 @@ __global__ __launch_bounds__(WORKER_THREADS,
   }
 }
 
-__global__ __launch_bounds__(WORKER_THREADS,
+__global__ __launch_bounds__(WORKER_NUM_THREADS,
                              1) void worker_kernel(RuntimeConfig config) {
   worker_checker(config);
+  adjust_registers();
   execute_worker(config);
 }
 
@@ -1150,7 +1159,7 @@ extern "C" void init_persistent_kernel(std::vector<void *> meta_tensors,
   size_t end_of_task_graph_event_pos = all_events.size() - 1;
   assert(all_events[end_of_task_graph_event_pos].event_type ==
          EVENT_END_OF_TASK_GRAPH);
-  init_kernel<<<dim3(1, 1, 1), dim3(INIT_THREADS, 1, 1)>>>(
+  init_kernel<<<dim3(1, 1, 1), dim3(INIT_NUM_THREADS, 1, 1)>>>(
       global_runtime_config, end_of_task_graph_event_pos);
   cudaDeviceSynchronize();
 #ifdef USE_NVSHMEM
@@ -1186,7 +1195,7 @@ extern "C" void launch_persistent_kernel() {
     // nvshmemx_collective_launch launches kernels sequentially, which blocks
     // the interaction between the worker kernel and the scheduler kernel
     worker_kernel<<<dim3(global_runtime_config.num_workers, 1, 1),
-                    dim3(WORKER_THREADS, 1, 1),
+                    dim3(WORKER_NUM_THREADS, 1, 1),
                     MAX_SHARE_MEMORY_SIZE /*smem*/,
                     worker_stream>>>(global_runtime_config);
 
@@ -1214,13 +1223,13 @@ extern "C" void launch_persistent_kernel() {
     void *args[] = {&global_runtime_config};
     nvshmemx_collective_launch((void const *)persistent_kernel,
                                dim3(sm_count, 1, 1),
-                               dim3(SINGLE_KERNEL_THREADS, 1, 1),
+                               dim3(SINGLE_KERNEL_NUM_THREADS, 1, 1),
                                args,
                                MAX_SHARE_MEMORY_SIZE /*sharedmem*/,
                                0 /*stream*/);
 #else
     persistent_kernel<<<dim3(sm_count, 1, 1),
-                        dim3(SINGLE_KERNEL_THREADS, 1, 1),
+                        dim3(SINGLE_KERNEL_NUM_THREADS, 1, 1),
                         MAX_SHARE_MEMORY_SIZE /*smem*/>>>(
         global_runtime_config);
 #endif
