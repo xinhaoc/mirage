@@ -36,10 +36,6 @@
 
 namespace kernel {
 
-using namespace cute;
-using namespace cutlass;
-using namespace cutlass::gemm::collective;
-
 template <typename MainloopPipeline,
           class DataType,
           class SmemLayoutA,
