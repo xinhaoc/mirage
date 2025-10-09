@@ -134,7 +134,7 @@ def get_compile_command(
         # "-g",
         # "-G",
         # "--ptxas-options=-v",
-        "-Xptxas=-v",
+        # "-Xptxas=-v",
         # "-lineinfo",
         f"-I{py_include_dir}",
         f"-I{mirage_inc_path}",

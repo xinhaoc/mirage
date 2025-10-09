@@ -1103,7 +1103,9 @@ int TaskRegister::register_linear_swapAB_hopper_task(
   constexpr int TILE_SIZE = 256;
   constexpr int Kstages = 5;
   assert(batch_size <= 16);
-  int const SMEM_M_SIZE = batch_size <= 8 ? 8 : 16; // batch size padded to 16
+  // int const SMEM_M_SIZE = batch_size <= 8 ? 8 : 16; // batch size padded to
+  // 16
+  int const SMEM_M_SIZE = 16;
   int const output_tma_cp_size = output_size < 64 ? output_size : 64;
   int const output_atom_size = 64;
   code.e("using TMA_B = kernel::tma::tma_2d<bfloat16, $, $, $, $, $, $, $, $, "

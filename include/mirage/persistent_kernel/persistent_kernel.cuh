@@ -355,16 +355,6 @@ __device__ __forceinline__ void terminate_schedulers(RuntimeConfig config) {
   }
 }
 
-__device__ __forceinline__ void adjust_registers() {
-#ifdef MIRAGE_GRACE_HOPPER
-  // if (threadIdx.x < CONSUMER_NUM_THREADS) {
-  //   wg_increase_regs<256>();
-  // } else {
-    // wg_decrease_regs<96>();
-  // }
-#endif
-}
-
 __device__ __forceinline__ void worker_checker(RuntimeConfig config) {
   assert(gridDim.y == 1);
   assert(gridDim.z == 1);
@@ -931,7 +921,6 @@ __global__ __launch_bounds__(WORKER_NUM_THREADS,
 __global__ __launch_bounds__(WORKER_NUM_THREADS,
                              1) void worker_kernel(RuntimeConfig config) {
   worker_checker(config);
-  adjust_registers();
   execute_worker(config);
 }
 
