@@ -1311,7 +1311,6 @@ void linear_kernel(torch::Tensor input,
 // #endif
 // }
 
-
 // void multitoken_paged_attention_hopper(
 //     torch::Tensor qkv,
 //     torch::Tensor paged_k_cache,
@@ -1397,4 +1396,3 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   //       &multitoken_paged_attention_hopper,
   //       "Multitoken paged attention for Grace Hopper GPU");
 }
-

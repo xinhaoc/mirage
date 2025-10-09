@@ -30,8 +30,6 @@
 
 namespace kernel {
 
-using namespace cute;
-
 template <class KernelTraits, bool OnHost>
 struct MainloopParamsImpl;
 

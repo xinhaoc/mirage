@@ -136,7 +136,8 @@ __device__ __forceinline__ void
   constexpr size_t TOTAL_SHARED_MEMORY =
       SHARED_RESIDUAL_DONE_OFFSET + 8 * Kstages;
 
-  static_assert(TOTAL_SHARED_MEMORY <= 224 * 1024);
+  static_assert(TOTAL_SHARED_MEMORY <=
+                mirage::runtime::MAX_DYNAMIC_SHARED_MEMORY_SIZE);
 
   // copy input
   T *shared_input = (T *)(smem + SHARED_INPUT_BUFFER_OFFSET);
