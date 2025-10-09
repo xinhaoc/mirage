@@ -411,6 +411,7 @@ if __name__ == "__main__":
                 weight=w_qkv,
                 output=attn_in,
                 # grid_dim=(grid_for_rmsnorm_linear_layer(w_qkv.dim(0)), 1, 1),
+                # TODO: may worth trying other partition optimization for larger batches
                 grid_dim=(w_qkv.dim(0) // 64, 1, 1),
                 block_dim=(256, 1, 1),
             )
@@ -420,7 +421,7 @@ if __name__ == "__main__":
             #    weight_linear=w_qkv,
             #    output=attn_in,
             #    grid_dim=(grid_for_rmsnorm_linear_layer(w_qkv.dim(0)), 1, 1),
-            #    block_dim=(128, 1, 1),
+            #    block_dim=(256, 1, 1),
             #)
             # add attention
             w_q_norm = mpk.attach_input(
@@ -525,7 +526,7 @@ if __name__ == "__main__":
             #    weight_linear=w_gatedup,
             #    output=mlp_mid,
             #    grid_dim=(rmsnorm_num_tasks, 1, 1),
-            #    block_dim=(128, 1, 1),
+            #    block_dim=(256, 1, 1),
             #)
             mpk.silu_mul_layer(
                 input=mlp_mid,

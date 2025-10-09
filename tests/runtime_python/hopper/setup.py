@@ -42,6 +42,8 @@ setup(
                     '-DMIRAGE_BACKEND_USE_CUDA',
                     '-DMIRAGE_GRACE_HOPPER',
                     '-DMIRAGE_PROFILE_HOPPER',
+                    '-DMIRAGE_BACKEND_USE_CUDA',
+                    # '-DMIRAGE_PROFILE_HOPPER',
                 ]
             }
         )
