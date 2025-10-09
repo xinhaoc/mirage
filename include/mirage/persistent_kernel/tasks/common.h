@@ -28,5 +28,7 @@ constexpr int WARPGROUP_WARPS = 4;
 
 constexpr float inf = 5e4;
 
+#if defined(MIRAGE_GRACE_HOPPER)
 constexpr int WORKER_NUM_THREADS = 256;   // Grace Hopper setting
 constexpr int CONSUMER_NUM_THREADS = 128; // Grace Hopper setting
+#endif

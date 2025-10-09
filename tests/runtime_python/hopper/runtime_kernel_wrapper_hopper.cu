@@ -97,7 +97,7 @@ void launch_linear_swapAB(void *input_ptr,
   constexpr int OUTPUT_TMA_CP_SIZE = OUTPUT_SIZE < 64 ? OUTPUT_SIZE : 64;
   constexpr int OUTPUT_ATOM_REPEAT_COL = 1;
 
-  constexpr int SMEM_M_SIZE = 16;
+  constexpr int SMEM_M_SIZE = BATCH_SIZE <= 8 ? 8 : 16;
   using TMA_B =
       kernel::tma::tma_2d<bfloat16,
                           B,

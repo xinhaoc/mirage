@@ -37,6 +37,9 @@
 #include "../../hopper/smem_layout_tma.cuh"
 #include "../../hopper/tma.cuh"
 #include "../../hopper/utils.cuh"
+#include "epilogue.cuh"
+#include "kernel_traits.cuh"
+#include "mma_tma_ws_mainloop.cuh"
 
 namespace kernel {
 

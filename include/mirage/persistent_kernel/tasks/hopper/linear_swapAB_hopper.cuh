@@ -56,6 +56,9 @@ __device__ __forceinline__ void
   constexpr int PRODUCER_WARPGROUPS = 1;
   constexpr int NUM_WARPGROUPS = CONSUMER_WARPGROUPS + PRODUCER_WARPGROUPS;
   constexpr int THREADS_PER_WARPGROUP = 128;
+  // NOTE(Yu): cause mpk to hang, to be fixed
+  // constexpr int MMA_ATOM_N = (BATCH_SIZE <= 8) ? 8 : 16;
+  constexpr int MMA_ATOM_N = 16;
 
   // The actual tma instructions are issued for each 64 cols when swizzle<3,3,3>
   constexpr int INPUT_TMA_TILE_SIZE = 64;
@@ -68,6 +71,8 @@ __device__ __forceinline__ void
   // to 16
   static_assert(BATCH_SIZE <= 16,
                 "Batch size must be smaller or equal to 16 in swapAB");
+  // NOTE(Yu): cause mpk to hang, to be fixed
+  // constexpr int SMEM_M_SIZE = (BATCH_SIZE <= 8) ? 8 : 16;
   constexpr int SMEM_M_SIZE = 16;
 
   constexpr int TMA_TRANS_BYTES_A = sizeof(T) * TILE_SIZE * OUTPUT_ATOM_SIZE;
@@ -268,8 +273,10 @@ __device__ __forceinline__ void
     float s_frag[SMEM_M_SIZE / 2];
     for (int output_atom_idx = 0; output_atom_idx < NUM_ITER_N;
          output_atom_idx++) {
+
+      constexpr int CLEAR_ITERS = SMEM_M_SIZE / 16 <= 0 ? 1 : SMEM_M_SIZE / 16;
 #pragma unroll
-      for (int i = 0; i < SMEM_M_SIZE / 16; i++) {
+      for (int i = 0; i < CLEAR_ITERS; i++) {
         clear_8_floats(s_frag + i * 8);
       }
 
@@ -287,13 +294,12 @@ __device__ __forceinline__ void
         input_smem.set_ptr(shared_input + (slot)*SMEM_M_SIZE * TILE_SIZE);
         A_DESC a_desc(input_weight_smem(0, 0));
         B_DESC b_desc(input_smem(0, 0));
-
         wgmma::warpgroup_fence_fragment(s_frag);
         wgmma::warpgroup_arrive();
         // wgmma
         wgmma::mma<bfloat16,
-                   64, // output atom size fixed to 64
-                   16, // Assume batch size is not larger than 16
+                   64,         // output atom size fixed to 64
+                   MMA_ATOM_N, // Assume batch size is not larger than 16
                    16,
                    WeightSmem,
                    InputSmem,

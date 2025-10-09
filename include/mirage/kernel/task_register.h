@@ -71,6 +71,10 @@ public:
   int register_linear_cutlass_hopper_task(threadblock::Graph const &bgraph,
                                           std::vector<int> const &params,
                                           bool with_residual);
+  int register_silu_mul_hopper_task(threadblock::Graph const &bgraph,
+                                    std::vector<int> const &params);
+  int register_embedding_hopper_task(threadblock::Graph const &bgraph,
+                                     std::vector<int> const &params);
   int register_task_variant(TaskType type, std::string const &code);
 
 public:
