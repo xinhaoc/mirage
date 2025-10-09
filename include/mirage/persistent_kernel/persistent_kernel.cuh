@@ -424,7 +424,7 @@ __device__ __forceinline__ void execute_worker(RuntimeConfig config) {
                 1,
                 (threadIdx.x % WORKER_NUM_THREADS == 0));
 
-
+#endif
   int const worker_id = blockIdx.x;
   worker_queues[0] = config.worker_queues[worker_id];
   worker_queue_ids[0] = worker_id;
@@ -517,8 +517,8 @@ __device__ __forceinline__ void execute_worker(RuntimeConfig config) {
                       get_task_position_index(task_ids[task_idx])) +
                       offset * 16);
       }
-      cp_async_fence();
-      cp_async_wait<0>();
+      kernel::cp_async_fence();
+      kernel::cp_async_wait<0>();
       __syncthreads();
       queue_pos = 0;
       queue_len = num_loaded_tasks;
