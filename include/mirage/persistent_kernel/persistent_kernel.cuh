@@ -42,6 +42,9 @@ using namespace kernel;
 #if defined(MIRAGE_GRACE_HOPPER)
 #define WORKER_NUM_THREADS 256
 #define SINGLE_KERNEL_NUM_THREADS 256
+#elif defined(MIRAGE_GRACE_BLACKWELL)
+#define WORKER_NUM_THREADS 256
+#define SINGLE_KERNEL_NUM_THREADS 256
 #else
 #define WORKER_NUM_THREADS 128
 #define SINGLE_KERNEL_NUM_THREADS 128
@@ -1207,6 +1210,7 @@ extern "C" void launch_persistent_kernel() {
 
   if (global_runtime_config.split_worker_scheduler) {
     printf("worker kernel & scheduler kernel\n");
+    printf("smem size: %d\n", MAX_DYNAMIC_SHARED_MEMORY_SIZE);
 
     // Launcher worker & scheduler kernel
     cudaFuncSetAttribute(worker_kernel,

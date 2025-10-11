@@ -1476,5 +1476,293 @@ int TaskRegister::register_embedding_hopper_task(
   return register_task_variant(TASK_EMBEDDING_HOPPER, code.to_string());
 }
 
+// SM100 Tasks
+int TaskRegister::register_linear_sm100_task(threadblock::Graph const &bgraph,
+                                       std::vector<int> const &params,
+                                       bool with_residual) {
+  assert(params.size() == 0);
+  int batch_size = 0, output_size = 0, reduction_size = 0, output_stride = 0;
+  std::vector<tb::TBInputOp *> input_ops;
+  std::vector<tb::TBInputOp *> output_ops;
+  int num_inputs = with_residual ? 3 : 2;
+  int num_outputs = 1;
+
+  assert(bgraph.operators.size() == (size_t)num_inputs + num_outputs);
+  for (auto const &op : bgraph.operators) {
+    assert(op->op_type == mirage::type::TB_INPUT_OP);
+    if (input_ops.size() < (size_t)num_inputs) {
+      input_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    } else {
+      output_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    }
+  }
+  assert(output_ops[0]->output_tensors[0].num_dims == 2);
+  batch_size = output_ops[0]->output_tensors[0].dim[0];
+  output_size = output_ops[0]->output_tensors[0].dim[1];
+  assert(input_ops[0]->dtensor.num_dims == 2);
+  reduction_size = input_ops[0]->dtensor.dim[1];
+  assert(output_ops[0]->dtensor.owner_op->op_type == type::KN_INPUT_OP);
+  kn::KNInputOp *kn_input_op =
+      static_cast<kn::KNInputOp *>(output_ops[0]->dtensor.owner_op);
+  output_stride = static_cast<int>(kn_input_op->input_strides[0]);
+
+  mirage::transpiler::CodeKeeper code;
+  code.inc_indent();
+  // define MMA
+  constexpr int MMA_M = 128;
+  constexpr int MMA_N = 16;
+  constexpr int bM = 128;
+  constexpr int bN = MMA_N;
+  constexpr int bK = 64;
+  constexpr int num_ab_stages = 8;
+  constexpr int num_acc_stages = 2;
+  constexpr int num_c_stages = 4;
+  constexpr int num_tmem_columns = bN * num_acc_stages;
+  assert(num_tmem_columns <= 512);
+  // define TMAs
+  constexpr int B = 3;
+  constexpr int M = 3;
+  constexpr int S = 3;
+  constexpr int TMA_CP_ASYNC_SIZE = 64;
+  constexpr int TILE_SIZE = 64;
+  int const output_tma_cp_size = 128;
+  int const output_atom_size = 128;
+  code.e("using TMA_A = kernel::tma::tma_2d<cute::bfloat16_t, $, $, $, $, $, $, $, $, "
+         "$, $, $, $, true>;",
+         B,
+         M,
+         S,
+         output_size,        /*GMEM_ROW_*/
+         reduction_size,    /*GMEM_COL_*/
+         MMA_M,             /*SMEM_ROW_*/
+         TMA_CP_ASYNC_SIZE, /*SMEM_COL_*/
+         reduction_size,    /*GMEM_STRIDE_ROW_*/
+         1,                 /*GMEM_STRIDE_COL_*/
+         1,                 /*SMEM_REPEAT_ROW_*/
+         (TILE_SIZE + TMA_CP_ASYNC_SIZE - 1) /
+             TMA_CP_ASYNC_SIZE,          /*SMEM_REPEAT_COL_*/
+         MMA_M * TMA_CP_ASYNC_SIZE /*SMEM_STRIDE_*/
+  );
+
+  code.e("using TMA_B = kernel::tma::tma_2d<cute::bfloat16_t, $, $, $, $, $, $, $, $, "
+         "$, $, $, $, true>;",
+         B,
+         M,
+         S,
+         batch_size,       /*GMEM_ROW_*/
+         reduction_size,    /*GMEM_COL_*/
+         MMA_N,  /*SMEM_ROW_*/
+         TMA_CP_ASYNC_SIZE, /*SMEM_COL_*/
+         reduction_size,    /*GMEM_STRIDE_ROW_*/
+         1,                 /*GMEM_STRIDE_COL_*/
+         1,                 /*SMEM_REPEAT_ROW_*/
+         (TILE_SIZE + TMA_CP_ASYNC_SIZE - 1) /
+             TMA_CP_ASYNC_SIZE,               /*SMEM_REPEAT_COL_*/
+         MMA_N * TMA_CP_ASYNC_SIZE /*SMEM_STRIDE_*/
+  );
+
+  code.e("using TMA_OUT = kernel::tma::tma_2d<cute::bfloat16_t, $, $, $, $, $, $, $, "
+         "$, $, $, $, $, true>;",
+         0,
+         M,
+         S,
+         batch_size,         /*GMEM_ROW_*/
+         output_size,        /*GMEM_COL_*/
+         MMA_N,              /*SMEM_ROW_*/
+         MMA_M,              /*SMEM_COL_*/
+         output_stride,      /*GMEM_STRIDE_ROW_*/
+         1,                  /*GMEM_STRIDE_COL_*/
+         1,                  /*SMEM_REPEAT_ROW_*/
+         (output_atom_size + output_tma_cp_size - 1) /
+             output_tma_cp_size,         /*SMEM_REPEAT_COL_*/
+         MMA_N * MMA_M                 /*SMEM_STRIDE_*/
+  );
+  code.inc_indent();
+  code.e("TMA_A "
+         "tma_a(static_cast<CUtensorMap*>(task_desc->input_tma_desc_ptrs[1][0])"
+         ");");
+  code.e("TMA_B "
+         "tma_b(static_cast<CUtensorMap*>(task_desc->input_tma_desc_ptrs[0][0])"
+         ");");
+  code.e("TMA_OUT "
+         "tma_out(static_cast<CUtensorMap*>(task_desc->output_tma_desc_ptrs[0]["
+         "0]));");
+  // Bias Tensor setup
+  code.e("cute::Layout layout_Bias = cute::make_layout(cute::make_shape($, $), cute::make_stride($, cute::Int<1>{}));",
+          batch_size,
+          output_size,
+          output_stride
+  );
+  code.e("cute::Tensor mBias = cute::make_tensor(cute::make_gmem_ptr(static_cast<cute::bfloat16_t*>($)), layout_Bias);",
+          with_residual ? "task_desc->input_ptrs[2]" : "nullptr"
+  );
+  code.e("kernel::linear_sm100_mpk_task_impl<cute::bfloat16_t, TMA_A, TMA_B, decltype(mBias), TMA_OUT, "
+         "$, $, $, $, $, $, "
+         "$, $, $>(",
+         MMA_M,
+         MMA_N,
+         batch_size,
+         output_size,
+         reduction_size,
+         with_residual ? "false" : "true",
+         num_ab_stages,
+         num_acc_stages,
+         num_c_stages);
+  code.e("    tma_a,");
+  code.e("    tma_b,");
+  code.e("    mBias,");
+  code.e("    tma_out); ");
+
+  if (with_residual) {
+    return register_task_variant(TASK_LINEAR_WITH_RESIDUAL_SM100,
+                                 code.to_string());
+  } else {
+    return register_task_variant(TASK_LINEAR_SM100, code.to_string());
+  }
+}
+
+int TaskRegister::register_paged_attention_sm100_task(
+    threadblock::Graph const &bgraph, std::vector<int> const &params) {
+  // params[0]: num_q_heads
+  // params[1]: num_kv_heads
+  // params[2]: qk_norm
+  // params[3]: rotary_emd
+  // params[4]: max_seq_len
+  // params[5]: page_size
+  assert(params.size() == 6);
+  std::vector<tb::TBInputOp *> input_ops;
+  std::vector<tb::TBInputOp *> output_ops;
+  int num_inputs = 7;
+  int num_outputs = 1;
+
+  assert(bgraph.operators.size() == (size_t)num_inputs + num_outputs);
+  for (auto const &op : bgraph.operators) {
+    assert(op->op_type == mirage::type::TB_INPUT_OP);
+    if (input_ops.size() < (size_t)num_inputs) {
+      input_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    } else {
+      output_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    }
+  }
+  assert(output_ops[0]->output_tensors[0].num_dims == 2);
+  int qkv_stride = input_ops[0]->dtensor.dim[1];
+  int output_size = output_ops[0]->dtensor.dim[1];
+  int num_q_heads = params[0];
+  int num_kv_heads = params[1];
+  int head_dim = output_size / num_q_heads;
+  int kv_stride = head_dim * num_kv_heads;
+  int max_seq_len = params[4];
+  int page_size = params[5];
+  // Assert that k_cache has the same head_dim
+  assert(input_ops[1]->output_tensors[0].num_dims == 4);
+  assert(head_dim == input_ops[1]->output_tensors[0].dim[3]);
+  assert(input_ops[2]->output_tensors[0].num_dims == 4);
+  assert(head_dim == input_ops[2]->output_tensors[0].dim[3]);
+
+  mirage::transpiler::CodeKeeper code;
+  code.inc_indent();
+  code.e("kernel::multitoken_paged_attention_sm100_task_impl<bfloat16, $, $, $, $, "
+         "$, $, $, $>(",
+         num_q_heads / num_kv_heads,
+         1,
+         kv_stride,
+         qkv_stride,
+         output_size,
+         head_dim,
+         max_seq_len,
+         page_size);
+  code.e("    task_desc->input_ptrs[0],");
+  code.e("    task_desc->input_ptrs[1],");
+  code.e("    task_desc->input_ptrs[2],");
+  code.e("    task_desc->output_ptrs[0],");
+  code.e("    runtime_config.qo_indptr_buffer,");
+  code.e("    runtime_config.paged_kv_indptr_buffer,");
+  code.e("    runtime_config.paged_kv_indices_buffer,");
+  code.e("    runtime_config.paged_kv_last_page_len_buffer,");
+  code.e("    task_desc->request_id,");
+  code.e("    $,", params[2] > 0);
+  code.e("    $,", params[3] > 0);
+  code.e("    task_desc->input_ptrs[3],");
+  code.e("    task_desc->input_ptrs[4],");
+  code.e("    task_desc->input_ptrs[5],");
+  code.e("    task_desc->input_ptrs[6],");
+  code.e("    1e-6f,");
+  code.e("    1e-6f);");
+  return register_task_variant(TASK_ATTN_SM100, code.to_string());
+}
+
+int TaskRegister::register_argmax_partial_sm100_task(threadblock::Graph const &bgraph,
+                                               std::vector<int> const &params) {
+  // params[0]: num_partial_tasks
+  assert(params.size() == 1);
+  std::vector<tb::TBInputOp *> input_ops;
+  std::vector<tb::TBInputOp *> output_ops;
+  int num_inputs = 1;
+  int num_outputs = 2;
+
+  assert(bgraph.operators.size() == (size_t)num_inputs + num_outputs);
+  for (auto const &op : bgraph.operators) {
+    assert(op->op_type == mirage::type::TB_INPUT_OP);
+    if (input_ops.size() < (size_t)num_inputs) {
+      input_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    } else {
+      output_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    }
+  }
+  assert(input_ops[0]->output_tensors[0].num_dims == 2);
+  int batch_size = input_ops[0]->output_tensors[0].dim[0];
+  int num_elements = input_ops[0]->output_tensors[0].dim[1];
+  int num_partial_tasks = params[0];
+
+  mirage::transpiler::CodeKeeper code;
+  code.inc_indent();
+  code.e("kernel::argmax_partial_sm100_kernel<bfloat16, $, $, $>(",
+         batch_size,
+         num_elements,
+         num_partial_tasks);
+  code.e("    task_desc->input_ptrs[0],");
+  code.e("    task_desc->output_ptrs[0],");
+  code.e("    task_desc->output_ptrs[1],");
+  code.e("    runtime_config.qo_indptr_buffer[MPK_MAX_NUM_BATCHED_REQUESTS]);");
+  return register_task_variant(TASK_ARGMAX_PARTIAL_SM100, code.to_string());
+}
+
+int TaskRegister::register_argmax_reduce_sm100_task(threadblock::Graph const &bgraph,
+                                              std::vector<int> const &params) {
+  // params[0]: output size
+  assert(params.size() == 1);
+  std::vector<tb::TBInputOp *> input_ops;
+  std::vector<tb::TBInputOp *> output_ops;
+  int num_inputs = 2;
+  int num_outputs = 1;
+
+  assert(bgraph.operators.size() == (size_t)num_inputs + num_outputs);
+  for (auto const &op : bgraph.operators) {
+    assert(op->op_type == mirage::type::TB_INPUT_OP);
+    if (input_ops.size() < (size_t)num_inputs) {
+      input_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    } else {
+      output_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    }
+  }
+  assert(input_ops[0]->output_tensors[0].num_dims == 2);
+  int batch_size = input_ops[0]->output_tensors[0].dim[0];
+  int num_parts = input_ops[0]->output_tensors[0].dim[1];
+
+  mirage::transpiler::CodeKeeper code;
+  code.inc_indent();
+  code.e("kernel::argmax_reduce_sm100_kernel<bfloat16, $, $, $>(",
+         batch_size,
+         params[0],
+         num_parts);
+  code.e("    task_desc->input_ptrs[0],");
+  code.e("    task_desc->input_ptrs[1],");
+  code.e("    task_desc->output_ptrs[0],");
+  code.e("    runtime_config.qo_indptr_buffer[MPK_MAX_NUM_BATCHED_REQUESTS]);");
+  return register_task_variant(TASK_ARGMAX_REDUCE_SM100, code.to_string());
+}
+
+
+
 } // namespace runtime
 } // namespace mirage
