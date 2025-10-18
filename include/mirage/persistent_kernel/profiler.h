@@ -82,6 +82,12 @@ __device__ __forceinline__ uint32_t get_timestamp() {
   return ret;
 }
 
+__device__ __forceinline__ uint64_t get_timestamp_ns() {
+  uint64_t volatile ret;
+  asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(ret));
+  return ret;
+}
+
 struct ProfilerEntry {
   union {
     struct {

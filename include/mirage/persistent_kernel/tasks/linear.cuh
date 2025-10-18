@@ -182,8 +182,8 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
   // start_warmup = clock();
   int global_pipe_idx = 0;
 // #pragma unroll
-  for (; global_pipe_idx < WEIGHT_PIPE_MAX - 1; ++global_pipe_idx) {
-    start_warmup = tb::get_timestamp();
+  start_warmup = tb::get_timestamp_ns();
+  for (; global_pipe_idx < (WEIGHT_PIPE_MAX - 1); ++global_pipe_idx) {
     int src_stage_offset = (global_pipe_idx % NUM_OUTPUT_ATOMS) << log2_OUTPUT_ATOM_SIZE;
     int buffer_stage_offset = (global_pipe_idx % WEIGHT_PIPE_MAX) << log2_OUTPUT_ATOM_SIZE;
     int global_pipe_row = global_pipe_idx  / NUM_OUTPUT_ATOMS;
@@ -214,8 +214,8 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
       load_smem(weight_smem(dst_row, dst_col), weight_dmem(src_row, src_col));
     }
     // cp_async_fence();
-    end_warmup = tb::get_timestamp();
   }
+  end_warmup = tb::get_timestamp_ns();
   cp_async_fence();
   // end_warmup = clock();
   // cp_async_fence();
@@ -232,6 +232,8 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
       }
     }
   }
+    size_t mainloop_start = tb::get_timestamp_ns();
+    size_t mainloop_start_clock = clock64();
 #pragma unroll 2
   for (int for_idx = 0; for_idx < FORLOOP_RANGE; for_idx++) {
     int cur_input_stage = for_idx % INPUT_PIPE_MAX;
@@ -247,6 +249,8 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
 
       // Prefetch next weight atom into ring buffer stage_write
       if (global_pipe_idx < TOTAL_WEIGHT_BLOCKS_TO_LOAD) {
+        // size_t start = tb::get_timestamp_ns();
+        size_t start = clock64();
         // Load input tile at the first output atom
         if (global_pipe_idx % NUM_OUTPUT_ATOMS == 0) {
           #pragma unroll
@@ -273,15 +277,16 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
                     weight_dmem(src_row, src_col));
         }
         cp_async_fence();
-        size_t start = tb::get_timestamp();
+        size_t end = clock64();
         cp_async_wait<WEIGHT_PIPE_MAX - 1>();
-        size_t end = tb::get_timestamp();
+        // size_t end = tb::get_timestamp_ns();
         l_clock_cycles_mem[global_pipe_idx] = (size_t)(end - start);
       } else if (global_pipe_idx == TOTAL_WEIGHT_BLOCKS_TO_LOAD) {
         cp_async_wait<0>();
       }
       __syncthreads();
-      size_t start = tb::get_timestamp();
+      // size_t start = tb::get_timestamp_ns();
+      size_t start = clock64();
 
       // MMA using the loaded input and weight tiles
       uint32_t a_frag[4], b_frag[4];
@@ -320,11 +325,16 @@ __device__ __forceinline__ void linear_kernel(void const *input_ptr,
           }
         }
       }
-      size_t end = tb::get_timestamp();
+      // size_t end = tb::get_timestamp_ns();
+      size_t end = clock64();
       __syncthreads();
       l_clock_cycles_compute[for_idx] = (size_t)(end - start);
     }
   }
+  size_t mainloop_end = tb::get_timestamp_ns();
+  size_t mainloop_end_clock = clock64();
+  l_clock_cycles_compute[11] = (size_t)(mainloop_end - mainloop_start);
+  l_clock_cycles_compute[12] = (size_t)(mainloop_end_clock - mainloop_start_clock);
   // Accumulate this atom's contribution into the full output_smem at offset
 #pragma unroll
   for (uint32_t output_atom_idx = 0; output_atom_idx < NUM_OUTPUT_ATOMS; output_atom_idx++) {
