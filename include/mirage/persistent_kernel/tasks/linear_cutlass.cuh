@@ -45,7 +45,10 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
                                               void const *residual_ptr,
                                               void *output_ptr,
                                               int num_active_tokens,
-                                              bool residual) {
+                                              bool residual,
+                                              size_t *clock_cycles_mem,
+                                              size_t *clock_cycles_compute
+                                              ) {
 // template <typename Config>
 // __global__ void /* __launch_bounds__(128, 1) */
 // gemm_multi_stage(void *Dptr, const void *Aptr, const void *Bptr, const void *Rptr, int m, int n, int k) {
@@ -124,6 +127,10 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
   auto cA = make_identity_tensor(shape(A));   // (m,k) -> (m,k)
   auto cB = make_identity_tensor(shape(B));   // (n,k) -> (n,k)
   auto cC = make_identity_tensor(shape(D));  // (m,n) -> (m,n)
+
+  size_t l_clock_cycles_mem[REDUCTION_SIZE / kTileK];
+  size_t l_clock_cycles_compute[REDUCTION_SIZE / kTileK];
+  size_t l_clock_cycles_mem_launch[REDUCTION_SIZE / kTileK];
 
   #pragma unroll
   for (int m_iter = 0; m_iter < LoopM; ++m_iter) {
@@ -281,6 +288,7 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
       int ismem_write_stage = 0;
 
       //warm up
+      size_t start_warmup = clock64();
     #pragma unroll
       for (int istage = 0; istage < kStage - 1; ++istage) {
         // cute::copy(g2s_tiled_copy_a, tAgA_copy(_, _, _, istage),
@@ -296,10 +304,15 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
         ++itile_to_read;
         ++ismem_write_stage;
       }
+      size_t end_warmup = clock64();
+
 
       //TODO: cp_async_wait later?
+      size_t start_warmup_wait = clock64();
       cp_async_wait<kStage - 2>();
+      size_t end_warmup_wait = clock64();
       __syncthreads();
+      size_t end_warmup_wait_sync = clock64();
 
       int ik = 0;
       cute::copy(s2r_tiled_copy_a, tAsA(_, _, ik, ismem_read_stage), tCrA_view(_, _, ik));
@@ -310,12 +323,17 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
 
     #pragma unroll 1
       for (int itile = 0; itile < ntile; ++itile) {
+        size_t start_gemm, end_gemm;
+        size_t start_copy_async_wait, end_copy_async_wait;
+        size_t start_copy_async_launch, end_copy_async_launch;
     #pragma unroll
         for (int ik = 0; ik < nk; ++ik) {
           int ik_next = (ik + 1) % nk;
 
           if (ik == nk - 1) {
+            start_copy_async_wait = clock64();
             cp_async_wait<kStage - 2>();
+            end_copy_async_wait = clock64();
             __syncthreads();
 
             ismem_read_stage = (ismem_read_stage + 1) % kStage;
@@ -328,6 +346,7 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
 
           if (ik == 0) {
             if (itile_to_read < ntile) {
+              start_copy_async_launch = clock64();
               // cute::copy(g2s_tiled_copy_a, tAgA_copy(_, _, _, itile_to_read),
               //           tAsA_copy(_, _, _, ismem_write_stage));
               // cute::copy(g2s_tiled_copy_b, tBgB_copy(_, _, _, itile_to_read),
@@ -339,14 +358,25 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
 
               ++itile_to_read;
               ismem_write_stage = (ismem_write_stage + 1) % kStage;
+              end_copy_async_launch = clock64();
             }
 
             cp_async_fence();
           }
 
+          start_gemm = clock64();
           cute::gemm(tiled_mma, tCrD, tCrA(_, _, ik), tCrB(_, _, ik), tCrD);
+          end_gemm = clock64();
         } // ik
+
+        l_clock_cycles_compute[itile] = end_gemm - start_gemm;
+        l_clock_cycles_mem[itile] = end_copy_async_wait - start_copy_async_wait;
+        l_clock_cycles_mem_launch[itile] = end_copy_async_launch - start_copy_async_launch;
       } // itile
+
+      l_clock_cycles_compute[7] = end_warmup - start_warmup;
+      l_clock_cycles_compute[11] = end_warmup_wait - start_warmup_wait;
+      l_clock_cycles_compute[15] = end_warmup_wait_sync - start_warmup_wait;
 
       // Epilogue: convert float accumulator result back to bfloat16_t and write back
       // use less shared memory as a scratchpad tile to use large wide instuction
@@ -398,6 +428,17 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
       cute::copy_if(s2g_tiled_copy_c, tCpC_ep, tCsC_s2g(_, _, _, 0), tCgC_s2g);
     } // n_iter < kLoopN 2 
   } // m_iter < LoopM 1
+
+  if (threadIdx.x == 6 && blockIdx.x == 12) {
+    for (int i = 0; i < REDUCTION_SIZE / kTileK; ++i) {
+      if (i % 2 == 0) {
+        clock_cycles_mem[i] = l_clock_cycles_mem[i];
+      } else {
+        clock_cycles_mem[i] = l_clock_cycles_mem_launch[i];
+      }
+      clock_cycles_compute[i] = l_clock_cycles_compute[i];
+    }
+  }
 }
 }
 

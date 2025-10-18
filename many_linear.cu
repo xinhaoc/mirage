@@ -1,4 +1,5 @@
-#include "include/mirage/persistent_kernel/tasks/linear.cuh"
+// #include "include/mirage/persistent_kernel/tasks/linear.cuh"
+#include "include/mirage/persistent_kernel/tasks/linear_cutlass.cuh"
 #include "include/mirage/persistent_kernel/tasks/linear_split.cuh"
 
 static constexpr int SINGLE_KERNEL_THREADS = 128;
@@ -48,7 +49,7 @@ __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_
         void * weight_ptr = (bfloat16 *)d_weight + (layer_num * REDUCTION_SIZE * OUTPUT_SIZE * SM_COUNT) + (blockIdx.x * OUTPUT_SIZE);
         void * output_ptr = (bfloat16 *)d_output + (layer_num * BATCH_SIZE * OUTPUT_SIZE * SM_COUNT) + (blockIdx.x * OUTPUT_SIZE);
 
-        kernel::linear_kernel<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT, 2>(
+        kernel::linear_kernel<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT, 3>(
         input_ptr,
         weight_ptr,
         nullptr,
