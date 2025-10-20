@@ -198,6 +198,13 @@ struct MMAKernelTraits {
                                          SmemLayoutAtomC>;
 
   static constexpr bool SwapAB = IS_SWAPAB::value;
+
+
+  //epilogue related
+  static constexpr RESIDUAL_LOAD_STAGES = NUM_STAGES;
+  static constexpr TMA_STORE_STAGES = NUM_STAGES;
+  
+
 };
 
 } // namespace kernel

@@ -85,7 +85,9 @@ void launch_linear_hopper_cute(void *weight_ptr,
                               4>;          // NUM_STAGES
 
   using Mainloop = kernel::CollectiveMainloop<KernelTraits>;
-  using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;
+  // using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;
+
+  using Epilogue = kernel::TmaEpilogue<KernelTraits>;
 
   using StrideA = typename KernelTraits::StrideA;
   using StrideB = typename KernelTraits::StrideB;
@@ -108,13 +110,21 @@ void launch_linear_hopper_cute(void *weight_ptr,
       stride_B,                           // dB
   };
 
+  // typename Epilogue::Arguments epilogue_args{
+  //     static_cast<T const *>(residual_ptr), // ptr_C
+  //     stride_C,                             // dC
+  //     static_cast<T *>(output_ptr),         // ptr_D
+  //     stride_C,                             // dD
+  //     {1.0f, 1.0f}                          // alpha and beta
+  // };
+
   typename Epilogue::Arguments epilogue_args{
-      static_cast<T const *>(residual_ptr), // ptr_C
-      stride_C,                             // dC
-      static_cast<T *>(output_ptr),         // ptr_D
-      stride_C,                             // dD
-      {1.0f, 1.0f}                          // alpha and beta
-  };
+    static_cast<T const *>(residual_ptr), // ptr_C
+    stride_C,                             // dC
+    static_cast<T *>(output_ptr),         // ptr_D
+    stride_C,                             // dD
+    // {1.0f, 1.0f}                          // alpha and beta
+};
 
   typename Mainloop::template Params<true> mainloop_params =
       Mainloop::template to_underlying_arguments<true>(problem_shape,
@@ -256,8 +266,39 @@ template <typename CollectiveMainloop,
           int OUTPUT_SIZE,
           int REDUCTION_SIZE,
           typename TMA_A,
-          typename TMA_B>
+          typename TMA_B,
+          typename TMA_RESIDUAL>
 __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_mpk_wrapper(
+    CUTE_GRID_CONSTANT
+    typename CollectiveMainloop::template Params<false> const mainloop_params,
+    CUTE_GRID_CONSTANT
+    typename CollectiveEpilogue::Params const epilogue_params,
+    const __grid_constant__ TMA_A tma_a,
+    const __grid_constant__ TMA_B tma_b,
+  const __grid_constant__ TMA_RESIDUAL tma_residual) {
+  kernel::linear_cutlass_ws_hopper<CollectiveMainloop,
+                                   CollectiveEpilogue,
+                                   false,
+                                   T,
+                                   BATCH_SIZE,
+                                   OUTPUT_SIZE,
+                                   REDUCTION_SIZE,
+                                   TMA_A,
+                                   TMA_B,
+                                   OUTPUT_SIZE,
+                                   true>(
+      mainloop_params, epilogue_params, tma_a, tma_b, tma_residual);
+}
+
+template <typename CollectiveMainloop,
+          typename CollectiveEpilogue,
+          typename T,
+          int BATCH_SIZE,
+          int OUTPUT_SIZE,
+          int REDUCTION_SIZE,
+          typename TMA_A,
+          typename TMA_B>
+__global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_mpk__no_residual_wrapper(
     CUTE_GRID_CONSTANT
     typename CollectiveMainloop::template Params<false> const mainloop_params,
     CUTE_GRID_CONSTANT
@@ -275,7 +316,7 @@ __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_mpk_wrapper(
                                    TMA_B,
                                    OUTPUT_SIZE,
                                    true>(
-      mainloop_params, epilogue_params, tma_a, tma_b);
+      mainloop_params, epilogue_params, tma_a, tma_b, nullptr);
 }
 
 template <typename T, int OUTPUT_SIZE, int BATCH_SIZE, int REDUCTION_SIZE>
@@ -309,7 +350,22 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                               4>;          // NUM_STAGES
 
   using Mainloop = kernel::CollectiveMainloop<KernelTraits>;
-  using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;
+  // using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;
+
+
+  using Epilogue = kernel::TmaEpilogue<KernelTraits>;
+  // constexpr int AlignmentC  = 128 / cutlass::sizeof_bits<T>::value;    // Memory access granularity/alignment of C matrix in units of elements (up to 16 bytes)
+
+
+  // using Epilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
+  //   cutlass::arch::Sm90, cutlass::arch::OpClassTensorOp,
+  //   TileShape, ClusterShape,
+  //   cutlass::epilogue::collective::EpilogueTileAuto,
+  //   float, float,
+  //   T, cutlass::layout::RowMajor, AlignmentC,
+  //   T, cutlass::layout::RowMajor, AlignmentC,
+  //   cutlass::epilogue::TmaWarpSpecializedCooperative
+  // >::CollectiveOp;
 
   using StrideA = typename KernelTraits::StrideA;
   using StrideB = typename KernelTraits::StrideB;
@@ -362,6 +418,9 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
 
   constexpr int OUTPUT_ATOM_SIZE = 64; // this is padded
   constexpr int SMEM_M_SIZE = BATCH_SIZE;
+
+  constexpr int OUTPUT_TMA_CP_SIZE = OUTPUT_SIZE < 64 ? OUTPUT_SIZE : 64;
+  constexpr int OUTPUT_ATOM_REPEAT_COL = 1;
   using TMA_B =
       kernel::tma::tma_2d<T,
                           B,
@@ -392,9 +451,24 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                           TMA_CP_ASYNC_REPEAT_COL, /*SMEM_REPEAT_COL_*/
                           OUTPUT_ATOM_SIZE * TMA_CP_ASYNC_SIZE, /*SMEM_STRIDE_*/
                           true>;
-
+  
+  using TMA_RESIDUAL = kernel::tma::tma_2d<T,
+                    0,
+                    0,
+                    0,
+                    BATCH_SIZE,
+                    OUTPUT_SIZE,
+                    BATCH_SIZE,
+                    OUTPUT_TMA_CP_SIZE,
+                    OUTPUT_SIZE,
+                    1,
+                    1,
+                    OUTPUT_ATOM_REPEAT_COL,
+                    SMEM_M_SIZE * OUTPUT_TMA_CP_SIZE,
+                    true>;
   TMA_A tma_a(weight_ptr);
   TMA_B tma_b(input_ptr);
+  TMA_RESIDUAL tma_residual(residual_ptr);
 
   dim3 grid(1);
   dim3 block(256);
