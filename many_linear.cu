@@ -1,6 +1,6 @@
 // #include "include/mirage/persistent_kernel/tasks/linear.cuh"
 #include "include/mirage/persistent_kernel/tasks/linear_cutlass.cuh"
-#include "include/mirage/persistent_kernel/tasks/linear_split.cuh"
+#include "include/mirage/persistent_kernel/tasks/linear_cutlass_split.cuh"
 
 static constexpr int SINGLE_KERNEL_THREADS = 128;
 static constexpr int MAX_SHARE_MEMORY_SIZE = 160 * 1024;
@@ -9,7 +9,7 @@ static constexpr size_t SM_COUNT = 96;
 static constexpr size_t OUTPUT_SIZE = 64;
 static constexpr size_t REDUCTION_SIZE = 4096;
 static constexpr size_t BATCH_SIZE = 16;
-static constexpr bool USE_PIPELINE = false;
+static constexpr bool USE_PIPELINE = true;
 using bfloat16 = type::bfloat16_t;
 
 __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_t *clock_cycles_mem, size_t *clock_cycles_compute) {
@@ -39,7 +39,12 @@ __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_
         layer_num < NUM_LAYERS - 1,
         input_ptr_next,
         weight_ptr_next,
-        smem_next);
+        smem_next,
+        clock_cycles_mem + layer_num * (REDUCTION_SIZE / 128),
+        clock_cycles_compute + layer_num * (REDUCTION_SIZE / 128)
+        );
+
+        kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>
       }
     }
 
@@ -49,7 +54,7 @@ __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_
         void * weight_ptr = (bfloat16 *)d_weight + (layer_num * REDUCTION_SIZE * OUTPUT_SIZE * SM_COUNT) + (blockIdx.x * OUTPUT_SIZE);
         void * output_ptr = (bfloat16 *)d_output + (layer_num * BATCH_SIZE * OUTPUT_SIZE * SM_COUNT) + (blockIdx.x * OUTPUT_SIZE);
 
-        kernel::linear_kernel<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT, 3>(
+        kernel::linear_kernel<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(
         input_ptr,
         weight_ptr,
         nullptr,
