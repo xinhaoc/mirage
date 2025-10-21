@@ -199,12 +199,9 @@ struct MMAKernelTraits {
 
   static constexpr bool SwapAB = IS_SWAPAB::value;
 
-
-  //epilogue related
-  static constexpr RESIDUAL_LOAD_STAGES = NUM_STAGES;
-  static constexpr TMA_STORE_STAGES = NUM_STAGES;
-  
-
+  // epilogue related
+  static constexpr int RESIDUAL_LOAD_STAGES = NUM_STAGES;
+  static constexpr int TMA_STORE_STAGES = NUM_STAGES;
 };
 
 } // namespace kernel

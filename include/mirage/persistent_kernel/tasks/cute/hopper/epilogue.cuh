@@ -33,15 +33,17 @@ struct CollectiveEpilogue {
   using StrideD = typename Ktraits::StrideD;
   using ThreadEpilogueOp = typename Ktraits::ThreadOp;
 
-  using LoadPipeline = cutlass::PipelineTransactionAsync<0>;
-  using LoadPipelineState = cutlass::PipelineState<0>;
-  constexpr static bool RequiresTransactionBytes = false;
+  using LoadPipeline =
+      cutlass::PipelineTransactionAsync<Ktraits::RESIDUAL_LOAD_STAGES>;
+  using LoadPipelineState =
+      cutlass::PipelineState<Ktraits::RESIDUAL_LOAD_STAGES>;
+  constexpr static bool RequiresTransactionBytes = true;
 
   using StorePipeline =
       cutlass::PipelineTmaStore<1>; // tma store pipe has no smem alloc
   using StorePipelineState = cutlass::PipelineState<1>;
 
-  using PipelineStorage = LoadPipeline::SharedStorage;
+  using PipelineStorage = typename LoadPipeline::SharedStorage;
 
   CUTLASS_DEVICE
   bool is_producer_load_needed() const {
