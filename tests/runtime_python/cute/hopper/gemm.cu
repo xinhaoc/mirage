@@ -203,10 +203,8 @@ void launch_linear_hopper_cute(void *weight_ptr,
 
 #define DISPATCH_LINEAR_CUTE_REDUCTION_SIZE(OUTPUT_SIZE, BATCH_SIZE)           \
   switch (weight.size(1)) {                                                    \
-    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(OUTPUT_SIZE, BATCH_SIZE, 4096)    \
-    /*                                                                         \
+    DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(OUTPUT_SIZE, BATCH_SIZE, 4096)    \                                                                        \
     DISPATCH_LINEAR_CUTE_REDUCTION_SIZE_CASE(OUTPUT_SIZE, BATCH_SIZE, 12288)   \
-    */                                                                         \
     default:                                                                   \
       printf("Unsupported reduction size in test: %zu\n", input.size(1));      \
       break;                                                                   \
@@ -245,12 +243,12 @@ void linear_kernel(torch::Tensor weight,
   void *residual_ptr = residual.data_ptr();
   void *output_ptr = output.data_ptr();
 
-  switch (weight.size(0)) {
-    DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(64)
-    default:
-      printf("Unsupported output size in test: %zu\n", weight.size(0));
-      break;
-  }
+  // switch (weight.size(0)) {
+  //   DISPATCH_LINEAR_CUTE_OUTPUT_SIZE_CASE(64)
+  //   default:
+  //     printf("Unsupported output size in test: %zu\n", weight.size(0));
+  //     break;
+  // }
 
   cudaError_t err = cudaDeviceSynchronize();
   if (err != cudaSuccess) {
@@ -441,9 +439,9 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                           true>;
 
   using TMA_RESIDUAL = kernel::tma::tma_2d<T,
-                                           0,
-                                           0,
-                                           0,
+                                           3,
+                                           3,
+                                           3,
                                            BATCH_SIZE,
                                            OUTPUT_SIZE,
                                            BATCH_SIZE,
@@ -456,9 +454,9 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                                            true>;
 
   using TMA_OUT = kernel::tma::tma_2d<T,
-                                      B,
-                                      M,
-                                      S,
+                                      3,
+                                      3,
+                                      3,
                                       BATCH_SIZE,
                                       OUTPUT_SIZE,
                                       BATCH_SIZE,
@@ -498,8 +496,8 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
 
-  constexpr int WARMUP_RUNS = 16;
-  constexpr int BENCHMARK_RUNS = 1000;
+  constexpr int WARMUP_RUNS = 0;
+  constexpr int BENCHMARK_RUNS = 1;
 
   printf("=== Kernel Performance Profiling ===\n");
 
@@ -586,10 +584,8 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
   switch (weight.size(1)) {                                                    \
     DISPATCH_LINEAR_CUTE_MPK_REDUCTION_SIZE_CASE(                              \
         OUTPUT_SIZE, BATCH_SIZE, 4096)                                         \
-    /*                                                                         \
     DISPATCH_LINEAR_CUTE_MPK_REDUCTION_SIZE_CASE(OUTPUT_SIZE, BATCH_SIZE,      \
     12288)                                                                     \
-    */                                                                         \
     default:                                                                   \
       printf("Unsupported reduction size in test: %zu\n", input.size(1));      \
       break;                                                                   \
