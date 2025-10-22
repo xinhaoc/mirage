@@ -126,9 +126,6 @@ struct CollectiveMainloop {
       cute::array_aligned<typename TiledMma::ValTypeB,
                           cute::cosize_v<SmemLayoutB>>
           smem_B;
-      cute::array_aligned<typename TiledMma::ValTypeB,
-                          cute::cosize_v<SmemLayoutB>>
-          smem_c;
     } tensors;
 
     using PipelineStorage = typename MainloopPipeline::SharedStorage;

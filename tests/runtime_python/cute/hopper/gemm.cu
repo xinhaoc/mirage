@@ -35,6 +35,7 @@
 #include "cutlass/util/tensor_view_io.h"
 
 #include "epilogue.cuh"
+#include "epilogue_tma.cuh"
 #include "gemm_ws.cuh"
 #include "gemm_ws_mpk.cuh"
 #include "kernel_traits.cuh"
@@ -86,8 +87,6 @@ void launch_linear_hopper_cute(void *weight_ptr,
 
   using Mainloop = kernel::CollectiveMainloop<KernelTraits>;
   using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;
-
-  // using Epilogue = kernel::TmaEpilogue<KernelTraits>;
 
   using StrideA = typename KernelTraits::StrideA;
   using StrideB = typename KernelTraits::StrideB;
@@ -289,7 +288,7 @@ __global__ __launch_bounds__(256, 1) void linear_kernel_hopper_cute_mpk_wrapper(
                                    TMA_B,
                                    TMA_OUT,
                                    OUTPUT_SIZE,
-                                   true>( tma_a, tma_b, tma_out, &tma_residual);
+                                   true>(tma_a, tma_b, tma_out, &tma_residual);
 }
 
 template <typename CollectiveMainloop,
@@ -354,22 +353,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                               4>;          // NUM_STAGES
 
   using Mainloop = kernel::CollectiveMainloop<KernelTraits>;
-  using Epilogue = kernel::CollectiveEpilogue<KernelTraits>;
-
-  // using Epilogue = kernel::TmaEpilogue<KernelTraits>;
-  // constexpr int AlignmentC  = 128 / cutlass::sizeof_bits<T>::value;    //
-  // Memory access granularity/alignment of C matrix in units of elements (up to
-  // 16 bytes)
-
-  // using Epilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
-  //   cutlass::arch::Sm90, cutlass::arch::OpClassTensorOp,
-  //   TileShape, ClusterShape,
-  //   cutlass::epilogue::collective::EpilogueTileAuto,
-  //   float, float,
-  //   T, cutlass::layout::RowMajor, AlignmentC,
-  //   T, cutlass::layout::RowMajor, AlignmentC,
-  //   cutlass::epilogue::TmaWarpSpecializedCooperative
-  // >::CollectiveOp;
+  using Epilogue = kernel::CollectiveTMAEpilogue<KernelTraits>;
 
   using StrideA = typename KernelTraits::StrideA;
   using StrideB = typename KernelTraits::StrideB;
@@ -396,7 +380,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
       static_cast<T const *>(residual_ptr), // ptr_C
       stride_C,                             // dC
       static_cast<T *>(output_ptr),         // ptr_D
-      stride_C                            // dD
+      stride_C                              // dD
       // {1.0f, 1.0f}                          // alpha and beta
   };
 
@@ -471,7 +455,7 @@ void launch_linear_hopper_cute_mpk(void *weight_ptr,
                                            SMEM_M_SIZE * OUTPUT_TMA_CP_SIZE,
                                            true>;
 
-  using TMA_OUT = kernel::tma::tma_2d<bfloat16,
+  using TMA_OUT = kernel::tma::tma_2d<T,
                                       B,
                                       M,
                                       S,
