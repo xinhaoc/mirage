@@ -1,4 +1,5 @@
 // #include "include/mirage/persistent_kernel/tasks/linear.cuh"
+#define MEASURE 0
 #include "include/mirage/persistent_kernel/tasks/linear_cutlass.cuh"
 #include "include/mirage/persistent_kernel/tasks/linear_cutlass_split.cuh"
 
@@ -7,16 +8,16 @@ static constexpr int MAX_SHARE_MEMORY_SIZE = 160 * 1024;
 static constexpr size_t NUM_LAYERS = 30;
 static constexpr size_t SM_COUNT = 96;
 static constexpr size_t OUTPUT_SIZE = 64;
-static constexpr size_t REDUCTION_SIZE = 4096;
+static constexpr size_t REDUCTION_SIZE = 1024;
 static constexpr size_t BATCH_SIZE = 16;
 static constexpr bool USE_PIPELINE = true;
-using bfloat16 = type::bfloat16_t;
+using bfloat16 = type::bfloat16_t;        // kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(input_ptr_next, weight_ptr_next, smem_next);
 
 __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_t *clock_cycles_mem, size_t *clock_cycles_compute) {
     extern __shared__ char smem[];
   
     if constexpr (USE_PIPELINE) {
-      kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(d_input, d_weight, smem);
+      kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(d_input, d_weight, smem, nullptr);
       for (size_t layer_num = 0; layer_num < NUM_LAYERS; layer_num++) {
         char * shared_mem_start = smem + (MAX_SHARE_MEMORY_SIZE / 2) * (layer_num % 2);
 
@@ -44,7 +45,6 @@ __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_
         clock_cycles_compute + layer_num * (REDUCTION_SIZE / 128)
         );
 
-        kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>
       }
     }
 
@@ -136,7 +136,7 @@ int main() {
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
   cudaEventRecord(start);
-  main_kernel<<<dim3(sm_count, 1, 1),
+  main_kernel<<<dim3(sm_count, 1, 21),
                       dim3(SINGLE_KERNEL_THREADS, 1, 1),
                       MAX_SHARE_MEMORY_SIZE /*smem*/>>>(d_input, d_weight, d_output, d_clock_cycles_mem, d_clock_cycles_compute);
   cudaEventRecord(stop);

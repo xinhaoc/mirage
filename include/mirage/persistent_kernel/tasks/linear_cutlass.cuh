@@ -14,6 +14,7 @@
 #include <cuda_bf16.h>
 #include <type_traits>
 
+
 // Forward declaration so it can be referenced before its full definition below
 namespace config {
 template <typename T_,
@@ -131,6 +132,10 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
   size_t l_clock_cycles_mem[REDUCTION_SIZE / kTileK];
   size_t l_clock_cycles_compute[REDUCTION_SIZE / kTileK];
   size_t l_clock_cycles_mem_launch[REDUCTION_SIZE / kTileK];
+
+  if (LoopN != 1 || LoopM != 1) {
+    asm("trap;");
+  }
 
   #pragma unroll
   for (int m_iter = 0; m_iter < LoopM; ++m_iter) {
@@ -374,9 +379,8 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
         l_clock_cycles_mem_launch[itile] = end_copy_async_launch - start_copy_async_launch;
       } // itile
 
-      l_clock_cycles_compute[7] = end_warmup - start_warmup;
-      l_clock_cycles_compute[11] = end_warmup_wait - start_warmup_wait;
-      l_clock_cycles_compute[15] = end_warmup_wait_sync - start_warmup_wait;
+      l_clock_cycles_compute[4] = end_warmup - start_warmup;
+      l_clock_cycles_compute[5] = end_warmup_wait_sync - start_warmup_wait;
 
       // Epilogue: convert float accumulator result back to bfloat16_t and write back
       // use less shared memory as a scratchpad tile to use large wide instuction
@@ -429,6 +433,7 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
     } // n_iter < kLoopN 2 
   } // m_iter < LoopM 1
 
+  #if MEASURE
   if (threadIdx.x == 6 && blockIdx.x == 12) {
     for (int i = 0; i < REDUCTION_SIZE / kTileK; ++i) {
       if (i % 2 == 0) {
@@ -439,6 +444,7 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
       clock_cycles_compute[i] = l_clock_cycles_compute[i];
     }
   }
+  #endif
 }
 }
 

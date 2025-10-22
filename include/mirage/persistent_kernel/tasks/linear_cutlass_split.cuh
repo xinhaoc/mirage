@@ -30,7 +30,6 @@ template <typename T_,
 struct GemmConfig;
 }
 
-#define MEASURE 0
 
 namespace kernel {
 
@@ -44,7 +43,11 @@ template <typename T_,
           int PIPE_MAX = 3>
 __device__ __forceinline__ void linear_prefetch(void const *input_ptr,
                                               void const *weight_ptr,
-                                              char * smem) {
+                                              char * smem,
+                                              size_t *l_clock_cycles_compute
+                                            ) {
+  size_t time1, time2, time3, time4;
+  time1 = clock64();
   using T = std::conditional_t<std::is_same_v<T_, bfloat16>, cute::bfloat16_t, float>; // A temporary hack
   constexpr int TILE_SIZE = 128;
   constexpr int kSmemLayoutCBatch = 1;
@@ -84,14 +87,12 @@ __device__ __forceinline__ void linear_prefetch(void const *input_ptr,
     asm("trap;");
   }
 
-  #pragma unroll
-  for (int m_iter = 0; m_iter < LoopM; ++m_iter) {
+    int m_iter = 0;
     Tensor gA = local_tile(A, make_tile(Int<kTileM>{}, Int<kTileK>{}),
                           make_coord(m_iter, _));
     auto cta_cA = local_tile(cA, make_tile(Int<kTileM>{}, Int<kTileK>{}),
                           make_coord(m_iter, _));
-    #pragma unroll
-    for (int n_iter = 0; n_iter < LoopN; ++n_iter) {
+      int n_iter = 0;
       Tensor gB = local_tile(B, make_tile(Int<kTileN>{}, Int<kTileK>{}),
                             make_coord(n_iter, _));
 
@@ -138,6 +139,7 @@ __device__ __forceinline__ void linear_prefetch(void const *input_ptr,
         tBpB(in,0) = elem_less(get<0>(tBcB(0, in, 0, 0)), shape<0>(B));
       }
 
+      time2 = clock64();
       // Prefetch warmup: load initial stages into shared memory
       #pragma unroll
       for (int istage = 0; istage < kStage - 1; ++istage) {
@@ -147,8 +149,12 @@ __device__ __forceinline__ void linear_prefetch(void const *input_ptr,
                   tBsB_copy(_, _, _, istage));
         cp_async_fence();
       }
-    }
-  }
+      time3 = clock64();
+      if (l_clock_cycles_compute != nullptr) {
+        l_clock_cycles_compute[0] = time2 - time1;
+        l_clock_cycles_compute[1] = time3 - time2;
+      }
+  
 }
 
 
@@ -480,13 +486,21 @@ __device__ __noinline__ void linear_main(void const *input_ptr,
         l_clock_cycles_mem[itile] = end_copy_async_wait - start_copy_async_wait;
         l_clock_cycles_mem_launch[itile] = end_copy_async_launch - start_copy_async_launch;
       } // itile
-      // if (prefetch_next) {
-      //   linear_prefetch<T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, O_STRIDE, PIPE_MAX>(input_ptr_next, weight_ptr_next, smem_next);
-      // }
+      size_t start_warmup, end_warmup;
+      if (prefetch_next) {
+        start_warmup = clock64();
+        linear_prefetch<T_, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, O_STRIDE, PIPE_MAX>(input_ptr_next, weight_ptr_next, smem_next, l_clock_cycles_compute);
+        end_warmup = clock64();
+      } else {
+        end_warmup = 707;
+        start_warmup = 0;
+      }
 
-      // l_clock_cycles_compute[7] = end_warmup - start_warmup;
-      l_clock_cycles_compute[11] = end_warmup_wait - start_warmup_wait;
-      l_clock_cycles_compute[15] = end_warmup_wait_sync - start_warmup_wait;
+
+      l_clock_cycles_compute[4] = end_warmup - start_warmup;
+      l_clock_cycles_compute[5] = end_warmup_wait_sync - start_warmup_wait;
+
+
 
       // Epilogue: convert float accumulator result back to bfloat16_t and write back
       // use less shared memory as a scratchpad tile to use large wide instuction
