@@ -21,7 +21,7 @@ namespace mirage {
 namespace runtime {
 
 #if defined(MIRAGE_GRACE_HOPPER) || defined(MIRAGE_GRACE_BLACKWELL)
-constexpr int WORKER_RESERVED_STATIC_SHARED_MEMORY_SIZE = 4 * 1024;
+constexpr int WORKER_RESERVED_STATIC_SHARED_MEMORY_SIZE = 6 * 1024;
 #else
 constexpr int WORKER_RESERVED_STATIC_SHARED_MEMORY_SIZE = 3 * 1024;
 #endif
@@ -79,6 +79,7 @@ enum TaskType {
   TASK_SILU_MUL = 118,
   TASK_RMS_NORM = 119,
   TASK_LINEAR = 120,
+  // Hopper Tasks
   TASK_HOPPER_TASK_BEGIN = 150, // Hopper start placeholder, not a real task
   TASK_LINEAR_WITH_RESIDUAL_HOPPER = 151,
   TASK_LINEAR_HOPPER = 152,
@@ -91,6 +92,14 @@ enum TaskType {
   TASK_SILU_MUL_HOPPER = 159,
   TASK_EMBEDDING_HOPPER = 160,
   TASK_HOPPER_TASK_END = 198, // Hopper end placeholder, not a real task
+  // SM100 Tasks
+  TASK_SM100_TASK_BEGIN = 250, // SM100 start placeholder, not a real task
+  TASK_LINEAR_WITH_RESIDUAL_SM100 = 251,
+  TASK_LINEAR_SM100 = 252,
+  TASK_ATTN_SM100 = 253,
+  TASK_ARGMAX_REDUCE_SM100 = 254,
+  TASK_ARGMAX_PARTIAL_SM100 = 255,
+  TASK_SM100_TASK_END = 298, // SM100 end placeholder, not a real task
   TASK_NVSHMEM_COPY = 199,
   TASK_SCHD_TASKS = 200,
   TASK_SCHD_EVENTS = 201,
@@ -184,8 +193,13 @@ struct alignas(16) TaskDesc {
   void *output_tma_desc_ptrs[MAX_INPUTS_PER_TASK]
                             [mirage::config::MAX_TMA_DESC_PER_TENSOR];
 #endif
-  int request_id; // Used for paged attention
-  int head_group; // Used for paged attention hopper
+  union {
+    struct {
+      int request_id; // Used for paged attention
+      int head_group; // Used for paged attention hopper
+    };
+    size_t xfer_size_in_bytes; // Used for nvshmem
+  };
 };
 
 struct RuntimeConfig {

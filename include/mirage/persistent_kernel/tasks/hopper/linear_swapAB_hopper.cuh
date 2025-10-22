@@ -15,13 +15,12 @@
  */
 
 #pragma once
-#include "../common.h"
-#include "../dmem_layout.cuh"
-#include "../element_binary.cuh"
-#include "../element_unary.cuh"
-#include "../reduction.cuh"
-#include "../smem_layout.cuh"
-#include "../utils.cuh"
+#include "../common/dmem_layout.cuh"
+// #include "../element_binary.cuh"
+// #include "../element_unary.cuh"
+// #include "../reduction.cuh"
+// #include "../smem_layout.cuh"
+#include "../common/utils.cuh"
 #include "smem_layout_tma.cuh"
 #include "tma.cuh"
 #include "utils.cuh"
@@ -57,9 +56,7 @@ __device__ __forceinline__ void
   constexpr int PRODUCER_WARPGROUPS = 1;
   constexpr int NUM_WARPGROUPS = CONSUMER_WARPGROUPS + PRODUCER_WARPGROUPS;
   constexpr int THREADS_PER_WARPGROUP = 128;
-  // NOTE(Yu): cause mpk to hang, to be fixed
-  // constexpr int MMA_ATOM_N = (BATCH_SIZE <= 8) ? 8 : 16;
-  constexpr int MMA_ATOM_N = 16;
+  constexpr int MMA_ATOM_N = (BATCH_SIZE <= 8) ? 8 : 16;
 
   // The actual tma instructions are issued for each 64 cols when swizzle<3,3,3>
   constexpr int INPUT_TMA_TILE_SIZE = 64;
@@ -72,9 +69,7 @@ __device__ __forceinline__ void
   // to 16
   static_assert(BATCH_SIZE <= 16,
                 "Batch size must be smaller or equal to 16 in swapAB");
-  // NOTE(Yu): cause mpk to hang, to be fixed
-  // constexpr int SMEM_M_SIZE = (BATCH_SIZE <= 8) ? 8 : 16;
-  constexpr int SMEM_M_SIZE = 16;
+  constexpr int SMEM_M_SIZE = (BATCH_SIZE <= 8) ? 8 : 16;
 
   constexpr int TMA_TRANS_BYTES_A = sizeof(T) * TILE_SIZE * OUTPUT_ATOM_SIZE;
   constexpr int TMA_TRANS_BYTES_B = sizeof(T) * BATCH_SIZE * TILE_SIZE;

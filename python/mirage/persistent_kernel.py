@@ -114,6 +114,7 @@ def get_compile_command(
     num_workers=None,
     num_local_schedulers=None,
     num_remote_schedulers=None,
+    use_cutlass_kernel=True,
 ):
     max_worker_per_scheduler = 128
     if num_workers != None and num_local_schedulers != None and num_remote_schedulers != None:
@@ -143,12 +144,13 @@ def get_compile_command(
         f"-I{os.path.join(mirage_deps_path, 'cutlass/tools/util/include')}",
         f"-I{os.path.join(mirage_home_path, 'deps/json/include')}",
         f"-DMAX_WORKER_PER_SCHEDULER={max_worker_per_scheduler}",
+        f"-DMIRAGE_USE_CUTLASS_KERNEL={'1' if use_cutlass_kernel else '0'}",
     ]
 
     flags = [
         "-shared",
         "-std=c++17",
-        "-rdc=false",
+        "-rdc=false" if not use_nvshmem else "-rdc=true",
         "-use_fast_math",
         "-lcuda",
         "-Xcompiler=-fPIC",
@@ -195,6 +197,13 @@ def get_compile_command(
             "-DNDEBUG",
             # "-DMPK_ENABLE_VERBOSE",
         ] + (["-DMIRAGE_ENABLE_PROFILER"] if profiling else [])
+    elif target_cc == 100:
+        specific_cmd = [
+            "-arch=sm_100a",
+            "-gencode=arch=compute_100a,code=sm_100a",
+            "-DMPK_ENABLE_TMA",
+            "-DMIRAGE_GRACE_BLACKWELL",
+        ]
     else:
         specific_cmd = [
             "-arch=native",
@@ -224,7 +233,8 @@ class PersistentKernel:
         meta_tensors: dict,
         profiler_tensor: torch.Tensor,
         trace_name: str,
-        spec_decode_config: SpecDecodeConfig
+        spec_decode_config: SpecDecodeConfig,
+        use_cutlass_kernel: bool
     ):
         self.__finalized__ = False
         self._is_compiled = False
@@ -248,6 +258,7 @@ class PersistentKernel:
         self.trace_name = trace_name
         self.use_nvshmem = True if world_size > 1 else False
         self.spec_decode_config = spec_decode_config
+        self.use_cutlass_kernel = use_cutlass_kernel
         self._spec_decode_handlers = {
             "promptlookup": self.prompt_lookup_spec_handler,
         }
@@ -341,7 +352,7 @@ class PersistentKernel:
         tb_graph.new_input(weight, (1, -1, -1), -1, True)
         tb_graph.new_input(output, (1, 0, -1), -1, True)
         self.kn_graph.customized([input, weight, output], tb_graph)
-        self.kn_graph.register_task(tb_graph, "embedding_hopper" if self.target_cc == 90 else "embedding", [input_source])
+        self.kn_graph.register_task(tb_graph, "embedding" if self.target_cc == 90 else "embedding", [input_source])
 
     def rmsnorm_layer(
         self,
@@ -359,7 +370,7 @@ class PersistentKernel:
         tb_graph.new_input(weight, (-1, -1, -1), 0, True)
         tb_graph.new_input(output, (0, -1, -1), 1, True)
         self.kn_graph.customized([input, weight, output], tb_graph)
-        self.kn_graph.register_task(tb_graph, "rmsnorm_hopper" if self.target_cc == 90 else "rmsnorm")
+        self.kn_graph.register_task(tb_graph, "rmsnorm_hopper" if self.target_cc >= 90 else "rmsnorm")
 
     def rmsnorm_linear_layer(
         self,
@@ -591,7 +602,12 @@ class PersistentKernel:
             ],
             tb_graph,
         )
-        self.kn_graph.register_task(tb_graph, "paged_attention_hopper" if self.target_cc == 90 else "paged_attention", params)
+        if self.target_cc == 90:
+            self.kn_graph.register_task(tb_graph, "paged_attention_hopper", params)
+        elif self.target_cc == 100:
+            self.kn_graph.register_task(tb_graph, "paged_attention_sm100", params)
+        else:
+            self.kn_graph.register_task(tb_graph, "paged_attention", params)
 
     def linear_layer(
         self,
@@ -610,14 +626,16 @@ class PersistentKernel:
         tb_graph.new_input(weight, (0, -1, -1), 1, True)
         tb_graph.new_input(output, (1, -1, -1), -1, True)
         self.kn_graph.customized([input, weight, output], tb_graph)
-        if self.target_cc == 90:
+
+        if self.target_cc == 100:
+            self.kn_graph.register_task(tb_graph, "linear_sm100")
+        elif self.target_cc == 90:
             if weight.dim(0) // grid_dim[0] <= 64:
                 self.kn_graph.register_task(tb_graph, "linear_swapAB_hopper")
                 # self.kn_graph.register_task(tb_graph, "linear_cutlass_hopper")
             else:
                 self.kn_graph.register_task(tb_graph, "linear_swapAB_hopper")
         elif self.target_cc == 80:
-
             self.kn_graph.register_task(tb_graph, "linear")
         else:
             assert False
@@ -642,7 +660,10 @@ class PersistentKernel:
         tb_graph.new_input(residual, (1, -1, -1), -1, True)
         tb_graph.new_input(output, (1, -1, -1), -1, True)
         self.kn_graph.customized([input, weight, residual, output], tb_graph)
-        if self.target_cc == 90:
+        
+        if self.target_cc == 100:
+            self.kn_graph.register_task(tb_graph, "linear_with_residual_sm100")
+        elif self.target_cc == 90:
             if weight.dim(0) // grid_dim[0] <= 64:
                 # self.kn_graph.register_task(tb_graph, "linear_cutlass_with_residual_hopper")
                 self.kn_graph.register_task(tb_graph, "linear_swapAB_with_residual_hopper")
@@ -665,12 +686,15 @@ class PersistentKernel:
         assert input.num_dims == 2  # (batch_size, hidden_size)
         assert buffer.num_dims == 3  # (world_size, batch_size, hidden_size)
         assert output.num_dims == 2  # (batch_size, hidden_size)
+        # params[0]: num_gpus
+        # params[1]: my_gpu_id
+        params = [self.world_size, self.mpi_rank]
         tb_graph = TBGraph(CyTBGraph(grid_dim, block_dim, 1, 64))
         tb_graph.new_input(input, (1, -1, -1), -1, True)
         tb_graph.new_input(buffer, (2, -1, -1), -1, True)
         tb_graph.new_input(output, (1, -1, -1), -1, True)
         self.kn_graph.customized([input, buffer, output], tb_graph)
-        self.kn_graph.register_task(tb_graph, "allreduce")
+        self.kn_graph.register_task(tb_graph, "allreduce", params)
 
     def silu_mul_layer(
         self,
@@ -686,7 +710,7 @@ class PersistentKernel:
         tb_graph.new_input(input, (1, -1, -1), 1, True)
         tb_graph.new_input(output, (1, -1, -1), 1, True)
         self.kn_graph.customized([input, output], tb_graph)
-        self.kn_graph.register_task(tb_graph, "silu_mul_hopper" if self.target_cc == 90 else "silu_mul")
+        self.kn_graph.register_task(tb_graph, "silu_mul" if self.target_cc == 90 else "silu_mul")
 
     def silu_mul_linear_with_residual_layer(
         self,
@@ -741,7 +765,10 @@ class PersistentKernel:
         tb_graph.new_input(output_value, (1, 0, -1), -1, True)
         tb_graph.new_input(output_index, (1, 0, -1), -1, True)
         self.kn_graph.customized([input, output_value, output_index], tb_graph)
-        self.kn_graph.register_task(tb_graph, "argmax_partial", [num_tasks])
+        if self.target_cc == 100:
+            self.kn_graph.register_task(tb_graph, "argmax_partial_sm100", [num_tasks])
+        else:
+            self.kn_graph.register_task(tb_graph, "argmax_partial", [num_tasks])
 
     def argmax_reduce_layer(
         self,
@@ -761,9 +788,14 @@ class PersistentKernel:
         tb_graph.new_input(input_index, (1, 0, -1), -1, True)
         tb_graph.new_input(output, (0, 1, -1), -1, True) #TODO: Make sure the output map is expected
         self.kn_graph.customized([input_value, input_index, output], tb_graph)
-        self.kn_graph.register_task(
-            tb_graph, "argmax_reduce", [self.argmax_partial_output_size]
-        )
+        if self.target_cc == 100:
+            self.kn_graph.register_task(
+                tb_graph, "argmax_reduce_sm100", [self.argmax_partial_output_size]
+            )
+        else:
+            self.kn_graph.register_task(
+                tb_graph, "argmax_reduce", [self.argmax_partial_output_size]
+            )
         
     def find_ngram_partial_layer(
         self, input: DTensor, output: DTensor, grid_dim: tuple, block_dim: tuple, ngram_size: int = 3):
@@ -1026,6 +1058,7 @@ class PersistentKernel:
             num_workers=self.num_workers,
             num_local_schedulers=self.num_local_schedulers, 
             num_remote_schedulers=self.num_remote_schedulers,
+            use_cutlass_kernel=self.use_cutlass_kernel,
         )
         print("Compiling megakernel using the following command line:")
         print(cc_cmd)

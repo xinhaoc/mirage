@@ -14,13 +14,12 @@
  */
 
 #include "profiler.h"
-#include "tasks/copy_sm80.cuh"
+#include "tasks/common/copy_sm80.cuh"
 #ifdef MPK_ENABLE_TMA
 #include "tma.cuh"
 #endif
+#include "mpk_atoms.cuh"
 #include "runtime_header.h"
-#include "tasks/kernel.h"
-#include "utils.cuh"
 #ifdef USE_NVSHMEM
 #include <mpi.h>
 #include <nvshmem.h>
@@ -29,6 +28,14 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+
+#if defined(MIRAGE_GRACE_HOPPER)
+#include "tasks/hopper/task_header.cuh"
+#elif defined(MIRAGE_GRACE_BLACKWELL)
+#include "tasks/blackwell/task_header.cuh"
+#else
+#include "tasks/ampere/task_header.cuh"
+#endif
 
 using bfloat16 = type::bfloat16_t;
 using namespace mirage::runtime;
@@ -40,6 +47,9 @@ using namespace kernel;
 // #define MPK_PAGE_SIZE 64
 
 #if defined(MIRAGE_GRACE_HOPPER)
+#define WORKER_NUM_THREADS 256
+#define SINGLE_KERNEL_NUM_THREADS 256
+#elif defined(MIRAGE_GRACE_BLACKWELL)
 #define WORKER_NUM_THREADS 256
 #define SINGLE_KERNEL_NUM_THREADS 256
 #else
@@ -212,35 +222,36 @@ __device__ __forceinline__ bool
     }
   }
 
-  // Add a new prefill request
-  if (num_reqs < MPK_MAX_NUM_BATCHED_REQUESTS &&
-      num_tokens < MPK_MAX_NUM_BATCHED_TOKENS) {
+  // Add new prefill requests until we reach capacity
+  while (num_reqs < MPK_MAX_NUM_BATCHED_REQUESTS &&
+         num_tokens < MPK_MAX_NUM_BATCHED_TOKENS) {
     int next_request_id = *config.next_request_id;
-    if (next_request_id < config.total_num_requests) {
-      config.request_ids[num_reqs] = next_request_id;
-      config.qo_indptr_buffer[num_reqs] = num_tokens;
-      config.paged_kv_indptr_buffer[num_reqs] = num_pages;
-      // Prefill request
-      int num_new_tokens = min(config.prompt_length[next_request_id],
-                               MPK_MAX_NUM_BATCHED_TOKENS - num_tokens);
-      // Move tokens to input tokens
-      for (int j = 0; j < num_new_tokens; j++) {
-        config.input_tokens[num_tokens + j] =
-            config.tokens[next_request_id * MPK_MAX_SEQ_LENGTH + j];
-      }
-      int num_new_pages = (num_new_tokens + MPK_PAGE_SIZE - 1) / MPK_PAGE_SIZE;
-      config.paged_kv_last_page_len_buffer[num_reqs] =
-          num_new_tokens % MPK_PAGE_SIZE;
-      for (int j = 0; j < num_new_pages; j++) {
-        config.paged_kv_indices_buffer[num_pages + j] =
-            config.page_queue[page_queue_head % MPK_MAX_NUM_PAGES];
-        page_queue_head++;
-      }
-      num_tokens += num_new_tokens;
-      num_pages += num_new_pages;
-      num_reqs++;
-      *config.next_request_id = next_request_id + 1;
+    if (next_request_id >= config.total_num_requests) {
+      break;
     }
+    config.request_ids[num_reqs] = next_request_id;
+    config.qo_indptr_buffer[num_reqs] = num_tokens;
+    config.paged_kv_indptr_buffer[num_reqs] = num_pages;
+    // Prefill request
+    int num_new_tokens = min(config.prompt_length[next_request_id],
+                             MPK_MAX_NUM_BATCHED_TOKENS - num_tokens);
+    // Move tokens to input tokens
+    for (int j = 0; j < num_new_tokens; j++) {
+      config.input_tokens[num_tokens + j] =
+          config.tokens[next_request_id * MPK_MAX_SEQ_LENGTH + j];
+    }
+    int num_new_pages = (num_new_tokens + MPK_PAGE_SIZE - 1) / MPK_PAGE_SIZE;
+    config.paged_kv_last_page_len_buffer[num_reqs] =
+        num_new_tokens % MPK_PAGE_SIZE;
+    for (int j = 0; j < num_new_pages; j++) {
+      config.paged_kv_indices_buffer[num_pages + j] =
+          config.page_queue[page_queue_head % MPK_MAX_NUM_PAGES];
+      page_queue_head++;
+    }
+    num_tokens += num_new_tokens;
+    num_pages += num_new_pages;
+    num_reqs++;
+    *config.next_request_id = next_request_id + 1;
   }
 
   // Step 4: Update all unused requests slots
@@ -560,10 +571,6 @@ __device__ __forceinline__ void execute_worker(RuntimeConfig config) {
       // Do nothing
 #ifdef USE_NVSHMEM
     } else if (task_desc->task_type == TASK_NVSHMEM_COPY) {
-      size_t size_in_bytes = 2;
-      for (int i = 0; i < task_desc.inputs[0].num_dims; i++) {
-        size_in_bytes *= task_desc.inputs[0].dim[i];
-      }
       size_t event_index = get_event_position_index(task_desc->trigger_event);
       int gpu_id = static_cast<int>(get_event_gpu_id(task_desc->trigger_event));
       assert(gpu_id < config.num_gpus);
@@ -571,23 +578,11 @@ __device__ __forceinline__ void execute_worker(RuntimeConfig config) {
       nvshmemx_putmem_signal_block(
           task_desc->output_ptrs[0],
           task_desc->input_ptrs[0],
-          size_in_bytes,
+          task_desc->xfer_size_in_bytes,
           reinterpret_cast<uint64_t *>(&config.all_event_counters[event_index]),
           1 /*signal*/,
           NVSHMEM_SIGNAL_ADD,
           gpu_id);
-    } else if (task_desc.task_type == TASK_REDUCE) {
-      // Currently support 2D reduction, buffer has an extra world_size dim
-      // assert(task_desc.inputs[0].num_dims == 2);
-      // assert(task_desc.inputs[1].num_dims == 3);
-      kernel::reduction_kernel<bfloat16>(task_desc->input_ptrs[0],
-                                         task_desc->input_ptrs[1],
-                                         task_desc->output_ptrs[0],
-                                         config.num_gpus,
-                                         config.my_gpu_id,
-                                         task_desc->inputs[0].dim[0],
-                                         task_desc->inputs[0].dim[1],
-                                         task_desc->inputs[0].stride[0]);
 #endif
     } else {
 #ifdef MPK_ENABLE_VERBOSE
@@ -1038,16 +1033,6 @@ extern "C" void init_persistent_kernel(std::vector<void *> meta_tensors,
 
   // Initialize nvshmem
   cudaSetDevice(my_rank);
-#if defined(MODE_OFFLINE) || defined(MODE_ONLINE)
-  global_runtime_config.request_ids =
-      gpu_malloc<int>(sizeof(int) * (MPK_MAX_NUM_BATCHED_REQUESTS + 1));
-  global_runtime_config.next_request_id = gpu_malloc<int>(sizeof(int));
-  global_runtime_config.page_queue =
-      gpu_malloc<int>(MPK_MAX_NUM_PAGES * sizeof(int));
-  global_runtime_config.page_queue_head = gpu_malloc<int>(sizeof(int));
-  global_runtime_config.page_queue_tail = gpu_malloc<int>(sizeof(int));
-  global_runtime_config.total_num_requests = total_num_requests;
-#endif
 
 #ifdef USE_NVSHMEM
   MPI_Comm mpi_comm = MPI_COMM_WORLD;
@@ -1063,6 +1048,17 @@ extern "C" void init_persistent_kernel(std::vector<void *> meta_tensors,
   int mype = 0;
   int npes = 1;
 #endif
+
+#if defined(MODE_OFFLINE) || defined(MODE_ONLINE)
+  global_runtime_config.request_ids =
+      gpu_malloc<int>(sizeof(int) * (MPK_MAX_NUM_BATCHED_REQUESTS + 1));
+  global_runtime_config.next_request_id = gpu_malloc<int>(sizeof(int));
+  global_runtime_config.page_queue =
+      gpu_malloc<int>(MPK_MAX_NUM_PAGES * sizeof(int));
+  global_runtime_config.page_queue_head = gpu_malloc<int>(sizeof(int));
+  global_runtime_config.page_queue_tail = gpu_malloc<int>(sizeof(int));
+  global_runtime_config.total_num_requests = total_num_requests;
+#endif
   global_runtime_config.per_worker_queue_len = 1024;
   global_runtime_config.per_sched_queue_len = 1024;
   global_runtime_config.num_gpus = npes;
@@ -1077,6 +1073,14 @@ extern "C" void init_persistent_kernel(std::vector<void *> meta_tensors,
   std::vector<TaskDesc> all_tasks;
   for (auto const &ft : all_fulltasks) {
     TaskDesc task_desc(ft);
+    // Reinterpret part of TaskDesc to save xfer_size information
+    if (ft.task_type == TASK_NVSHMEM_COPY) {
+      int size_in_bytes = 2;
+      for (int i = 0; i < ft.inputs[0].num_dims; i++) {
+        size_in_bytes *= ft.inputs[0].dim[i];
+      }
+      task_desc.xfer_size_in_bytes = size_in_bytes;
+    }
     all_tasks.push_back(task_desc);
   }
 
@@ -1207,6 +1211,7 @@ extern "C" void launch_persistent_kernel() {
 
   if (global_runtime_config.split_worker_scheduler) {
     printf("worker kernel & scheduler kernel\n");
+    printf("smem size: %d\n", MAX_DYNAMIC_SHARED_MEMORY_SIZE);
 
     // Launcher worker & scheduler kernel
     cudaFuncSetAttribute(worker_kernel,
