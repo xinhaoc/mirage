@@ -1,5 +1,5 @@
 // #include "include/mirage/persistent_kernel/tasks/linear.cuh"
-#define MEASURE 0
+#define MEASURE 1
 #include "include/mirage/persistent_kernel/tasks/linear_cutlass.cuh"
 #include "include/mirage/persistent_kernel/tasks/linear_cutlass_split.cuh"
 
@@ -10,7 +10,7 @@ static constexpr size_t SM_COUNT = 96;
 static constexpr size_t OUTPUT_SIZE = 64;
 static constexpr size_t REDUCTION_SIZE = 1024;
 static constexpr size_t BATCH_SIZE = 16;
-static constexpr bool USE_PIPELINE = true;
+static constexpr bool USE_PIPELINE = false;
 using bfloat16 = type::bfloat16_t;        // kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(input_ptr_next, weight_ptr_next, smem_next);
 
 __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_t *clock_cycles_mem, size_t *clock_cycles_compute) {
@@ -136,7 +136,7 @@ int main() {
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
   cudaEventRecord(start);
-  main_kernel<<<dim3(sm_count, 1, 21),
+  main_kernel<<<dim3(sm_count, 1, 1),
                       dim3(SINGLE_KERNEL_THREADS, 1, 1),
                       MAX_SHARE_MEMORY_SIZE /*smem*/>>>(d_input, d_weight, d_output, d_clock_cycles_mem, d_clock_cycles_compute);
   cudaEventRecord(stop);
