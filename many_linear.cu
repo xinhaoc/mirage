@@ -1,7 +1,11 @@
 // #include "include/mirage/persistent_kernel/tasks/linear.cuh"
-#define MEASURE 1
+#define MEASURE 0
 #include "include/mirage/persistent_kernel/tasks/linear_cutlass.cuh"
 #include "include/mirage/persistent_kernel/tasks/linear_cutlass_split.cuh"
+#include <vector>
+#include <array>
+#include <algorithm>
+#include <numeric>
 
 static constexpr int SINGLE_KERNEL_THREADS = 128;
 static constexpr int MAX_SHARE_MEMORY_SIZE = 160 * 1024;
@@ -11,13 +15,18 @@ static constexpr size_t OUTPUT_SIZE = 64;
 static constexpr size_t REDUCTION_SIZE = 1024;
 static constexpr size_t BATCH_SIZE = 16;
 static constexpr bool USE_PIPELINE = false;
+static constexpr size_t NUM_TRIALS = 1;
+static constexpr size_t NUM_WARMUP_TRIALS = 5;
 using bfloat16 = type::bfloat16_t;        // kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(input_ptr_next, weight_ptr_next, smem_next);
 
 __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_t *clock_cycles_mem, size_t *clock_cycles_compute) {
     extern __shared__ char smem[];
   
     if constexpr (USE_PIPELINE) {
+      size_t time_start_prefetch = clock64();
       kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(d_input, d_weight, smem, nullptr);
+      size_t time_end_prefetch = clock64();
+
       for (size_t layer_num = 0; layer_num < NUM_LAYERS; layer_num++) {
         char * shared_mem_start = smem + (MAX_SHARE_MEMORY_SIZE / 2) * (layer_num % 2);
 
@@ -130,29 +139,47 @@ int main() {
   cudaFuncSetAttribute(main_kernel,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         MAX_SHARE_MEMORY_SIZE);
-  
 
-  cudaEvent_t start, stop;
-  cudaEventCreate(&start);
-  cudaEventCreate(&stop);
-  cudaEventRecord(start);
-  main_kernel<<<dim3(sm_count, 1, 1),
+  for (size_t i = 0; i < NUM_WARMUP_TRIALS; ++i) {
+    main_kernel<<<dim3(sm_count, 1, 1),
                       dim3(SINGLE_KERNEL_THREADS, 1, 1),
                       MAX_SHARE_MEMORY_SIZE /*smem*/>>>(d_input, d_weight, d_output, d_clock_cycles_mem, d_clock_cycles_compute);
-  cudaEventRecord(stop);
-  cudaEventSynchronize(stop);
-  cudaError_t err = cudaDeviceSynchronize();
-  if (err != cudaSuccess) {
-    printf("CUDA kernel launch error: %s\n", cudaGetErrorString(err));
+  }
+  std::array<float, NUM_TRIALS> all_elapsed_ms;
+  for (size_t i = 0; i < NUM_TRIALS; ++i) {
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
+    main_kernel<<<dim3(sm_count, 1, 1),
+                      dim3(SINGLE_KERNEL_THREADS, 1, 1),
+                      MAX_SHARE_MEMORY_SIZE /*smem*/>>>(d_input, d_weight, d_output, d_clock_cycles_mem, d_clock_cycles_compute);
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    cudaError_t err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+      printf("CUDA kernel launch error: %s\n", cudaGetErrorString(err));
+    }
+    float elapsed_ms;
+    cudaEventElapsedTime(&elapsed_ms, start, stop);
+    all_elapsed_ms[i] = elapsed_ms;
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
   }
 
-  // Stop the timer and print the time
-  float elapsed_ms;
-  cudaEventElapsedTime(&elapsed_ms, start, stop);
-  printf("Time taken: %f ms\n", elapsed_ms);
-
-  cudaEventDestroy(start);
-  cudaEventDestroy(stop);
+  // Process the elapsed times
+  float min_elapsed_ms = *std::min_element(all_elapsed_ms.begin(), all_elapsed_ms.end());
+  float max_elapsed_ms = *std::max_element(all_elapsed_ms.begin(), all_elapsed_ms.end());
+  float average_elapsed_ms = std::accumulate(all_elapsed_ms.begin(), all_elapsed_ms.end(), 0.0f) / NUM_TRIALS;
+  float std_elapsed_ms = std::sqrt(std::accumulate(all_elapsed_ms.begin(), all_elapsed_ms.end(), 0.0f, [average_elapsed_ms](float acc, float x) { return acc + (x - average_elapsed_ms) * (x - average_elapsed_ms); }) / NUM_TRIALS);
+  printf("Min elapsed time: %f ms\n", min_elapsed_ms);
+  printf("Max elapsed time: %f ms\n", max_elapsed_ms);
+  printf("Average elapsed time: %f ms\n", average_elapsed_ms);
+  printf("Standard deviation: %f ms (%.2f%%)\n", std_elapsed_ms, std_elapsed_ms / average_elapsed_ms * 100);
+  // print all the elapsed times
+  for (size_t i = 0; i < NUM_TRIALS; ++i) {
+    printf("Elapsed time %zu: %f ms, ", i, all_elapsed_ms[i]);
+  }
 
   // Output the output tensors to a file for verification
   cudaMemcpy(h_output, d_output, output_size, cudaMemcpyDeviceToHost);

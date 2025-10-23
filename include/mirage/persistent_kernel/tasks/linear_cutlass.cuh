@@ -293,18 +293,23 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
       int ismem_write_stage = 0;
 
       //warm up
+      size_t time1, time2, time3, time4, time5;
       size_t start_warmup = clock64();
     #pragma unroll
       for (int istage = 0; istage < kStage - 1; ++istage) {
+        time1 = clock64();
         // cute::copy(g2s_tiled_copy_a, tAgA_copy(_, _, _, istage),
         //           tAsA_copy(_, _, _, istage));
         // cute::copy(g2s_tiled_copy_b, tBgB_copy(_, _, _, istage),
         //           tBsB_copy(_, _, _, istage));
         cute::copy_if(g2s_tiled_copy_a, tApA, tAgA_copy(_, _, _, istage),
                   tAsA_copy(_, _, _, istage));
+        time2 = clock64();
         cute::copy_if(g2s_tiled_copy_b, tBpB, tBgB_copy(_, _, _, istage),
                   tBsB_copy(_, _, _, istage));
+        time3 = clock64();
         cp_async_fence();
+        time4 = clock64();
 
         ++itile_to_read;
         ++ismem_write_stage;
@@ -378,7 +383,9 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
         l_clock_cycles_mem[itile] = end_copy_async_wait - start_copy_async_wait;
         l_clock_cycles_mem_launch[itile] = end_copy_async_launch - start_copy_async_launch;
       } // itile
-
+      l_clock_cycles_compute[0] = time2 - time1;
+      l_clock_cycles_compute[1] = time3 - time2;
+      l_clock_cycles_compute[2] = time4 - time3;
       l_clock_cycles_compute[4] = end_warmup - start_warmup;
       l_clock_cycles_compute[5] = end_warmup_wait_sync - start_warmup_wait;
 

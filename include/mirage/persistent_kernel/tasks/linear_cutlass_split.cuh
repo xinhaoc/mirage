@@ -46,7 +46,7 @@ __device__ __forceinline__ void linear_prefetch(void const *input_ptr,
                                               char * smem,
                                               size_t *l_clock_cycles_compute
                                             ) {
-  size_t time1, time2, time3, time4;
+  size_t time1, time2, time3, time4, time5;
   time1 = clock64();
   using T = std::conditional_t<std::is_same_v<T_, bfloat16>, cute::bfloat16_t, float>; // A temporary hack
   constexpr int TILE_SIZE = 128;
@@ -139,20 +139,25 @@ __device__ __forceinline__ void linear_prefetch(void const *input_ptr,
         tBpB(in,0) = elem_less(get<0>(tBcB(0, in, 0, 0)), shape<0>(B));
       }
 
-      time2 = clock64();
       // Prefetch warmup: load initial stages into shared memory
+      size_t time_start_launch = clock64();
       #pragma unroll
       for (int istage = 0; istage < kStage - 1; ++istage) {
+        time2 = clock64();
         cute::copy_if(g2s_tiled_copy_a, tApA, tAgA_copy(_, _, _, istage),
                   tAsA_copy(_, _, _, istage));
+        time3 = clock64();
         cute::copy_if(g2s_tiled_copy_b, tBpB, tBgB_copy(_, _, _, istage),
                   tBsB_copy(_, _, _, istage));
+        time4 = clock64();
         cp_async_fence();
+        time5 = clock64();
       }
-      time3 = clock64();
       if (l_clock_cycles_compute != nullptr) {
-        l_clock_cycles_compute[0] = time2 - time1;
-        l_clock_cycles_compute[1] = time3 - time2;
+        l_clock_cycles_compute[0] = time3 - time2;
+        l_clock_cycles_compute[1] = time4 - time3;
+        l_clock_cycles_compute[2] = time5 - time4;
+        l_clock_cycles_compute[3] = time_start_launch - time1;
       }
   
 }
