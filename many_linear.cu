@@ -14,8 +14,8 @@ static constexpr size_t SM_COUNT = 96;
 static constexpr size_t OUTPUT_SIZE = 64;
 static constexpr size_t REDUCTION_SIZE = 1024;
 static constexpr size_t BATCH_SIZE = 16;
-static constexpr bool USE_PIPELINE = false;
-static constexpr size_t NUM_TRIALS = 1;
+static constexpr bool USE_PIPELINE = true;
+static constexpr size_t NUM_TRIALS = 100;
 static constexpr size_t NUM_WARMUP_TRIALS = 5;
 using bfloat16 = type::bfloat16_t;        // kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(input_ptr_next, weight_ptr_next, smem_next);
 
@@ -24,7 +24,7 @@ __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_
   
     if constexpr (USE_PIPELINE) {
       size_t time_start_prefetch = clock64();
-      kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(d_input, d_weight, smem, nullptr);
+      kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(d_input, d_weight, smem);
       size_t time_end_prefetch = clock64();
 
       for (size_t layer_num = 0; layer_num < NUM_LAYERS; layer_num++) {
@@ -47,11 +47,7 @@ __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_
         false,
         shared_mem_start,
         layer_num < NUM_LAYERS - 1,
-        input_ptr_next,
-        weight_ptr_next,
-        smem_next,
-        clock_cycles_mem + layer_num * (REDUCTION_SIZE / 128),
-        clock_cycles_compute + layer_num * (REDUCTION_SIZE / 128)
+        smem_next
         );
 
       }
@@ -69,9 +65,7 @@ __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_
         nullptr,
         output_ptr,
         BATCH_SIZE,
-        false,
-        clock_cycles_mem + layer_num * (REDUCTION_SIZE / 128),
-        clock_cycles_compute + layer_num * (REDUCTION_SIZE / 128)
+        false
         );
       }
     }

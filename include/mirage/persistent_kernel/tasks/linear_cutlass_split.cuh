@@ -43,11 +43,8 @@ template <typename T_,
           int PIPE_MAX = 3>
 __device__ __forceinline__ void linear_prefetch(void const *input_ptr,
                                               void const *weight_ptr,
-                                              char * smem,
-                                              size_t *l_clock_cycles_compute
-                                            ) {
-  size_t time1, time2, time3, time4, time5;
-  time1 = clock64();
+                                              char * smem
+                                              ) {
   using T = std::conditional_t<std::is_same_v<T_, bfloat16>, cute::bfloat16_t, float>; // A temporary hack
   constexpr int TILE_SIZE = 128;
   constexpr int kSmemLayoutCBatch = 1;
@@ -140,24 +137,13 @@ __device__ __forceinline__ void linear_prefetch(void const *input_ptr,
       }
 
       // Prefetch warmup: load initial stages into shared memory
-      size_t time_start_launch = clock64();
       #pragma unroll
       for (int istage = 0; istage < kStage - 1; ++istage) {
-        time2 = clock64();
         cute::copy_if(g2s_tiled_copy_a, tApA, tAgA_copy(_, _, _, istage),
                   tAsA_copy(_, _, _, istage));
-        time3 = clock64();
         cute::copy_if(g2s_tiled_copy_b, tBpB, tBgB_copy(_, _, _, istage),
                   tBsB_copy(_, _, _, istage));
-        time4 = clock64();
         cp_async_fence();
-        time5 = clock64();
-      }
-      if (l_clock_cycles_compute != nullptr) {
-        l_clock_cycles_compute[0] = time3 - time2;
-        l_clock_cycles_compute[1] = time4 - time3;
-        l_clock_cycles_compute[2] = time5 - time4;
-        l_clock_cycles_compute[3] = time_start_launch - time1;
       }
   
 }
@@ -178,12 +164,12 @@ __device__ __noinline__ void linear_main(void const *input_ptr,
                                               bool residual,
                                               char* smem,
                                               bool prefetch_next,
-                                              void const* input_ptr_next,
-                                              void const* weight_ptr_next,
-                                              char* smem_next,
-                                              size_t *clock_cycles_mem,
-                                              size_t *clock_cycles_compute
-                                              ) {
+                                              char* smem_next
+                                              ){
+
+  void const* input_ptr_next = (char*) input_ptr + BATCH_SIZE * REDUCTION_SIZE;
+  void const* weight_ptr_next = (char*) weight_ptr + REDUCTION_SIZE * OUTPUT_SIZE * 96;
+
 // template <typename Config>
 // __global__ void /* __launch_bounds__(128, 1) */
 // gemm_multi_stage(void *Dptr, const void *Aptr, const void *Bptr, const void *Rptr, int m, int n, int k) {
@@ -262,10 +248,6 @@ __device__ __noinline__ void linear_main(void const *input_ptr,
   auto cA = make_identity_tensor(shape(A));   // (m,k) -> (m,k)
   auto cB = make_identity_tensor(shape(B));   // (n,k) -> (n,k)
   auto cC = make_identity_tensor(shape(D));  // (m,n) -> (m,n)
-
-  size_t l_clock_cycles_mem[REDUCTION_SIZE / kTileK];
-  size_t l_clock_cycles_compute[REDUCTION_SIZE / kTileK];
-  size_t l_clock_cycles_mem_launch[REDUCTION_SIZE / kTileK];
 
   #pragma unroll
   for (int m_iter = 0; m_iter < LoopM; ++m_iter) {
@@ -426,11 +408,8 @@ __device__ __noinline__ void linear_main(void const *input_ptr,
 
 
       //TODO: cp_async_wait later?
-      size_t start_warmup_wait = clock64();
       cp_async_wait<kStage - 2>();
-      size_t end_warmup_wait = clock64();
       __syncthreads();
-      size_t end_warmup_wait_sync = clock64();
 
       int ik = 0;
       cute::copy(s2r_tiled_copy_a, tAsA(_, _, ik, ismem_read_stage), tCrA_view(_, _, ik));
@@ -441,17 +420,12 @@ __device__ __noinline__ void linear_main(void const *input_ptr,
 
     #pragma unroll 1
       for (int itile = 0; itile < ntile; ++itile) {
-        size_t start_gemm, end_gemm;
-        size_t start_copy_async_wait, end_copy_async_wait;
-        size_t start_copy_async_launch, end_copy_async_launch;
     #pragma unroll
         for (int ik = 0; ik < nk; ++ik) {
           int ik_next = (ik + 1) % nk;
 
           if (ik == nk - 1) {
-            start_copy_async_wait = clock64();
             cp_async_wait<kStage - 2>();
-            end_copy_async_wait = clock64();
             __syncthreads();
 
             ismem_read_stage = (ismem_read_stage + 1) % kStage;
@@ -464,7 +438,6 @@ __device__ __noinline__ void linear_main(void const *input_ptr,
 
           if (ik == 0) {
             if (itile_to_read < ntile) {
-              start_copy_async_launch = clock64();
               // cute::copy(g2s_tiled_copy_a, tAgA_copy(_, _, _, itile_to_read),
               //           tAsA_copy(_, _, _, ismem_write_stage));
               // cute::copy(g2s_tiled_copy_b, tBgB_copy(_, _, _, itile_to_read),
@@ -476,35 +449,20 @@ __device__ __noinline__ void linear_main(void const *input_ptr,
 
               ++itile_to_read;
               ismem_write_stage = (ismem_write_stage + 1) % kStage;
-              end_copy_async_launch = clock64();
             }
 
             cp_async_fence();
           }
-
-          start_gemm = clock64();
           cute::gemm(tiled_mma, tCrD, tCrA(_, _, ik), tCrB(_, _, ik), tCrD);
-          end_gemm = clock64();
         } // ik
-
-        l_clock_cycles_compute[itile] = end_gemm - start_gemm;
-        l_clock_cycles_mem[itile] = end_copy_async_wait - start_copy_async_wait;
-        l_clock_cycles_mem_launch[itile] = end_copy_async_launch - start_copy_async_launch;
       } // itile
       size_t start_warmup, end_warmup;
       if (prefetch_next) {
-        start_warmup = clock64();
-        linear_prefetch<T_, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, O_STRIDE, PIPE_MAX>(input_ptr_next, weight_ptr_next, smem_next, l_clock_cycles_compute);
-        end_warmup = clock64();
+        linear_prefetch<T_, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, O_STRIDE, PIPE_MAX>(input_ptr_next, weight_ptr_next, smem_next);
       } else {
         end_warmup = 707;
         start_warmup = 0;
       }
-
-
-      l_clock_cycles_compute[4] = end_warmup - start_warmup;
-      l_clock_cycles_compute[5] = end_warmup_wait_sync - start_warmup_wait;
-
 
 
       // Epilogue: convert float accumulator result back to bfloat16_t and write back
@@ -558,17 +516,6 @@ __device__ __noinline__ void linear_main(void const *input_ptr,
     } // n_iter < kLoopN 2 
   } // m_iter < LoopM 1
 
-  #if MEASURE
-    if (threadIdx.x == 6 && blockIdx.x == 12) {
-        for (int i = 0; i < REDUCTION_SIZE / kTileK; ++i) {
-        if (i % 2 == 0) {
-            clock_cycles_mem[i] = l_clock_cycles_mem[i];
-        } else {
-            clock_cycles_mem[i] = l_clock_cycles_mem_launch[i];
-        }
-        clock_cycles_compute[i] = l_clock_cycles_compute[i];
-        }
-    }
-  #endif
+
 }
 }
