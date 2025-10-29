@@ -164,11 +164,13 @@ __device__ __noinline__ void linear_main(void const *input_ptr,
                                               bool residual,
                                               char* smem,
                                               bool prefetch_next,
-                                              char* smem_next
+                                              char* smem_next,
+                                              void const* input_ptr_next,
+                                              void const* weight_ptr_next
                                               ){
 
-  void const* input_ptr_next = (char*) input_ptr + BATCH_SIZE * REDUCTION_SIZE;
-  void const* weight_ptr_next = (char*) weight_ptr + REDUCTION_SIZE * OUTPUT_SIZE * 96;
+  // void const* input_ptr_next = (char*) input_ptr + BATCH_SIZE * REDUCTION_SIZE;
+  // void const* weight_ptr_next = (char*) weight_ptr + REDUCTION_SIZE * OUTPUT_SIZE * 96;
 
 // template <typename Config>
 // __global__ void /* __launch_bounds__(128, 1) */

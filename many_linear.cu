@@ -6,6 +6,7 @@
 #include <array>
 #include <algorithm>
 #include <numeric>
+#include <cuda.h>
 
 static constexpr int SINGLE_KERNEL_THREADS = 128;
 static constexpr int MAX_SHARE_MEMORY_SIZE = 160 * 1024;
@@ -15,7 +16,7 @@ static constexpr size_t OUTPUT_SIZE = 64;
 static constexpr size_t REDUCTION_SIZE = 1024;
 static constexpr size_t BATCH_SIZE = 16;
 static constexpr bool USE_PIPELINE = true;
-static constexpr size_t NUM_TRIALS = 100;
+static constexpr size_t NUM_TRIALS = 1;
 static constexpr size_t NUM_WARMUP_TRIALS = 5;
 using bfloat16 = type::bfloat16_t;        // kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(input_ptr_next, weight_ptr_next, smem_next);
 
@@ -47,7 +48,9 @@ __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_
         false,
         shared_mem_start,
         layer_num < NUM_LAYERS - 1,
-        smem_next
+        smem_next,
+        input_ptr_next,
+        weight_ptr_next
         );
 
       }
@@ -85,6 +88,27 @@ int main() {
   int sm_count;
   cudaDeviceGetAttribute(&sm_count, cudaDevAttrMultiProcessorCount, device);
   printf("a single persistent kernel\n");
+
+  // CUdevice cu_device;
+  // CUcontext cu_context;
+  // CUmodule mod;
+  // CUfunction main_kernel;
+  // cuInit(0);
+  // cuDeviceGet(&cu_device, 0);
+  // cuCtxCreate(&cu_context, 0, cu_device);
+
+
+  // auto result = cuModuleLoad(&mod, "many_linear.ptx");
+  // if (result != CUDA_SUCCESS) {
+  //   printf("Error loading module: %d\n", result);
+  //   return 1;
+  // }
+  // auto result2 = cuModuleGetFunction(&main_kernel, mod, "_Z11main_kernelPvS_S_PmS0_");
+  // if (result2 != CUDA_SUCCESS) {
+  //   printf("Error getting function: %d\n", result2);
+  //   return 1;
+  // }
+
 
   // Allocate device memory for d_input, d_weight, d_output and fill with ones
 
@@ -130,11 +154,35 @@ int main() {
   cudaMalloc(&d_clock_cycles_compute, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t));
     
   // Launcher persistent kernel
-  cudaFuncSetAttribute(main_kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        MAX_SHARE_MEMORY_SIZE);
+  // cudaFuncSetAttribute(main_kernel,
+  //                       cudaFuncAttributeMaxDynamicSharedMemorySize,
+  //                       MAX_SHARE_MEMORY_SIZE);
+  
+  bfloat16 **d_input_ptr;
+  bfloat16 **d_weight_ptr;
+  bfloat16 **d_output_ptr;
+  size_t **d_clock_cycles_mem_ptr;
+  size_t **d_clock_cycles_compute_ptr;
+  cudaMalloc(&d_input_ptr, sizeof(bfloat16*));
+  cudaMalloc(&d_weight_ptr, sizeof(bfloat16*));
+  cudaMalloc(&d_output_ptr, sizeof(bfloat16*));
+  cudaMalloc(&d_clock_cycles_mem_ptr, sizeof(size_t*));
+  cudaMalloc(&d_clock_cycles_compute_ptr, sizeof(size_t*));
+  cudaMemcpy(d_input_ptr, &d_input, sizeof(bfloat16*), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_weight_ptr, &d_weight, sizeof(bfloat16*), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_output_ptr, &d_output, sizeof(bfloat16*), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_clock_cycles_mem_ptr, &d_clock_cycles_mem, sizeof(size_t*), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_clock_cycles_compute_ptr, &d_clock_cycles_compute, sizeof(size_t*), cudaMemcpyHostToDevice);
 
+
+  void* args[] = {&d_input_ptr, &d_weight_ptr, &d_output_ptr, &d_clock_cycles_mem_ptr, &d_clock_cycles_compute_ptr};
+  // void* args[] = {&d_input, &d_weight, &d_output, &d_clock_cycles_mem, &d_clock_cycles_compute, nullptr};
   for (size_t i = 0; i < NUM_WARMUP_TRIALS; ++i) {
+    // auto result = cuLaunchKernel(main_kernel, sm_count, 1, 1, SINGLE_KERNEL_THREADS, 1, 1, 48 * 1024, 0, args, nullptr);
+    // if (result != CUDA_SUCCESS) {
+    //   printf("Error launching kernel: %d\n", result);
+    //   return 1;
+    // }
     main_kernel<<<dim3(sm_count, 1, 1),
                       dim3(SINGLE_KERNEL_THREADS, 1, 1),
                       MAX_SHARE_MEMORY_SIZE /*smem*/>>>(d_input, d_weight, d_output, d_clock_cycles_mem, d_clock_cycles_compute);
@@ -145,18 +193,27 @@ int main() {
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);
+    auto start_time = std::chrono::high_resolution_clock::now();
     main_kernel<<<dim3(sm_count, 1, 1),
                       dim3(SINGLE_KERNEL_THREADS, 1, 1),
                       MAX_SHARE_MEMORY_SIZE /*smem*/>>>(d_input, d_weight, d_output, d_clock_cycles_mem, d_clock_cycles_compute);
+    // auto result = cuLaunchKernel(main_kernel, sm_count, 1, 1, SINGLE_KERNEL_THREADS, 1, 1, 48 * 1024, 0, args, nullptr);
+    // if (result != CUDA_SUCCESS) {
+    //   printf("Error launching kernel: %d\n", result);
+    //   return 1;
+    // }
+    
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     cudaError_t err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
       printf("CUDA kernel launch error: %s\n", cudaGetErrorString(err));
     }
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
     float elapsed_ms;
     cudaEventElapsedTime(&elapsed_ms, start, stop);
-    all_elapsed_ms[i] = elapsed_ms;
+    all_elapsed_ms[i] = duration.count();
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
   }
@@ -197,4 +254,5 @@ int main() {
   free(h_clock_cycles_compute);
 
 
+  // cuCtxDestroy(cu_context);
 }
