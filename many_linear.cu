@@ -10,11 +10,11 @@
 
 static constexpr int SINGLE_KERNEL_THREADS = 128;
 static constexpr int MAX_SHARE_MEMORY_SIZE = 160 * 1024;
-static constexpr size_t NUM_LAYERS = 30;
+static constexpr size_t NUM_LAYERS = 2;
 static constexpr size_t SM_COUNT = 96;
 static constexpr size_t OUTPUT_SIZE = 64;
-static constexpr size_t REDUCTION_SIZE = 1024;
-static constexpr size_t BATCH_SIZE = 16;
+static constexpr size_t REDUCTION_SIZE = 128;
+static constexpr size_t BATCH_SIZE = 1;
 static constexpr bool USE_PIPELINE = true;
 static constexpr size_t NUM_TRIALS = 1;
 static constexpr size_t NUM_WARMUP_TRIALS = 5;
@@ -153,29 +153,12 @@ int main() {
   cudaMalloc(&d_clock_cycles_mem, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t));
   cudaMalloc(&d_clock_cycles_compute, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t));
     
-  // Launcher persistent kernel
-  // cudaFuncSetAttribute(main_kernel,
-  //                       cudaFuncAttributeMaxDynamicSharedMemorySize,
-  //                       MAX_SHARE_MEMORY_SIZE);
-  
-  bfloat16 **d_input_ptr;
-  bfloat16 **d_weight_ptr;
-  bfloat16 **d_output_ptr;
-  size_t **d_clock_cycles_mem_ptr;
-  size_t **d_clock_cycles_compute_ptr;
-  cudaMalloc(&d_input_ptr, sizeof(bfloat16*));
-  cudaMalloc(&d_weight_ptr, sizeof(bfloat16*));
-  cudaMalloc(&d_output_ptr, sizeof(bfloat16*));
-  cudaMalloc(&d_clock_cycles_mem_ptr, sizeof(size_t*));
-  cudaMalloc(&d_clock_cycles_compute_ptr, sizeof(size_t*));
-  cudaMemcpy(d_input_ptr, &d_input, sizeof(bfloat16*), cudaMemcpyHostToDevice);
-  cudaMemcpy(d_weight_ptr, &d_weight, sizeof(bfloat16*), cudaMemcpyHostToDevice);
-  cudaMemcpy(d_output_ptr, &d_output, sizeof(bfloat16*), cudaMemcpyHostToDevice);
-  cudaMemcpy(d_clock_cycles_mem_ptr, &d_clock_cycles_mem, sizeof(size_t*), cudaMemcpyHostToDevice);
-  cudaMemcpy(d_clock_cycles_compute_ptr, &d_clock_cycles_compute, sizeof(size_t*), cudaMemcpyHostToDevice);
+  // // Launcher persistent kernel
+  cudaFuncSetAttribute(main_kernel,
+                        f,
+                        MAX_SHARE_MEMORY_SIZE);
 
-
-  void* args[] = {&d_input_ptr, &d_weight_ptr, &d_output_ptr, &d_clock_cycles_mem_ptr, &d_clock_cycles_compute_ptr};
+  void* args[] = {&d_input, &d_weight, &d_output, &d_clock_cycles_mem, &d_clock_cycles_compute};
   // void* args[] = {&d_input, &d_weight, &d_output, &d_clock_cycles_mem, &d_clock_cycles_compute, nullptr};
   for (size_t i = 0; i < NUM_WARMUP_TRIALS; ++i) {
     // auto result = cuLaunchKernel(main_kernel, sm_count, 1, 1, SINGLE_KERNEL_THREADS, 1, 1, 48 * 1024, 0, args, nullptr);
@@ -213,7 +196,8 @@ int main() {
     auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
     float elapsed_ms;
     cudaEventElapsedTime(&elapsed_ms, start, stop);
-    all_elapsed_ms[i] = duration.count();
+    // all_elapsed_ms[i] = duration.count();
+    all_elapsed_ms[i] = elapsed_ms;
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
   }

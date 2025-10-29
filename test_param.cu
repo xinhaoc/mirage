@@ -101,7 +101,8 @@ int main() {
     //     d_input1, d_input2, d_output
     // );
     void *params[3] = {&d_input1, &d_input2, &d_output};
-    auto launch_result = cuLaunchKernel(main_kernel, 1, 1, 1, 1, 1, 1, 48 * 1024, NULL, (void**) params, NULL);
+    CUDA_CHECK(cuFuncSetAttribute(main_kernel, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, 160 * 1024));
+    auto launch_result = cuLaunchKernel(main_kernel, 1, 1, 1, 1, 1, 1, 160 * 1024, NULL, (void**) params, NULL);
     if (launch_result != CUDA_SUCCESS) {
         printf("Error launching kernel: %d\n", launch_result);
         return 1;
