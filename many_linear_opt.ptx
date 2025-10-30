@@ -13,7 +13,7 @@
 	// .globl	_Z11main_kernelPvS_S_PmS0_
 .func _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4_
 (
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_0,
+	.reg .b64 bruh_param_0,
 	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_1,
 	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_2,
 	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_3,
@@ -245,8 +245,6 @@ $L__BB0_1:
 	add.s64 	%rd42, %rd41, 81920;
 	{ // callseq 0, 0
 	.reg .b32 temp_param_reg;
-	.param .b64 param0;
-	st.param.b64 	[param0+0], %rd45;
 	.param .b64 param1;
 	st.param.b64 	[param1+0], %rd44;
 	.param .b64 param2;
@@ -264,7 +262,7 @@ $L__BB0_1:
 	call.uni 
 	_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4_, 
 	(
-	param0, 
+	%rd45, 
 	param1, 
 	param2, 
 	param3, 
@@ -281,8 +279,6 @@ $L__BB0_1:
 	selp.u32 	%r70, 1, 0, %p9;
 	{ // callseq 1, 0
 	.reg .b32 temp_param_reg;
-	.param .b64 param0;
-	st.param.b64 	[param0+0], %rd40;
 	.param .b64 param1;
 	st.param.b64 	[param1+0], %rd39;
 	.param .b64 param2;
@@ -300,7 +296,7 @@ $L__BB0_1:
 	call.uni 
 	_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4_, 
 	(
-	param0, 
+	%rd40, 
 	param1, 
 	param2, 
 	param3, 
@@ -319,7 +315,7 @@ $L__BB0_1:
 
 }
 .func _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4_(
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_0,
+	.reg .b64 bruh_param_0,
 	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_1,
 	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_2,
 	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_3,
@@ -336,7 +332,6 @@ $L__BB0_1:
 	.reg .b64 	%rd<58>;
 
 
-	ld.param.u64 	%rd4, [_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_0];
 	ld.param.u64 	%rd5, [_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_1];
 	ld.param.u64 	%rd10, [_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_3];
 	{ .reg .b64 %tmp;
@@ -493,7 +488,7 @@ $L__BB1_1:
 	add.s32 	%r178, %r10, %r177;
 	add.s64 	%rd22, %rd2, %rd21;
 	shl.b64 	%rd23, %rd22, 1;
-	add.s64 	%rd11, %rd4, %rd23;
+	add.s64 	%rd11, bruh_param_0, %rd23;
 	shl.b32 	%r179, %r178, 1;
 	add.s32 	%r156, %r1, %r179;
 	// begin inline asm
