@@ -245,14 +245,6 @@ $L__BB0_1:
 	add.s64 	%rd42, %rd41, 81920;
 	{ // callseq 0, 0
 	.reg .b32 temp_param_reg;
-	.param .b32 param4;
-	st.param.b32 	[param4+0], 1;
-	.param .b64 param5;
-	st.param.b64 	[param5+0], %rd42;
-	.param .b64 param6;
-	st.param.b64 	[param6+0], %rd40;
-	.param .b64 param7;
-	st.param.b64 	[param7+0], %rd39;
 	call.uni 
 	_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4_, 
 	(
@@ -273,14 +265,6 @@ $L__BB0_1:
 	selp.u32 	%r70, 1, 0, %p9;
 	{ // callseq 1, 0
 	.reg .b32 temp_param_reg;
-	.param .b32 param4;
-	st.param.b32 	[param4+0], %r70;
-	.param .b64 param5;
-	st.param.b64 	[param5+0], %rd41;
-	.param .b64 param6;
-	st.param.b64 	[param6+0], %rd45;
-	.param .b64 param7;
-	st.param.b64 	[param7+0], %rd44;
 	call.uni 
 	_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4_, 
 	(
@@ -715,7 +699,7 @@ $L__BB1_3:
 	setp.ne.s32 	%p14, %r478, 8;
 	@%p14 bra 	$L__BB1_1;
 
-	mov.s8          %rs18, bruh_param_4;
+	cvt.s8.s32      %rs18, bruh_param_4;
 	setp.eq.s16 	%p15, %rs18, 0;
 	@%p15 bra 	$L__BB1_6;
 
