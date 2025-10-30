@@ -14,13 +14,13 @@
 .func _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4_
 (
 	.reg .b64 bruh_param_0,
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_1,
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_2,
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_3,
-	.param .b32 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_4,
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_5,
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_6,
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_7
+	.reg .b64 bruh_param_1,
+	.reg .b64 bruh_param_2,
+	.reg .b64 bruh_param_3,
+	.reg .b32 bruh_param_4,
+	.reg .b64 bruh_param_5,
+	.reg .b64 bruh_param_6,
+	.reg .b64 bruh_param_7
 )
 ;
 .global .align 1 .b8 _ZN45_INTERNAL_e10375f7_14_many_linear_cu_cfd8d65b4cute7productE[1];
@@ -245,12 +245,6 @@ $L__BB0_1:
 	add.s64 	%rd42, %rd41, 81920;
 	{ // callseq 0, 0
 	.reg .b32 temp_param_reg;
-	.param .b64 param1;
-	st.param.b64 	[param1+0], %rd44;
-	.param .b64 param2;
-	st.param.b64 	[param2+0], %rd47;
-	.param .b64 param3;
-	st.param.b64 	[param3+0], %rd41;
 	.param .b32 param4;
 	st.param.b32 	[param4+0], 1;
 	.param .b64 param5;
@@ -263,13 +257,13 @@ $L__BB0_1:
 	_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4_, 
 	(
 	%rd45, 
-	param1, 
-	param2, 
-	param3, 
-	param4, 
-	param5, 
-	param6, 
-	param7
+	%rd44, 
+	%rd47,
+	%rd41, 
+	1,
+	%rd42,
+	%rd40,
+	%rd39
 	);
 	} // callseq 0
 	setp.ne.s64 	%p9, %rd46, 2;
@@ -279,12 +273,6 @@ $L__BB0_1:
 	selp.u32 	%r70, 1, 0, %p9;
 	{ // callseq 1, 0
 	.reg .b32 temp_param_reg;
-	.param .b64 param1;
-	st.param.b64 	[param1+0], %rd39;
-	.param .b64 param2;
-	st.param.b64 	[param2+0], %rd43;
-	.param .b64 param3;
-	st.param.b64 	[param3+0], %rd42;
 	.param .b32 param4;
 	st.param.b32 	[param4+0], %r70;
 	.param .b64 param5;
@@ -297,13 +285,13 @@ $L__BB0_1:
 	_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4_, 
 	(
 	%rd40, 
-	param1, 
-	param2, 
-	param3, 
-	param4, 
-	param5, 
-	param6, 
-	param7
+	%rd39, 
+	%rd43, 
+	%rd42, 
+	%r70,
+	%rd41,
+	%rd45,
+	%rd44
 	);
 	} // callseq 1
 	add.s64 	%rd47, %rd47, 393216;
@@ -316,13 +304,13 @@ $L__BB0_1:
 }
 .func _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4_(
 	.reg .b64 bruh_param_0,
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_1,
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_2,
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_3,
-	.param .b32 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_4,
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_5,
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_6,
-	.param .b64 _ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_7
+	.reg .b64 bruh_param_1,
+	.reg .b64 bruh_param_2,
+	.reg .b64 bruh_param_3,
+	.reg .b32 bruh_param_4,
+	.reg .b64 bruh_param_5,
+	.reg .b64 bruh_param_6,
+	.reg .b64 bruh_param_7
 )
 {
 	.reg .pred 	%p<18>;
@@ -332,10 +320,8 @@ $L__BB0_1:
 	.reg .b64 	%rd<58>;
 
 
-	ld.param.u64 	%rd5, [_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_1];
-	ld.param.u64 	%rd10, [_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_3];
 	{ .reg .b64 %tmp;
-	  cvta.to.shared.u64 	%tmp, %rd10;
+	  cvta.to.shared.u64 	%tmp, bruh_param_3;
 	  cvt.u32.u64 	%r1, %tmp; }
 	mov.u32 	%r2, %tid.x;
 	shr.s32 	%r85, %r2, 31;
@@ -503,7 +489,7 @@ $L__BB1_1:
 	// end inline asm
 	shl.b32 	%r180, %r482, 13;
 	add.s32 	%r181, %r11, %r180;
-	add.s64 	%rd13, %rd5, %rd23;
+	add.s64 	%rd13, bruh_param_1, %rd23;
 	shl.b32 	%r182, %r181, 1;
 	add.s32 	%r160, %r20, %r182;
 	// begin inline asm
@@ -729,18 +715,15 @@ $L__BB1_3:
 	setp.ne.s32 	%p14, %r478, 8;
 	@%p14 bra 	$L__BB1_1;
 
-	ld.param.s8 	%rs18, [_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_4];
+	mov.s8          %rs18, bruh_param_4;
 	setp.eq.s16 	%p15, %rs18, 0;
 	@%p15 bra 	$L__BB1_6;
 
-	ld.param.u64 	%rd55, [_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_5];
-	ld.param.u64 	%rd54, [_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_7];
-	ld.param.u64 	%rd53, [_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_6];
 	shl.b64 	%rd44, %rd2, 1;
-	add.s64 	%rd24, %rd53, %rd44;
-	add.s64 	%rd26, %rd54, %rd44;
+	add.s64 	%rd24, bruh_param_6, %rd44;
+	add.s64 	%rd26, bruh_param_7, %rd44;
 	{ .reg .b64 %tmp;
-	  cvta.to.shared.u64 	%tmp, %rd55;
+	  cvta.to.shared.u64 	%tmp, bruh_param_5;
 	  cvt.u32.u64 	%r413, %tmp; }
 	shl.b32 	%r414, %r11, 1;
 	add.s32 	%r415, %r413, %r414;
@@ -884,8 +867,7 @@ $L__BB1_6:
 	add.s32 	%r461, %r469, %r462;
 	shr.s32 	%r460, %r461, 5;
 	mov.u32 	%r459, %tid.x;
-	ld.param.u64 	%rd57, [_ZN6kernel11linear_mainIN4type10bfloat16_tELi16ELi64ELi1024ELi6144ELi3EEEvPKvS4_S4_PvibPcbS6_S4_S4__param_2];
-	cvta.to.global.u64 	%rd56, %rd57;
+	cvta.to.global.u64 	%rd56, bruh_param_2;
 	shr.s32 	%r458, %r459, 31;
 	setp.gt.s32 	%p16, %r459, 127;
 	shr.u32 	%r418, %r458, 30;
