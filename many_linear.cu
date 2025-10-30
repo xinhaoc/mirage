@@ -19,7 +19,7 @@ static constexpr size_t BATCH_SIZE = 16;
 static constexpr bool USE_PIPELINE = true;
 static constexpr size_t NUM_TRIALS = 100;
 static constexpr size_t NUM_WARMUP_TRIALS = 5;
-#define USE_DRIVER 0
+#define USE_DRIVER 1
 using bfloat16 = type::bfloat16_t;        // kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(input_ptr_next, weight_ptr_next, smem_next);
 #define CU_CHECK(err) do { if (err != CUDA_SUCCESS) { printf("CU error: %d\n", err); return 1; } } while (0)
 #define CUDA_CHECK(err) do { if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; } } while (0)
