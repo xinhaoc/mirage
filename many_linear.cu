@@ -15,9 +15,11 @@ static constexpr size_t SM_COUNT = 96;
 static constexpr size_t OUTPUT_SIZE = 64;
 static constexpr size_t REDUCTION_SIZE = 1024;
 static constexpr size_t BATCH_SIZE = 16;
+
 static constexpr bool USE_PIPELINE = true;
-static constexpr size_t NUM_TRIALS = 1;
+static constexpr size_t NUM_TRIALS = 100;
 static constexpr size_t NUM_WARMUP_TRIALS = 5;
+#define USE_DRIVER 0
 using bfloat16 = type::bfloat16_t;        // kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(input_ptr_next, weight_ptr_next, smem_next);
 #define CU_CHECK(err) do { if (err != CUDA_SUCCESS) { printf("CU error: %d\n", err); return 1; } } while (0)
 #define CUDA_CHECK(err) do { if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; } } while (0)
@@ -91,6 +93,7 @@ int main() {
   cudaDeviceGetAttribute(&sm_count, cudaDevAttrMultiProcessorCount, device);
   printf("a single persistent kernel\n");
 
+#if USE_DRIVER
   CUdevice cu_device;
   CUcontext cu_context;
   CUmodule mod;
@@ -98,9 +101,7 @@ int main() {
   cuInit(0);
   cuDeviceGet(&cu_device, 0);
   cuCtxCreate(&cu_context, 0, cu_device);
-
-
-  auto result = cuModuleLoad(&mod, "many_linear.ptx");
+  auto result = cuModuleLoad(&mod, "many_linear_opt.ptx");
   if (result != CUDA_SUCCESS) {
     printf("Error loading module: %d\n", result);
     return 1;
@@ -110,7 +111,7 @@ int main() {
     printf("Error getting function: %d\n", result2);
     return 1;
   }
-
+#endif
 
   // Allocate device memory for d_input, d_weight, d_output and fill with ones
 
@@ -118,19 +119,25 @@ int main() {
   size_t weight_size = NUM_LAYERS * REDUCTION_SIZE * OUTPUT_SIZE * SM_COUNT * sizeof(bfloat16);
   size_t output_size = NUM_LAYERS * BATCH_SIZE * OUTPUT_SIZE * SM_COUNT * sizeof(bfloat16);
 
-  // bfloat16 *d_input = nullptr;
-  // bfloat16 *d_weight = nullptr;
-  // bfloat16 *d_output = nullptr;
-  CUdeviceptr d_input = NULL;
-  CUdeviceptr d_weight = NULL;
-  CUdeviceptr d_output = NULL;
+#if USE_DRIVER
+  CUdeviceptr d_input = 0;
+  CUdeviceptr d_weight = 0;
+  CUdeviceptr d_output = 0;
+#else
+  bfloat16 *d_input = nullptr;
+  bfloat16 *d_weight = nullptr;
+  bfloat16 *d_output = nullptr;
+#endif
 
-  // cudaMalloc(&d_input, input_size);
-  // cudaMalloc(&d_weight, weight_size);
-  // cudaMalloc(&d_output, output_size);
+#if USE_DRIVER
   CU_CHECK(cuMemAlloc(&d_input, input_size));
   CU_CHECK(cuMemAlloc(&d_weight, weight_size));
   CU_CHECK(cuMemAlloc(&d_output, output_size));
+#else
+  cudaMalloc(&d_input, input_size);
+  cudaMalloc(&d_weight, weight_size);
+  cudaMalloc(&d_output, output_size);
+#endif
 
   // Fill with ones
   // Allocate host buffers
@@ -148,49 +155,58 @@ int main() {
       h_output[i] = bfloat16(1.0f);
   }
 
-  // cudaMemcpy(d_input, h_input, input_size, cudaMemcpyHostToDevice);
-  // cudaMemcpy(d_weight, h_weight, weight_size, cudaMemcpyHostToDevice);
-  // cudaMemcpy(d_output, h_output, output_size, cudaMemcpyHostToDevice);
+#if USE_DRIVER
   CU_CHECK(cuMemcpyHtoD(d_input, h_input, input_size));
   CU_CHECK(cuMemcpyHtoD(d_weight, h_weight, weight_size));
   CU_CHECK(cuMemcpyHtoD(d_output, h_output, output_size));
+#else
+  cudaMemcpy(d_input, h_input, input_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_weight, h_weight, weight_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_output, h_output, output_size, cudaMemcpyHostToDevice);
+#endif
 
   free(h_input);
   free(h_weight);
 
   // Allocate device memory for clock_cycles_mem and clock_cycles_compute
-  // size_t *d_clock_cycles_mem = nullptr;
-  // size_t *d_clock_cycles_compute = nullptr;
-  // cudaMalloc(&d_clock_cycles_mem, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t));
-  // cudaMalloc(&d_clock_cycles_compute, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t));
-  CUdeviceptr d_clock_cycles_mem = NULL;
-  CUdeviceptr d_clock_cycles_compute = NULL;
+#if USE_DRIVER
+  CUdeviceptr d_clock_cycles_mem = 0;
+  CUdeviceptr d_clock_cycles_compute = 0;
   CU_CHECK(cuMemAlloc(&d_clock_cycles_mem, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t)));
   CU_CHECK(cuMemAlloc(&d_clock_cycles_compute, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t)));
-    
+#else
+  size_t *d_clock_cycles_mem = nullptr;
+  size_t *d_clock_cycles_compute = nullptr;
+  cudaMalloc(&d_clock_cycles_mem, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t));
+  cudaMalloc(&d_clock_cycles_compute, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t));
+#endif
   // // Launcher persistent kernel
-  // cudaFuncSetAttribute(main_kernel,
-  //                       f,
-  //                       MAX_SHARE_MEMORY_SIZE);
+#if USE_DRIVER
   CU_CHECK(cuFuncSetAttribute(main_kernel, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, MAX_SHARE_MEMORY_SIZE));
+#else
+  cudaFuncSetAttribute(main_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, MAX_SHARE_MEMORY_SIZE);
+#endif
 
   void* args[] = {&d_input, &d_weight, &d_output, &d_clock_cycles_mem, &d_clock_cycles_compute};
-  // void* args[] = {&d_input, &d_weight, &d_output, &d_clock_cycles_mem, &d_clock_cycles_compute, nullptr};
   for (size_t i = 0; i < NUM_WARMUP_TRIALS; ++i) {
+  #if USE_DRIVER
     auto result = cuLaunchKernel(main_kernel, sm_count, 1, 1, SINGLE_KERNEL_THREADS, 1, 1, MAX_SHARE_MEMORY_SIZE, 0, args, nullptr);
     if (result != CUDA_SUCCESS) {
       printf("Error launching kernel: %d\n", result);
       return 1;
     }
-    // main_kernel<<<dim3(sm_count, 1, 1),
-    //                   dim3(SINGLE_KERNEL_THREADS, 1, 1),
-    //                   MAX_SHARE_MEMORY_SIZE /*smem*/>>>(d_input, d_weight, d_output, d_clock_cycles_mem, d_clock_cycles_compute);
+  #else
+    main_kernel<<<dim3(sm_count, 1, 1),
+                      dim3(SINGLE_KERNEL_THREADS, 1, 1),
+                      MAX_SHARE_MEMORY_SIZE /*smem*/>>>(d_input, d_weight, d_output, d_clock_cycles_mem, d_clock_cycles_compute);
+  #endif
   }
   printf("Finished warmup\n");
   CUDA_CHECK(cudaDeviceSynchronize());
   std::array<float, NUM_TRIALS> all_elapsed_ms;
   for (size_t i = 0; i < NUM_TRIALS; ++i) {
 
+    #if USE_DRIVER
     CUevent start, stop;
     CU_CHECK(cuEventCreate(&start, CU_EVENT_DEFAULT));
     CU_CHECK(cuEventCreate(&stop, CU_EVENT_DEFAULT));
@@ -205,24 +221,28 @@ int main() {
       printf("Error launching kernel: %d\n", result);
       return 1;
     }
-    // cudaEvent_t start, stop;
-    // cudaEventCreate(&start);
-    // cudaEventCreate(&stop);
-    // cudaEventRecord(start);
-    // // main_kernel<<<dim3(sm_count, 1, 1),
-    // //                   dim3(SINGLE_KERNEL_THREADS, 1, 1),
-    // //                   MAX_SHARE_MEMORY_SIZE /*smem*/>>>(d_input, d_weight, d_output, d_clock_cycles_mem, d_clock_cycles_compute);
-    // cudaEventRecord(stop);
-    // cudaEventSynchronize(stop);
-    // cudaError_t err = cudaDeviceSynchronize();
-    // if (err != cudaSuccess) {
-    //   printf("CUDA kernel launch error: %s\n", cudaGetErrorString(err));
-    // }
-    // float elapsed_ms;
-    // cudaEventElapsedTime(&elapsed_ms, start, stop);
-    // // all_elapsed_ms[i] = elapsed_ms;
-    // cudaEventDestroy(start);
-    // cudaEventDestroy(stop);
+    CU_CHECK(cuEventDestroy(start));
+    CU_CHECK(cuEventDestroy(stop));
+    #else
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
+    main_kernel<<<dim3(sm_count, 1, 1),
+                      dim3(SINGLE_KERNEL_THREADS, 1, 1),
+                      MAX_SHARE_MEMORY_SIZE /*smem*/>>>(d_input, d_weight, d_output, d_clock_cycles_mem, d_clock_cycles_compute);
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    cudaError_t err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+      printf("CUDA kernel launch error: %s\n", cudaGetErrorString(err));
+    }
+    float elapsed_ms;
+    cudaEventElapsedTime(&elapsed_ms, start, stop);
+    all_elapsed_ms[i] = elapsed_ms;
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+    #endif
   }
   printf("Finished trials\n");
   CUDA_CHECK(cudaDeviceSynchronize());
@@ -241,8 +261,11 @@ int main() {
   }
 
   // Output the output tensors to a file for verification
-  // cudaMemcpy(h_output, d_output, output_size, cudaMemcpyDeviceToHost);
+  #if USE_DRIVER
   cuMemcpyDtoH(h_output, d_output, output_size);
+  #else
+  cudaMemcpy(h_output, d_output, output_size, cudaMemcpyDeviceToHost);
+  #endif
   for (size_t i = 0; i < output_size / sizeof(bfloat16); ++i) {
     if (h_output[i] != static_cast<bfloat16>(REDUCTION_SIZE)) {
       printf("Error: h_output[%zu] = %f\n", i, float(h_output[i]));
@@ -253,10 +276,13 @@ int main() {
   // Write the clock_cycles_mem and clock_cycles_compute to a file
   size_t *h_clock_cycles_mem = (size_t*)malloc(NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t));
   size_t *h_clock_cycles_compute = (size_t*)malloc(NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t));
-  // cudaMemcpy(h_clock_cycles_mem, d_clock_cycles_mem, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t), cudaMemcpyDeviceToHost);
-  // cudaMemcpy(h_clock_cycles_compute, d_clock_cycles_compute, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t), cudaMemcpyDeviceToHost);
+  #if USE_DRIVER
   CU_CHECK(cuMemcpyDtoH(h_clock_cycles_mem, d_clock_cycles_mem, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t)));
   CU_CHECK(cuMemcpyDtoH(h_clock_cycles_compute, d_clock_cycles_compute, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t)));
+  #else
+  cudaMemcpy(h_clock_cycles_mem, d_clock_cycles_mem, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t), cudaMemcpyDeviceToHost);
+  cudaMemcpy(h_clock_cycles_compute, d_clock_cycles_compute, NUM_LAYERS * (REDUCTION_SIZE / 128) * sizeof(size_t), cudaMemcpyDeviceToHost);
+  #endif
   for (size_t i = 0; i < NUM_LAYERS * (REDUCTION_SIZE / 128); ++i) {
     printf("clock_cycles_mem[%zu] = %zu\n", i, h_clock_cycles_mem[i]);
     printf("clock_cycles_compute[%zu] = %zu\n", i, h_clock_cycles_compute[i]);
@@ -264,6 +290,7 @@ int main() {
   free(h_clock_cycles_mem);
   free(h_clock_cycles_compute);
 
-
+#if USE_DRIVER
   cuCtxDestroy(cu_context);
+#endif
 }
