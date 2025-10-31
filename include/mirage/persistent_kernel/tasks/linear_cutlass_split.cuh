@@ -1,3 +1,4 @@
+
 #pragma once
 #include "common.h"
 #include "copy_sm80.cuh"
@@ -29,9 +30,124 @@ template <typename T_,
 struct GemmConfig;
 }
 
+
 namespace kernel {
 
 using bfloat16 = type::bfloat16_t;
+
+template <typename T_,
+          int BATCH_SIZE,
+          int OUTPUT_SIZE,
+          int REDUCTION_SIZE,
+          int O_STRIDE = OUTPUT_SIZE,
+          int PIPE_MAX = 3>
+__device__ __forceinline__ void linear_prefetch(void const *input_ptr,
+                                              void const *weight_ptr,
+                                              char * smem
+                                              ) {
+  using T = std::conditional_t<std::is_same_v<T_, bfloat16>, cute::bfloat16_t, float>; // A temporary hack
+  constexpr int TILE_SIZE = 128;
+  constexpr int kSmemLayoutCBatch = 1;
+  using Config = config::GemmConfig<
+    T, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, 16, 128, TILE_SIZE, PIPE_MAX, kSmemLayoutCBatch, float
+  >;
+  using namespace cute;
+
+  using SmemLayoutA = typename Config::SmemLayoutA;
+  using SmemLayoutB = typename Config::SmemLayoutB;
+  using G2SCopyA = typename Config::G2SCopyA;
+  using G2SCopyB = typename Config::G2SCopyB;
+
+  constexpr int kTileM = Config::kTileM;
+  constexpr int kTileN = Config::kTileN;
+  constexpr int LoopM = Config::LoopM;
+  constexpr int LoopN = Config::LoopN;
+  constexpr int kTileK = Config::kTileK;
+  constexpr int kStage = Config::kStage;
+    
+  T *shm_data = (T *) smem;
+  T *Ashm = shm_data;
+  T *Bshm = shm_data + cute::cosize(SmemLayoutA{});
+  
+  int idx = threadIdx.x;
+  
+  Tensor A = make_tensor(make_gmem_ptr((T *)input_ptr), make_shape(BATCH_SIZE, REDUCTION_SIZE),
+                         make_stride(REDUCTION_SIZE, Int<1>{}));
+  Tensor B = make_tensor(make_gmem_ptr((T *)weight_ptr), make_shape(OUTPUT_SIZE, REDUCTION_SIZE),
+                         make_stride(REDUCTION_SIZE, Int<1>{}));
+
+  // create identity tensors for predicate
+  auto cA = make_identity_tensor(shape(A));   // (m,k) -> (m,k)
+  auto cB = make_identity_tensor(shape(B));   // (n,k) -> (n,k)
+
+  if (LoopM != 1 || LoopN != 1) {
+    asm("trap;");
+  }
+
+    int m_iter = 0;
+    Tensor gA = local_tile(A, make_tile(Int<kTileM>{}, Int<kTileK>{}),
+                          make_coord(m_iter, _));
+    auto cta_cA = local_tile(cA, make_tile(Int<kTileM>{}, Int<kTileK>{}),
+                          make_coord(m_iter, _));
+      int n_iter = 0;
+      Tensor gB = local_tile(B, make_tile(Int<kTileN>{}, Int<kTileK>{}),
+                            make_coord(n_iter, _));
+
+      // shared memory
+      auto sA = make_tensor(make_smem_ptr(Ashm),
+                            SmemLayoutA{});
+      auto sB = make_tensor(make_smem_ptr(Bshm),
+                            SmemLayoutB{});
+
+      auto cta_cB = local_tile(cB, make_tile(Int<kTileN>{}, Int<kTileK>{}),
+                              make_coord(n_iter, _));
+
+      G2SCopyA g2s_tiled_copy_a;
+      auto g2s_thr_copy_a = g2s_tiled_copy_a.get_slice(idx);
+      auto tAgA_copy = g2s_thr_copy_a.partition_S(gA);  // (CPY, CPY_M, CPY_K, k) ((_8,_1),_2,_1,32)
+      auto tAsA_copy =
+          g2s_thr_copy_a.partition_D(sA);  // (CPY, CPY_M, CPY_K, kStage) ((_8,_1),_2,_1,_3)
+      auto tAcA = g2s_thr_copy_a.partition_S(cta_cA);
+
+      G2SCopyB g2s_tiled_copy_b;
+      auto g2s_thr_copy_b = g2s_tiled_copy_b.get_slice(idx);
+      auto tBgB_copy = g2s_thr_copy_b.partition_S(gB);  // (CPY, CPY_N, CPY_K, k) ((_8,_1),_16,_1,32)
+      auto tBsB_copy =
+          g2s_thr_copy_b.partition_D(sB);  // (CPY, CPY_N, CPY_K, kStage) ((_8,_1),_16,_1,_3)
+      auto tBcB = g2s_thr_copy_b.partition_S(cta_cB);
+      
+      // only do predicate on m / n dimension, k dimension use stride-0 broadcast
+      auto tApA = make_tensor<bool>(
+        make_shape(size<1>(tAcA), Int<1>{}),
+        make_stride(Int<1>{},      Int<0>{})
+      );
+      auto tBpB = make_tensor<bool>(
+        make_shape(size<1>(tBcB), Int<1>{}),
+        make_stride(Int<1>{},      Int<0>{})
+      );
+
+      // fill predicate: compare if the coordinate is in shape(A)/shape(B)
+      CUTE_UNROLL
+      for (int im = 0; im < size<0>(tApA); ++im) {
+        tApA(im,0) = elem_less(get<0>(tAcA(0, im, 0, 0)), shape<0>(A));
+      }
+      CUTE_UNROLL
+      for (int in = 0; in < size<0>(tBpB); ++in) {
+        tBpB(in,0) = elem_less(get<0>(tBcB(0, in, 0, 0)), shape<0>(B));
+      }
+
+      // Prefetch warmup: load initial stages into shared memory
+      #pragma unroll
+      for (int istage = 0; istage < kStage - 1; ++istage) {
+        cute::copy_if(g2s_tiled_copy_a, tApA, tAgA_copy(_, _, _, istage),
+                  tAsA_copy(_, _, _, istage));
+        cute::copy_if(g2s_tiled_copy_b, tBpB, tBgB_copy(_, _, _, istage),
+                  tBsB_copy(_, _, _, istage));
+        cp_async_fence();
+      }
+  
+}
+
 
 // Modified from https://github.com/reed-lau/cute-gemm/blob/main/gemm-multi-stage.cu
 template <typename T_,
@@ -40,20 +156,25 @@ template <typename T_,
           int REDUCTION_SIZE,
           int O_STRIDE = OUTPUT_SIZE,
           int PIPE_MAX = 3>
-__device__ __noinline__ void linear_kernel(void const *input_ptr,
+__device__ __noinline__ void linear_main(void const *input_ptr,
                                               void const *weight_ptr,
                                               void const *residual_ptr,
                                               void *output_ptr,
                                               int num_active_tokens,
-                                              bool residual) {
+                                              bool residual,
+                                              char* smem,
+                                              bool prefetch_next,
+                                              char* smem_next,
+                                              void const* input_ptr_next,
+                                              void const* weight_ptr_next
+                                              ){
+
+  // void const* input_ptr_next = (char*) input_ptr + BATCH_SIZE * REDUCTION_SIZE;
+  // void const* weight_ptr_next = (char*) weight_ptr + REDUCTION_SIZE * OUTPUT_SIZE * 96;
+
 // template <typename Config>
 // __global__ void /* __launch_bounds__(128, 1) */
 // gemm_multi_stage(void *Dptr, const void *Aptr, const void *Bptr, const void *Rptr, int m, int n, int k) {
-  #if 0
-  if (threadIdx.x == 0) {
-    printf("Entering linear_kernel with BATCH_SIZE: %d, OUTPUT_SIZE: %d, REDUCTION_SIZE: %d, O_STRIDE: %d, PIPE_MAX: %d, residual: %d\n", BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, O_STRIDE, PIPE_MAX, residual);
-  }
-  #endif
   using T = std::conditional_t<std::is_same_v<T_, bfloat16>, cute::bfloat16_t, float>; // A temporary hack
   constexpr int TILE_SIZE = 128;
   constexpr int kSmemLayoutCBatch = 1;
@@ -95,7 +216,7 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
   // constexpr int n = Config::OUTPUT_SIZE;
   // constexpr int k = Config::REDUCTION_SIZE;
   
-  extern __shared__ T shm_data[];
+  T *shm_data = (T *) smem;
   
   T *Ashm = shm_data;
   T *Bshm = shm_data + cute::cosize(SmemLayoutA{});
@@ -281,26 +402,12 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
       }
       #endif
 
-      int itile_to_read = 0;
+      int itile_to_read = kStage - 1;
       int ismem_read_stage = 0;
-      int ismem_write_stage = 0;
+      int ismem_write_stage = kStage - 1;
 
-      //warm up
-    #pragma unroll
-      for (int istage = 0; istage < kStage - 1; ++istage) {
-        // cute::copy(g2s_tiled_copy_a, tAgA_copy(_, _, _, istage),
-        //           tAsA_copy(_, _, _, istage));
-        // cute::copy(g2s_tiled_copy_b, tBgB_copy(_, _, _, istage),
-        //           tBsB_copy(_, _, _, istage));
-        cute::copy_if(g2s_tiled_copy_a, tApA, tAgA_copy(_, _, _, istage),
-                  tAsA_copy(_, _, _, istage));
-        cute::copy_if(g2s_tiled_copy_b, tBpB, tBgB_copy(_, _, _, istage),
-                  tBsB_copy(_, _, _, istage));
-        cp_async_fence();
+      //^ Took out prefetch
 
-        ++itile_to_read;
-        ++ismem_write_stage;
-      }
 
       //TODO: cp_async_wait later?
       cp_async_wait<kStage - 2>();
@@ -348,10 +455,17 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
 
             cp_async_fence();
           }
-
           cute::gemm(tiled_mma, tCrD, tCrA(_, _, ik), tCrB(_, _, ik), tCrD);
         } // ik
       } // itile
+      size_t start_warmup, end_warmup;
+      if (prefetch_next) {
+        linear_prefetch<T_, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, O_STRIDE, PIPE_MAX>(input_ptr_next, weight_ptr_next, smem_next);
+      } else {
+        end_warmup = 707;
+        start_warmup = 0;
+      }
+
 
       // Epilogue: convert float accumulator result back to bfloat16_t and write back
       // use less shared memory as a scratchpad tile to use large wide instuction
@@ -403,117 +517,7 @@ __device__ __noinline__ void linear_kernel(void const *input_ptr,
       cute::copy_if(s2g_tiled_copy_c, tCpC_ep, tCsC_s2g(_, _, _, 0), tCgC_s2g);
     } // n_iter < kLoopN 2 
   } // m_iter < LoopM 1
+
+
 }
 }
-
-namespace config {
-
-using namespace cute;
-
-template <typename T_,
-          int BATCH_SIZE_,
-          int OUTPUT_SIZE_,
-          int REDUCTION_SIZE_,
-          int kTileM_,              
-          int kTileN_,              
-          int kTileK_,             
-          int kStage_,               
-          int kSmemLayoutCBatch_ = 1,
-          typename ComputeType = float>
-struct GemmConfig {
-  using T = T_;
-
-  static constexpr int BATCH_SIZE = BATCH_SIZE_;
-  static constexpr int OUTPUT_SIZE = OUTPUT_SIZE_;
-  static constexpr int REDUCTION_SIZE = REDUCTION_SIZE_;
-  static constexpr int kTileM = kTileM_;
-  static constexpr int kTileN = kTileN_ < OUTPUT_SIZE_ ? kTileN_ : OUTPUT_SIZE_;
-  static constexpr int LoopN = (OUTPUT_SIZE_ + kTileN - 1) / kTileN;
-  static constexpr int LoopM = (BATCH_SIZE_ + kTileM - 1) / kTileM;
-  static constexpr int kTileK = kTileK_;
-  static constexpr int kStage = kStage_;
-  // TODO: add better way to determine PIPE_DEPTH
-  // static constexpr int kStage = OUTPUT_SIZE_ < 128 ? 5 : 3;
-  static constexpr int kSmemLayoutCBatch = kSmemLayoutCBatch_;
-  static constexpr int BankMaxElemNum = 128 / sizeof(T);
-
-  static constexpr int kShmLoadSwizzleM = 3;
-  static constexpr int kShmLoadSwizzleS = 3;
-  static constexpr int kShmLoadSwizzleB = 3;
-
-  using SmemLayoutAtom = decltype(composition(
-      Swizzle<kShmLoadSwizzleB, kShmLoadSwizzleM, kShmLoadSwizzleS>{},
-      make_layout(make_shape(Int<8>{}, Int<BankMaxElemNum>{}),
-                  make_stride(Int<BankMaxElemNum>{}, Int<1>{}))));
-  using SmemLayoutA = decltype(
-      tile_to_shape(SmemLayoutAtom{},
-                    make_shape(Int<kTileM>{}, Int<kTileK>{}, Int<kStage>{})));
-  using SmemLayoutB = decltype(
-      tile_to_shape(SmemLayoutAtom{},
-                    make_shape(Int<kTileN>{}, Int<kTileK>{}, Int<kStage>{})));
-
-  using mma_op = SM80_16x8x16_F32BF16BF16F32_TN;
-  using mma_traits = MMA_Traits<mma_op>;
-  using mma_atom = MMA_Atom<mma_traits>;
-
-  static constexpr int kMmaEURepeatM = 1;
-  static constexpr int kMmaEURepeatN = 4;
-  static constexpr int kMmaEURepeatK = 1;
-  static constexpr int N_REG_REPEAT = kTileN / (kMmaEURepeatN * 8);
-  using mma_atom_shape = mma_traits::Shape_MNK;
-  static constexpr int kMmaPM = 1 * kMmaEURepeatM * get<0>(mma_atom_shape{});
-  static constexpr int kMmaPN = N_REG_REPEAT * kMmaEURepeatN * get<1>(mma_atom_shape{});
-  static constexpr int kMmaPK = 1 * kMmaEURepeatK * get<2>(mma_atom_shape{});
-  using MMA_EU_RepeatT = decltype(make_layout(make_shape(
-      Int<kMmaEURepeatM>{}, Int<kMmaEURepeatN>{}, Int<kMmaEURepeatK>{})));
-  using MMA_P_T = Tile<Int<kMmaPM>, Int<kMmaPN>, Int<kMmaPK>>;
-  using MMA = decltype(make_tiled_mma(mma_atom{}, MMA_EU_RepeatT{}, MMA_P_T{}));
-
-  using g2s_copy_op = SM80_CP_ASYNC_CACHEGLOBAL<cute::uint128_t>;
-  using g2s_copy_traits = Copy_Traits<g2s_copy_op>;
-  using g2s_copy_atom = Copy_Atom<g2s_copy_traits, T>;
-  using G2SCopyA =
-      decltype(make_tiled_copy(g2s_copy_atom{},
-                               make_layout(make_shape(Int<8>{}, Int<16>{}),
-                                           make_stride(Int<16>{}, Int<1>{})),
-                               make_layout(make_shape(Int<1>{}, Int<8>{}))));
-  using G2SCopyB = G2SCopyA;
-
-  using s2r_copy_op = SM75_U32x4_LDSM_N;
-  using s2r_copy_traits = Copy_Traits<s2r_copy_op>;
-  using s2r_copy_atom = Copy_Atom<s2r_copy_traits, T>;
-  using S2RCopyAtomA = s2r_copy_atom;
-  using S2RCopyAtomB = s2r_copy_atom;
-
-  using SmemLayoutAtomC = decltype(composition(
-      Swizzle<3, 3, 3>{}, make_layout(make_shape(Int<kMmaPM>{}, Int<BankMaxElemNum>{}),
-                                      make_stride(Int<BankMaxElemNum>{}, Int<1>{}))));
-  using SmemLayoutC = decltype(tile_to_shape(
-      SmemLayoutAtomC{},
-      make_shape(Int<kMmaPM>{}, Int<kMmaPN>{}, Int<kSmemLayoutCBatch>{})));
-  // static_assert(size<0>(SmemLayoutA{}) * size<1>(SmemLayoutA{}) >=
-  //                   size(SmemLayoutC{}),
-  //               "C shared memory request is large than A's one pipe");
-  static_assert(size<0>(SmemLayoutB{}) * size<1>(SmemLayoutB{}) >=
-                    size(SmemLayoutC{}),
-                "C shared memory request is large than B's one pipe");
-
-  using R2SCopyAtomC = Copy_Atom<UniversalCopy<int>, T>;
-  using S2GCopyAtomC = Copy_Atom<UniversalCopy<cute::uint128_t>, T>;
-  using S2GCopyC =
-      decltype(make_tiled_copy(S2GCopyAtomC{},
-                               make_layout(make_shape(Int<16>{}, Int<8>{}),
-                                           make_stride(Int<8>{}, Int<1>{})),
-                               make_layout(make_shape(Int<1>{}, Int<8>{}))));
-
-  static constexpr int kThreadNum = size(MMA{});
-  static_assert(kThreadNum == 128, "This config should use 4 warps (128 threads)");
-
-  static constexpr int shm_size_AB =
-      cute::cosize(SmemLayoutA{}) + cute::cosize(SmemLayoutB{});
-  static constexpr int shm_size_C = cute::cosize(SmemLayoutC{});
-  static constexpr int kShmSize =
-      cute::max(shm_size_AB, shm_size_C) * sizeof(T);
-};
-
-}  // namespace config
