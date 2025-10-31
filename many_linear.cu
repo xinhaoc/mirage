@@ -19,7 +19,7 @@ static constexpr size_t BATCH_SIZE = 16;
 static constexpr bool USE_PIPELINE = true;
 static constexpr size_t NUM_TRIALS = 100;
 static constexpr size_t NUM_WARMUP_TRIALS = 5;
-#define USE_DRIVER 1
+#define USE_DRIVER 0
 using bfloat16 = type::bfloat16_t;        // kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(input_ptr_next, weight_ptr_next, smem_next);
 #define CU_CHECK(err) do { if (err != CUDA_SUCCESS) { printf("CU error: %d\n", err); return 1; } } while (0)
 #define CUDA_CHECK(err) do { if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; } } while (0)
@@ -31,17 +31,23 @@ __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_
       size_t time_start_prefetch = clock64();
       kernel::linear_prefetch<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(d_input, d_weight, smem);
       size_t time_end_prefetch = clock64();
+      char * shared_mem_start, * smem_next;
+      shared_mem_start = smem;
+      smem_next = smem + (MAX_SHARE_MEMORY_SIZE / 2);
 
       for (size_t layer_num = 0; layer_num < NUM_LAYERS; layer_num++) {
-        char * shared_mem_start = smem + (MAX_SHARE_MEMORY_SIZE / 2) * (layer_num % 2);
+        // char * shared_mem_start = smem + (MAX_SHARE_MEMORY_SIZE / 2) * (layer_num % 2);
 
+        size_t block_idx = blockIdx.x;
         void * input_ptr = (bfloat16 *)d_input + (layer_num * BATCH_SIZE * REDUCTION_SIZE);
-        void * weight_ptr = (bfloat16 *)d_weight + (layer_num * REDUCTION_SIZE * OUTPUT_SIZE * SM_COUNT) + (blockIdx.x * OUTPUT_SIZE);
-        void * output_ptr = (bfloat16 *)d_output + (layer_num * BATCH_SIZE * OUTPUT_SIZE * SM_COUNT) + (blockIdx.x * OUTPUT_SIZE);
+        void * weight_ptr = (bfloat16 *)d_weight + (layer_num * REDUCTION_SIZE * OUTPUT_SIZE * SM_COUNT) + (block_idx * OUTPUT_SIZE);
+        void * output_ptr = (bfloat16 *)d_output + (layer_num * BATCH_SIZE * OUTPUT_SIZE * SM_COUNT) + (block_idx * OUTPUT_SIZE);
 
-        char * smem_next = smem + (MAX_SHARE_MEMORY_SIZE / 2) * ((layer_num + 1) % 2);
-        void * input_ptr_next = (bfloat16 *)d_input + ((layer_num + 1) * BATCH_SIZE * REDUCTION_SIZE);
-        void * weight_ptr_next = (bfloat16 *)d_weight + ((layer_num + 1) * REDUCTION_SIZE * OUTPUT_SIZE * SM_COUNT) + (blockIdx.x * OUTPUT_SIZE);
+        // char * smem_next = smem + (MAX_SHARE_MEMORY_SIZE / 2) * ((layer_num + 1) % 2);
+        // void * input_ptr_next = (bfloat16 *)d_input + ((layer_num + 1) * BATCH_SIZE * REDUCTION_SIZE);
+        // void * weight_ptr_next = (bfloat16 *)d_weight + ((layer_num + 1) * REDUCTION_SIZE * OUTPUT_SIZE * SM_COUNT) + (blockIdx.x * OUTPUT_SIZE);
+        void * input_ptr_next = (char *) input_ptr + (BATCH_SIZE * REDUCTION_SIZE);
+        void * weight_ptr_next = (char*) weight_ptr + (REDUCTION_SIZE * OUTPUT_SIZE * SM_COUNT);
 
         kernel::linear_main<bfloat16, BATCH_SIZE, OUTPUT_SIZE, REDUCTION_SIZE, OUTPUT_SIZE * SM_COUNT>(
         input_ptr,
@@ -56,6 +62,11 @@ __global__ void main_kernel(void *d_input, void *d_weight, void *d_output, size_
         input_ptr_next,
         weight_ptr_next
         );
+        
+        char* temp;
+        temp = shared_mem_start;
+        shared_mem_start = smem_next;
+        smem_next = temp;
 
       }
     }
@@ -86,6 +97,7 @@ int main() {
 
 
   // Launch the main kernel and start the timer
+  cudaSetDevice(6);
 
   int device;
   cudaGetDevice(&device);
@@ -101,7 +113,7 @@ int main() {
   cuInit(0);
   cuDeviceGet(&cu_device, 0);
   cuCtxCreate(&cu_context, 0, cu_device);
-  auto result = cuModuleLoad(&mod, "many_linear_opt.ptx");
+  auto result = cuModuleLoad(&mod, "many_linear.ptx");
   if (result != CUDA_SUCCESS) {
     printf("Error loading module: %d\n", result);
     return 1;
