@@ -13,13 +13,17 @@ def get_torch_ext():
          ) from e
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
-include_dir = os.path.join(this_dir, '../../../include/mirage/persistent_kernel/tasks')
+include_dir = os.path.join(this_dir, '../../../include/mirage/persistent_kernel/tasks/ampere')
+include_dir_2 = os.path.join(this_dir, '../../../include/mirage/persistent_kernel/tasks/common')
+include_dir_3 = os.path.join(this_dir, '../../../include/mirage/persistent_kernel/')
+
 header_root_dir = os.path.join(this_dir, '../../../include')
 spec_decode_include_dir = os.path.join(include_dir, 'speculative_decoding')
 
 # Collect header files for the 'depends' argument. This tells the build system
 # to recompile if any of these headers change, without trying to compile them directly.
 header_files = glob.glob(os.path.join(include_dir, '*.cuh'))
+header_files += glob.glob(os.path.join(include_dir_2, '*.cuh'))
 header_files += glob.glob(os.path.join(spec_decode_include_dir, '*.cuh'))
 header_files += glob.glob(os.path.join(header_root_dir, '*.h'))
 
@@ -39,11 +43,14 @@ setup(
                 include_dir,
                 spec_decode_include_dir,
                 header_root_dir,
+                include_dir_2,
+                include_dir_3,
             ],
             extra_compile_args={
                 'cxx': [],
                 'nvcc': [
                     '-O3',
+                    "-lineinfo",  
                     '-gencode=arch=compute_80,code=sm_80',
                 ]
             }

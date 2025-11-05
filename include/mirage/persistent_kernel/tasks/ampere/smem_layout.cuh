@@ -289,6 +289,58 @@ template <typename T,
           size_t ROW_,
           size_t INNER_COL_,
           size_t OUTER_COL_>
+struct smem_row_2drow {
+  T *__restrict__ base_ptr;
+
+  using value_type = T;
+  using OffsetCalculator = SwizzleOffsetCalculator<B, M, S>;
+
+  static constexpr size_t ROW = ROW_;
+  static constexpr size_t INNER_COL = INNER_COL_;
+  static constexpr size_t log2_INNER_COL = log2_constexpr(INNER_COL_);
+  static constexpr size_t OUTER_COL = OUTER_COL_;
+  static constexpr size_t COL = INNER_COL * OUTER_COL;
+  static constexpr size_t SIZE = ROW * COL;
+  static constexpr size_t STRIDE_OUTER_COL = INNER_COL;
+  static constexpr size_t STRIDE = INNER_COL * OUTER_COL;
+
+  __device__ __forceinline__ smem_row_2drow(T *ptr) : base_ptr(ptr) {}
+
+  __device__ __forceinline__ void set_ptr(T *ptr) {
+    base_ptr = ptr;
+  }
+
+  static constexpr size_t size() {
+    return ROW * COL;
+  }
+
+   __device__ __forceinline__ T &at(size_t logical_idx_row,
+                                           size_t logical_idx_col) {
+    // size_t inner_col = logical_idx_col & ((1 << log2_INNER_COL) - 1);
+    // size_t outer_col = logical_idx_col >> log2_INNER_COL;
+
+    size_t inner_col = (logical_idx_col % INNER_COL);
+    size_t outer_col = (logical_idx_col / INNER_COL) % OUTER_COL;
+
+
+    size_t logical_idx =
+        outer_col * STRIDE_OUTER_COL + logical_idx_row * STRIDE + inner_col;
+    // return &base_ptr[get_swizzled_offset(logical_idx)];
+    return base_ptr[OffsetCalculator::get_phy_offset(logical_idx)];
+  }
+};
+
+
+
+
+// Row-major layout with split column dimension: OUTER_COL x INNER_COL
+template <typename T,
+          int B,
+          int M,
+          int S,
+          size_t ROW_,
+          size_t INNER_COL_,
+          size_t OUTER_COL_>
 struct smem_row_2dcol {
   T *__restrict__ base_ptr;
 
@@ -333,6 +385,16 @@ struct smem_row_2dcol {
         outer_col * STRIDE_OUTER_COL + logical_idx_row * STRIDE + inner_col;
     // return &base_ptr[get_swizzled_offset(logical_idx)];
     return &base_ptr[OffsetCalculator::get_phy_offset(logical_idx)];
+  }
+
+   __device__ __forceinline__ T &at(size_t logical_idx_row,
+                                           size_t logical_idx_col) {
+    size_t inner_col = logical_idx_col & ((1 << log2_INNER_COL) - 1);
+    size_t outer_col = logical_idx_col >> log2_INNER_COL;
+    size_t logical_idx =
+        outer_col * STRIDE_OUTER_COL + logical_idx_row * STRIDE + inner_col;
+    // return &base_ptr[get_swizzled_offset(logical_idx)];
+    return base_ptr[OffsetCalculator::get_phy_offset(logical_idx)];
   }
 };
 
