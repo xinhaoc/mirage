@@ -81,7 +81,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64(
   //now we don't support iteration over Q
   // assert(GLOBAL_ITERS_M == 1);
   // the scale factor for normalization in softmax
-  float const sm_scale = 1.0f / sqrtf(static_cast<float>(HEAD_DIM));
+  float const sm_scale = 1.0f / sqrtf(static_cast<float>(HEAD_DIM)) * log2e;
 
   int warp_idx = warp_id();
   int lane_idx = lane_id();
@@ -226,14 +226,11 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64(
   // STensors' layouts
   using ZeroBufferSmem = smem_row<T, 0, 0, 0, 1, 8, 8>;
   using QOSmem =
-      smem_row<T, 3, 3, 3, MAX_TOKENS * NUM_QO_PER_KV, HEAD_DIM, HEAD_DIM>;
-  using KVSmem = smem_row<T, 3, 3, 3, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
-
-  using OutSmem = smem_row_2drow<T, 3, 3, 3, MAX_TOKENS * NUM_QO_PER_KV, 64, 2>;
-
+      smem_row_tiled<T, 3, 3, 3, MAX_TOKENS * NUM_QO_PER_KV, HEAD_DIM, HEAD_DIM>;
+  using KVSmem = smem_row_tiled<T, 3, 3, 3, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
   ZeroBufferSmem zero_buffer(zero_buf);
   QOSmem q_smem(s_q);
-  OutSmem o_smem(s_o);
+  QOSmem o_smem(s_o);
   KVSmem k_smem(s_k), v_smem(s_v);
   KVSmem k_buffer_smem(s_k_buffer), v_buffer_smem(s_v_buffer);
 
@@ -546,8 +543,8 @@ int kt_col = (n << 4) + ((lane_idx >> 4) << 3) + (lane_idx & 0x7);
     float rescale[GLOBAL_ITERS_M][2];
 #pragma unroll
     for (int m = 0; m < GLOBAL_ITERS_M; m++) {
-      rescale[m][0] = expf(m_prev[m][0] * sm_scale - m_local[m][0] * sm_scale);
-      rescale[m][1] = expf(m_prev[m][1] * sm_scale - m_local[m][1] * sm_scale);
+      rescale[m][0] = ptx_exp2(m_prev[m][0] * sm_scale - m_local[m][0] * sm_scale);
+      rescale[m][1] = ptx_exp2(m_prev[m][1] * sm_scale - m_local[m][1] * sm_scale);
     }
 
     // update d: get partial sum
@@ -560,11 +557,16 @@ int kt_col = (n << 4) + ((lane_idx >> 4) << 3) + (lane_idx & 0x7);
     for(int n = 0; n < NUM_ITER_QK_N; n++){
 #pragma unroll
       for (int frag_idx = 0; frag_idx < 8; frag_idx++) {
-        x_frag_f[m][n][frag_idx] =
-            x_frag_f[m][n][frag_idx] != -inf
-                ? expf(x_frag_f[m][n][frag_idx] * sm_scale -
-                       m_local[m][(frag_idx & 0x3) >> 1] * sm_scale)
-                : 0.f;
+        // x_frag_f[m][n][frag_idx] =
+        //     x_frag_f[m][n][frag_idx] != -inf
+        //         ? expf(x_frag_f[m][n][frag_idx] * sm_scale -
+        //                m_local[m][(frag_idx & 0x3) >> 1] * sm_scale)
+        //         : 0.f;
+
+         x_frag_f[m][n][frag_idx] = ptx_exp2(x_frag_f[m][n][frag_idx] * sm_scale -
+                       m_local[m][(frag_idx & 0x3) >> 1] * sm_scale);
+
+          // x_frag_f[m][n][frag_idx] = ptx_exp2(x_frag_f[m][n][frag_idx] * sm_scale -  m_local[m][(frag_idx & 0x3) >> 1] * sm_scale);
         d_partial[m][(frag_idx & 0x3) >> 1] += x_frag_f[m][n][frag_idx];
       }
     }
@@ -648,19 +650,19 @@ int kt_col = (n << 4) + ((lane_idx >> 4) << 3) + (lane_idx & 0x7);
       // int row = (threadIdx.x / 32) * 16  + (lane_idx / 4) + (frag_idx % 2) * 8;
       // int col = (lane_idx % 4) * 2 + (frag_idx / 2) * 8 + i * 16;
       // float d_global = d[m][(row / 8) % 2];
-      if(warp_idx == 0){
-        int row = ((threadIdx.x >> 5) << 4) + (lane_idx >> 2) + ((frag_idx & 1) << 3);
+      // if(warp_idx == 0){
+      int row = ((threadIdx.x >> 5) << 4) + (lane_idx >> 2) + ((frag_idx & 1) << 3);
       int col = ((lane_idx & 3) << 1) + ((frag_idx >> 1) << 3) + (i << 4);
       float d_global = d[m][(row >> 3) & 1];
 
-      // bfloat16 b0 = bfloat16(o[m][col/16][frag_idx * 2] / d_global);
-      // bfloat16 b1 = bfloat16(o[m][col/16][frag_idx * 2 + 1] / d_global);
-      // bfloat16* dst = o_smem(row, col);
-      // *reinterpret_cast<uint32_t*>(dst) = type::pack2u32(b0, b1);
+    //   bfloat16 b0 = bfloat16(o[m][col >> 4][frag_idx << 1] / d_global);
+    //   bfloat16 b1 = bfloat16(o[m][col >> 4][(frag_idx << 1) + 1] / d_global);
+    //   bfloat16* dst = o_smem(row, col);
+    //  *reinterpret_cast<uint32_t*>(dst) = type::pack2u32(b0, b1);
       o_smem.at(row, col) =  bfloat16(o[m][col >> 4][frag_idx << 1] / d_global);
       o_smem.at(row, col + 1) =  bfloat16(o[m][col >> 4][(frag_idx << 1) + 1] / d_global);
 
-      }
+      // }
       
     }
     // stmatrix_m8n8x4((uint32_t*)o[0][i], o_smem(0, 0));
