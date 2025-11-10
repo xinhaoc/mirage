@@ -158,7 +158,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_4_16(
   constexpr size_t S_V_BUFFER_OFFSET = S_V_OFFSET + S_V_SIZE;
   constexpr size_t S_V_BUFFER_SIZE = S_K_SIZE;
 
-   // align to size of float
+  // align to size of float
   constexpr size_t S_Q_NORM_SUM_OFFSET =
       ((S_V_BUFFER_OFFSET + S_V_BUFFER_SIZE + sizeof(float) - 1) &
        ~size_t(sizeof(float) - 1));
@@ -168,10 +168,9 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_4_16(
   constexpr size_t S_K_NORM_SUM_OFFSET =
       S_Q_NORM_SUM_OFFSET + S_Q_NORM_SUM_SIZE;
 
- 
   constexpr size_t S_K_NORM_SUM_SIZE = sizeof(float) * 4;
 
-  //stage2 flash meta buffer
+  // stage2 flash meta buffer
 
   constexpr size_t S_M_BUFFER_OFFSET = ZERO_BUFFER_OFFSET + ZERO_BUFFER_SIZE;
   constexpr size_t S_M_BUFFER_SIZE =
@@ -185,14 +184,15 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_4_16(
   constexpr size_t S_O_BUFFER_SIZE =
       sizeof(float) * MMA_ITERS_M * NUM_THREADS * 64;
 
-  //stage3 output buffer
+  // stage3 output buffer
   constexpr size_t S_O_OFFSET = ZERO_BUFFER_OFFSET + S_V_BUFFER_SIZE;
   constexpr size_t S_O_SIZE = S_Q_SIZE;
 
-  constexpr size_t S_TOTAL_OFFSET =  (S_O_BUFFER_OFFSET + S_O_BUFFER_SIZE >
-     S_K_NORM_SUM_OFFSET + S_K_NORM_SUM_SIZE)
-        ? (S_O_BUFFER_OFFSET + S_O_BUFFER_SIZE)
-        : (S_K_NORM_SUM_OFFSET + S_K_NORM_SUM_SIZE);
+  constexpr size_t S_TOTAL_OFFSET =
+      (S_O_BUFFER_OFFSET + S_O_BUFFER_SIZE >
+       S_K_NORM_SUM_OFFSET + S_K_NORM_SUM_SIZE)
+          ? (S_O_BUFFER_OFFSET + S_O_BUFFER_SIZE)
+          : (S_K_NORM_SUM_OFFSET + S_K_NORM_SUM_SIZE);
 
   static_assert(S_TOTAL_OFFSET <=
                 mirage::runtime::MAX_DYNAMIC_SHARED_MEMORY_SIZE);
@@ -208,7 +208,6 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_4_16(
   T *s_v_buffer = reinterpret_cast<T *>(smem + S_V_BUFFER_OFFSET);
   T *s_o = reinterpret_cast<T *>(smem + S_O_OFFSET);
 
-
   float *s_q_norm_sum = reinterpret_cast<float *>(smem + S_Q_NORM_SUM_OFFSET);
   float *s_k_norm_sum = reinterpret_cast<float *>(smem + S_K_NORM_SUM_OFFSET);
   float *s_m_buffer = reinterpret_cast<float *>(smem + S_M_BUFFER_OFFSET);
@@ -219,7 +218,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_4_16(
   using ZeroBufferSmem = smem_row<T, 0, 0, 0, 1, 8, 8>;
   using QOSmem =
       smem_row<T, 3, 3, 3, MAX_TOKENS * NUM_QO_PER_KV, HEAD_DIM, HEAD_DIM>;
-  using KVSmem = smem_row<T, 3, 3, 3, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
+  using KVSmem = smem_row_tiled<T, 3, 3, 3, KV_TILE_SIZE, HEAD_DIM, HEAD_DIM>;
 
   ZeroBufferSmem zero_buffer(zero_buf);
   QOSmem q_smem(s_q), o_smem(s_o);
@@ -638,7 +637,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_4_16(
       o_global = o_global * expf(m_prev - m_global) +
                  other_o * expf(other_m - m_global);
     }
-    // o_smem.at(row, col) = bfloat16(o_global / d_global);
+    o_smem.at(row, col) = bfloat16(o_global / d_global);
   }
   __syncthreads();
 

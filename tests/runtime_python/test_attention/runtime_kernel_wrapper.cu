@@ -1,11 +1,11 @@
 
-#include "single_batch_decoding.cuh"
-#include "multitoken_paged_attention.cuh"
 #include "bfloat16.h"
+#include "multitoken_paged_attention.cuh"
+#include "single_batch_decoding.cuh"
 #include <cstdio>
 #include <cuda_runtime.h>
-#include <torch/extension.h>
 #include <nvtx3/nvToolsExt.h>
+#include <torch/extension.h>
 
 using bfloat16 = type::bfloat16_t;
 
@@ -28,22 +28,22 @@ __global__ void single_batch_decoding_wrapper(void const *qkv_ptr,
                                               float q_eps,
                                               float k_eps) {
   kernel::single_batch_decoding_kernel<T,
-                               NUM_Q_HEADS,
-                               NUM_KV_HEADS,
-                               HEAD_DIM,
-                               WEIGHT_STRIDE>(qkv_ptr,
-                                              k_cache_ptr,
-                                              v_cache_ptr,
-                                              output_ptr,
-                                              seq_len,
-                                              qk_norm,
-                                              rotary_emd,
-                                              qnorm_weight_ptr,
-                                              knorm_weight_ptr,
-                                              cos_ptr,
-                                              sin_ptr,
-                                              q_eps,
-                                              k_eps);
+                                       NUM_Q_HEADS,
+                                       NUM_KV_HEADS,
+                                       HEAD_DIM,
+                                       WEIGHT_STRIDE>(qkv_ptr,
+                                                      k_cache_ptr,
+                                                      v_cache_ptr,
+                                                      output_ptr,
+                                                      seq_len,
+                                                      qk_norm,
+                                                      rotary_emd,
+                                                      qnorm_weight_ptr,
+                                                      knorm_weight_ptr,
+                                                      cos_ptr,
+                                                      sin_ptr,
+                                                      q_eps,
+                                                      k_eps);
 }
 
 void single_batch_decoding(
@@ -78,32 +78,30 @@ void single_batch_decoding(
                        cudaFuncAttributeMaxDynamicSharedMemorySize,
                        smem_size);
 
- 
-
   cudaEvent_t start, stop;
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
 
-  constexpr int WARMUP_RUNS = 0;
-  constexpr int BENCHMARK_RUNS = 1;
+  constexpr int WARMUP_RUNS = 16;
+  constexpr int BENCHMARK_RUNS = 1000;
 
   printf("=== Multitoken Paged Attention Kernel Performance Profiling ===\n");
 
   for (int i = 0; i < WARMUP_RUNS; i++) {
     single_batch_decoding_wrapper<bfloat16, 4, 1, 128, 128>
-      <<<grid_dim, block_dim, smem_size>>>(qkv_ptr,
-                                           k_cache_ptr,
-                                           v_cache_ptr,
-                                           output_ptr,
-                                           seq_len,
-                                           qk_norm,
-                                           rotary_emd,
-                                           qnorm_weight_ptr,
-                                           knorm_weight_ptr,
-                                           cos_ptr,
-                                           sin_ptr,
-                                           q_eps,
-                                           k_eps);
+        <<<grid_dim, block_dim, smem_size>>>(qkv_ptr,
+                                             k_cache_ptr,
+                                             v_cache_ptr,
+                                             output_ptr,
+                                             seq_len,
+                                             qk_norm,
+                                             rotary_emd,
+                                             qnorm_weight_ptr,
+                                             knorm_weight_ptr,
+                                             cos_ptr,
+                                             sin_ptr,
+                                             q_eps,
+                                             k_eps);
   }
   cudaDeviceSynchronize();
 
@@ -113,30 +111,27 @@ void single_batch_decoding(
   float total_time_ms = 0.0f;
   cudaEventRecord(start);
   for (int i = 0; i < BENCHMARK_RUNS; i++) {
-    
-     single_batch_decoding_wrapper<bfloat16, 4, 1, 128, 128>
-      <<<grid_dim, block_dim, smem_size>>>(qkv_ptr,
-                                           k_cache_ptr,
-                                           v_cache_ptr,
-                                           output_ptr,
-                                           seq_len,
-                                           qk_norm,
-                                           rotary_emd,
-                                           qnorm_weight_ptr,
-                                           knorm_weight_ptr,
-                                           cos_ptr,
-                                           sin_ptr,
-                                           q_eps,
-                                           k_eps);
-                                           cudaDeviceSynchronize();
-   
 
-     
+    single_batch_decoding_wrapper<bfloat16, 4, 1, 128, 128>
+        <<<grid_dim, block_dim, smem_size>>>(qkv_ptr,
+                                             k_cache_ptr,
+                                             v_cache_ptr,
+                                             output_ptr,
+                                             seq_len,
+                                             qk_norm,
+                                             rotary_emd,
+                                             qnorm_weight_ptr,
+                                             knorm_weight_ptr,
+                                             cos_ptr,
+                                             sin_ptr,
+                                             q_eps,
+                                             k_eps);
+    cudaDeviceSynchronize();
   }
 
   cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&total_time_ms, start, stop);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&total_time_ms, start, stop);
 
   float avg_time_ms = total_time_ms / BENCHMARK_RUNS;
 
@@ -167,7 +162,7 @@ template <typename T,
           int HEAD_DIM,
           int MAX_SEQ_LEN,
           int PAGE_SIZE,
-          int MAX_TOKENS = 8>
+          int MAX_TOKENS = 16>
 __global__ void multitoken_paged_attention_wrapper(
     void const *qkv_ptr,
     void *paged_k_cache_ptr,
@@ -187,15 +182,15 @@ __global__ void multitoken_paged_attention_wrapper(
     float q_eps,
     float k_eps) {
   kernel::multitoken_paged_attention_task_impl<T,
-                                       NUM_QO_HEADS,
-                                       NUM_KV_HEADS,
-                                       KV_CACHE_STRIDE,
-                                       QKV_STRIDE,
-                                       O_STRIDE,
-                                       HEAD_DIM,
-                                       MAX_SEQ_LEN,
-                                       PAGE_SIZE,
-                                       MAX_TOKENS>(
+                                               NUM_QO_HEADS,
+                                               NUM_KV_HEADS,
+                                               KV_CACHE_STRIDE,
+                                               QKV_STRIDE,
+                                               O_STRIDE,
+                                               HEAD_DIM,
+                                               MAX_SEQ_LEN,
+                                               PAGE_SIZE,
+                                               MAX_TOKENS>(
       qkv_ptr,
       paged_k_cache_ptr,
       paged_v_cache_ptr,
@@ -224,7 +219,7 @@ template <typename T,
           int HEAD_DIM,
           int MAX_SEQ_LEN,
           int PAGE_SIZE,
-          int MAX_TOKENS = 8>
+          int MAX_TOKENS = 16>
 void launch_multitoken_paged_attention(
     void const *qkv_ptr,
     void *paged_k_cache_ptr,
@@ -262,8 +257,6 @@ void launch_multitoken_paged_attention(
                        cudaFuncAttributeMaxDynamicSharedMemorySize,
                        smem_size);
 
-
-
   cudaEvent_t start, stop;
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
@@ -274,36 +267,35 @@ void launch_multitoken_paged_attention(
   printf("=== Multitoken Paged Attention Kernel Performance Profiling ===\n");
 
   for (int i = 0; i < WARMUP_RUNS; i++) {
-   multitoken_paged_attention_wrapper<T,
-                                     NUM_QO_HEADS,
-                                     NUM_KV_HEADS,
-                                     KV_CACHE_STRIDE,
-                                     QKV_STRIDE,
-                                     O_STRIDE,
-                                     HEAD_DIM,
-                                     MAX_SEQ_LEN,
-                                     PAGE_SIZE,
-                                     MAX_TOKENS>
-      <<<grid_dim, block_dim, smem_size>>>(qkv_ptr,
-                                           paged_k_cache_ptr,
-                                           paged_v_cache_ptr,
-                                           output_ptr,
-                                           qo_indptr_buffer_ptr,
-                                           paged_kv_indptr_buffer_ptr,
-                                           paged_kv_indices_buffer_ptr,
-                                           paged_kv_last_page_len_buffer_ptr,
-                                           request_id,
-                                           qk_norm,
-                                           rope,
-                                           q_norm_weight_ptr,
-                                           k_norm_weight_ptr,
-                                           cos_ptr,
-                                           sin_ptr,
-                                           q_eps,
-                                           k_eps);
+    multitoken_paged_attention_wrapper<T,
+                                       NUM_QO_HEADS,
+                                       NUM_KV_HEADS,
+                                       KV_CACHE_STRIDE,
+                                       QKV_STRIDE,
+                                       O_STRIDE,
+                                       HEAD_DIM,
+                                       MAX_SEQ_LEN,
+                                       PAGE_SIZE,
+                                       MAX_TOKENS>
+        <<<grid_dim, block_dim, smem_size>>>(qkv_ptr,
+                                             paged_k_cache_ptr,
+                                             paged_v_cache_ptr,
+                                             output_ptr,
+                                             qo_indptr_buffer_ptr,
+                                             paged_kv_indptr_buffer_ptr,
+                                             paged_kv_indices_buffer_ptr,
+                                             paged_kv_last_page_len_buffer_ptr,
+                                             request_id,
+                                             qk_norm,
+                                             rope,
+                                             q_norm_weight_ptr,
+                                             k_norm_weight_ptr,
+                                             cos_ptr,
+                                             sin_ptr,
+                                             q_eps,
+                                             k_eps);
   }
   cudaDeviceSynchronize();
-  nvtxRangePop();
 
   printf("Running %d benchmark iterations...\n", BENCHMARK_RUNS);
 
@@ -311,41 +303,40 @@ void launch_multitoken_paged_attention(
   float total_time_ms = 0.0f;
   cudaEventRecord(start);
   for (int i = 0; i < BENCHMARK_RUNS; i++) {
-    
-   multitoken_paged_attention_wrapper<T,
-                                     NUM_QO_HEADS,
-                                     NUM_KV_HEADS,
-                                     KV_CACHE_STRIDE,
-                                     QKV_STRIDE,
-                                     O_STRIDE,
-                                     HEAD_DIM,
-                                     MAX_SEQ_LEN,
-                                     PAGE_SIZE,
-                                     MAX_TOKENS>
-      <<<grid_dim, block_dim, smem_size>>>(qkv_ptr,
-                                           paged_k_cache_ptr,
-                                           paged_v_cache_ptr,
-                                           output_ptr,
-                                           qo_indptr_buffer_ptr,
-                                           paged_kv_indptr_buffer_ptr,
-                                           paged_kv_indices_buffer_ptr,
-                                           paged_kv_last_page_len_buffer_ptr,
-                                           request_id,
-                                           qk_norm,
-                                           rope,
-                                           q_norm_weight_ptr,
-                                           k_norm_weight_ptr,
-                                           cos_ptr,
-                                           sin_ptr,
-                                           q_eps,
-                                           k_eps);
-   
+
+    multitoken_paged_attention_wrapper<T,
+                                       NUM_QO_HEADS,
+                                       NUM_KV_HEADS,
+                                       KV_CACHE_STRIDE,
+                                       QKV_STRIDE,
+                                       O_STRIDE,
+                                       HEAD_DIM,
+                                       MAX_SEQ_LEN,
+                                       PAGE_SIZE,
+                                       MAX_TOKENS>
+        <<<grid_dim, block_dim, smem_size>>>(qkv_ptr,
+                                             paged_k_cache_ptr,
+                                             paged_v_cache_ptr,
+                                             output_ptr,
+                                             qo_indptr_buffer_ptr,
+                                             paged_kv_indptr_buffer_ptr,
+                                             paged_kv_indices_buffer_ptr,
+                                             paged_kv_last_page_len_buffer_ptr,
+                                             request_id,
+                                             qk_norm,
+                                             rope,
+                                             q_norm_weight_ptr,
+                                             k_norm_weight_ptr,
+                                             cos_ptr,
+                                             sin_ptr,
+                                             q_eps,
+                                             k_eps);
   }
 
-   cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
 
-    cudaEventElapsedTime(&total_time_ms, start, stop);
+  cudaEventElapsedTime(&total_time_ms, start, stop);
 
   float avg_time_ms = total_time_ms / BENCHMARK_RUNS;
 
@@ -413,6 +404,8 @@ void multitoken_paged_attention(
   int const page_size = 64;
   int const max_seq_len = 512;
 
+  int const max_tokens = 4;
+
   launch_multitoken_paged_attention<bfloat16,
                                     qo_heads,
                                     kv_heads,
@@ -421,7 +414,8 @@ void multitoken_paged_attention(
                                     o_stride,
                                     head_dim,
                                     max_seq_len,
-                                    page_size>(
+                                    page_size,
+                                    max_tokens>(
       qkv_ptr,
       paged_k_cache_ptr,
       paged_v_cache_ptr,
@@ -467,8 +461,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         py::arg("sin") = py::none(),
         py::arg("q_eps") = 0.0f,
         py::arg("k_eps") = 0.0f);
-    m.def("multitoken_paged_attention",
+  m.def("multitoken_paged_attention",
         &multitoken_paged_attention,
         "Multitoken Paged Attention");
 }
-

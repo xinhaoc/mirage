@@ -13,7 +13,7 @@ head_dim = 128
 page_size = 64
 max_num_pages = 64
 prompt_len = 8
-max_tokens = 8
+max_tokens = 4
 
 device = "cuda"
 dtype = torch.bfloat16
@@ -145,6 +145,18 @@ paged_v_cache = torch.randn(
     dtype=dtype,
 )
 
+
+# paged_k_cache = torch.full(
+#     (max_num_pages, page_size, kv_heads * head_dim), 0.1, 
+#     device=device,
+#     dtype=dtype,
+# )
+# paged_v_cache = torch.full(
+#     (max_num_pages, page_size, kv_heads * head_dim),0.1, 
+#     device=device,
+#     dtype=dtype,
+# )
+
 paged_kv_indptr_buffer = torch.arange(
     max_num_pages + 1, device=device, dtype=torch.int32
 )
@@ -169,7 +181,7 @@ qkv = torch.randn(
 )
 
 # qkv = torch.full(
-#     ((max_tokens, (qo_heads + 2 * kv_heads) * head_dim)),0.1, device=device, dtype=dtype
+#     ((max_tokens, (qo_heads + 2 * kv_heads) * head_dim)),0.8, device=device, dtype=dtype
 # )
 
 
@@ -236,7 +248,7 @@ runtime_kernel.multitoken_paged_attention(
     all_cos,
     all_sin,
     eps,
-    eps,
+    eps
 )
 
 torch_out = torch_multitoken_paged_attention(
@@ -256,6 +268,6 @@ torch_out = torch_multitoken_paged_attention(
     torch_sin,
     eps=eps,
 )
-# print("Ratio (Mirage / Torch):")
-# print(mirage_output / torch_out)
+print("Ratio (Mirage / Torch):")
+print(mirage_output / torch_out)
 
