@@ -189,8 +189,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_4_16(
   constexpr size_t S_O_SIZE = S_Q_SIZE;
 
   constexpr size_t S_TOTAL_OFFSET =
-      (S_O_OFFSET + S_O_SIZE >
-       S_K_NORM_SUM_OFFSET + S_K_NORM_SUM_SIZE)
+      (S_O_OFFSET + S_O_SIZE > S_K_NORM_SUM_OFFSET + S_K_NORM_SUM_SIZE)
           ? (S_O_OFFSET + S_O_SIZE)
           : (S_K_NORM_SUM_OFFSET + S_K_NORM_SUM_SIZE);
 
@@ -511,7 +510,9 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_4_16(
             //     ? expf(x_frag_f[m][frag_idx] * sm_scale -
             //            m_local[m][(frag_idx & 0x3) >> 1] * sm_scale)
             //     : 0.f;
-        x_frag_f[m][frag_idx] = expf(x_frag_f[m][frag_idx] * sm_scale - m_local[m][(frag_idx & 0x3) >> 1] * sm_scale);
+            x_frag_f[m][frag_idx] =
+                expf(x_frag_f[m][frag_idx] * sm_scale -
+                     m_local[m][(frag_idx & 0x3) >> 1] * sm_scale);
         d_partial[m][(frag_idx & 0x3) >> 1] += x_frag_f[m][frag_idx];
       }
     }
