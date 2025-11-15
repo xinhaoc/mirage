@@ -63,7 +63,6 @@ void const *o, int const *qo_indptr_buffer_ptr, int request_id, void *output){
 
 #pragma unroll
         for(int i = 0; i < VAL_PER_THREAD; ++i){
-
             float m_global = -inf;
             float d_global = 1.f;
             float o_global = 0.f;
@@ -72,8 +71,9 @@ void const *o, int const *qo_indptr_buffer_ptr, int request_id, void *output){
             //process 8 tokens
             float m_prev = m_global,
             d_prev = d_global; // save previous values
-            size_t lse_offset = kv_idx * (GLOBAL_ITERS_M * 64) + tok;
-            size_t o_offset = (kv_idx * (MAX_TOKENS * NUM_QO_HEADS) + tok) * HEAD_DIM +  head_partition * VAL_PER_THREAD + i;
+            int lse_offset = kv_idx * (MAX_TOKENS * NUM_QO_HEADS) + tok;
+            int o_offset = (kv_idx * (MAX_TOKENS * NUM_QO_HEADS) + tok) * HEAD_DIM +  head_partition * VAL_PER_THREAD + i;
+
 
             float other_m = lse_ptr[lse_offset],
                     other_d = 1;
@@ -82,6 +82,7 @@ void const *o, int const *qo_indptr_buffer_ptr, int request_id, void *output){
                 d_prev * ptx_exp2(m_prev - m_global) + other_d * ptx_exp2(other_m - m_global);
             // accumulate o
             float other_o = (float)o_ptr[o_offset];
+
             o_global = o_global * ptx_exp2(m_prev - m_global) +
                         other_o * ptx_exp2(other_m - m_global);
 

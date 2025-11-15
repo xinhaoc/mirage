@@ -185,6 +185,12 @@ __global__ void multitoken_paged_attention_wrapper(
     float k_eps,
     void *o_tmp,
     void *lse_tmp) {
+
+  float* lse_base = static_cast<float*>(lse_tmp);
+  float* lse_block = lse_base + NUM_QO_HEADS * MAX_TOKENS * blockIdx.x;
+
+  T* o_tmp_base = static_cast<T*>(o_tmp);
+  T* o_tmp_block = o_tmp_base + NUM_QO_HEADS * MAX_TOKENS * HEAD_DIM * blockIdx.x;
   kernel::multitoken_paged_attention_task_impl_32_64_split_kv<
       T,
       NUM_QO_HEADS,
@@ -194,12 +200,13 @@ __global__ void multitoken_paged_attention_wrapper(
       O_STRIDE,
       HEAD_DIM,
       256,
+      MAX_SEQ_LEN,
       PAGE_SIZE,
       MAX_TOKENS,
       PARTITION_KV>(qkv_ptr,
                     paged_k_cache_ptr,
                     paged_v_cache_ptr,
-                    o_tmp + NUM_QO_HEADS * MAX_TOKENS * HEAD_DIM * blockIdx.x,
+                    reinterpret_cast<void*>(o_tmp_block),
                     qo_indptr_buffer_ptr,
                     paged_kv_indptr_buffer_ptr,
                     paged_kv_indices_buffer_ptr,
@@ -213,8 +220,8 @@ __global__ void multitoken_paged_attention_wrapper(
                     sin_ptr,
                     q_eps,
                     k_eps,
-                    lse_tmp + NUM_QO_HEADS * MAX_TOKENS * blockIdx.x,
-                    blockIdx.x );
+                    reinterpret_cast<void*>(lse_block),
+                    blockIdx.x);
   
    kernel::merge_splitkv<T, NUM_QO_HEADS, NUM_KV_HEADS, HEAD_DIM, MAX_TOKENS, PARTITION_KV, (MAX_SEQ_LEN / 256)>(lse_tmp, o_tmp, qo_indptr_buffer_ptr, request_id, output_ptr);               
 }
@@ -253,6 +260,8 @@ void launch_multitoken_paged_attention(
 
   dim3 grid_dim(PARTITION_KV ? MAX_SEQ_LEN / 256 : 1, 1, 1);
   dim3 block_dim(128, 1, 1);
+
+  printf("luanch blocks %d\n", MAX_SEQ_LEN / 256);
 
   size_t smem_size = mirage::runtime::MAX_DYNAMIC_SHARED_MEMORY_SIZE;
 
@@ -405,6 +414,235 @@ void launch_multitoken_paged_attention(
   // cudaEventDestroy(stop);
 }
 
+template<typename T,
+         int NUM_QO_HEADS,
+         int NUM_KV_HEADS,
+         int KV_CACHE_STRIDE,
+         int QKV_STRIDE,
+         int O_STRIDE,
+         int HEAD_DIM,
+         int PAGE_SIZE,
+         int MAX_TOKENS>
+void launch_multitoken_paged_attention_dispatch(
+    void const* qkv_ptr,
+    void* paged_k_cache_ptr,
+    void* paged_v_cache_ptr,
+    void* output_ptr,
+    int const* qo_indptr_buffer_ptr,
+    int const* paged_kv_indptr_buffer_ptr,
+    int const* paged_kv_indices_buffer_ptr,
+    int const* paged_kv_last_page_len_buffer_ptr,
+    int request_id,
+    bool qk_norm,
+    bool rope,
+    void const* q_norm_weight_ptr,
+    void const* k_norm_weight_ptr,
+    void const* cos_ptr,
+    void const* sin_ptr,
+    float q_eps,
+    float k_eps,
+    void* o_tmp_ptr,
+    void* lse_tmp_ptr,
+  int seq_len) {
+
+  switch (seq_len) {
+    case 256:
+      launch_multitoken_paged_attention<T,
+                                        NUM_QO_HEADS,
+                                        NUM_KV_HEADS,
+                                        KV_CACHE_STRIDE,
+                                        QKV_STRIDE,
+                                        O_STRIDE,
+                                        HEAD_DIM,
+                                        256,
+                                        PAGE_SIZE,
+                                        MAX_TOKENS>(
+          qkv_ptr,
+          paged_k_cache_ptr,
+          paged_v_cache_ptr,
+          output_ptr,
+          qo_indptr_buffer_ptr,
+          paged_kv_indptr_buffer_ptr,
+          paged_kv_indices_buffer_ptr,
+          paged_kv_last_page_len_buffer_ptr,
+          request_id,
+          qk_norm,
+          rope,
+          q_norm_weight_ptr,
+          k_norm_weight_ptr,
+          cos_ptr,
+          sin_ptr,
+          q_eps,
+          k_eps,
+          o_tmp_ptr,
+          lse_tmp_ptr);
+      break;
+
+    case 512:
+      launch_multitoken_paged_attention<T,
+                                        NUM_QO_HEADS,
+                                        NUM_KV_HEADS,
+                                        KV_CACHE_STRIDE,
+                                        QKV_STRIDE,
+                                        O_STRIDE,
+                                        HEAD_DIM,
+                                        512,
+                                        PAGE_SIZE,
+                                        MAX_TOKENS>(
+          qkv_ptr,
+          paged_k_cache_ptr,
+          paged_v_cache_ptr,
+          output_ptr,
+          qo_indptr_buffer_ptr,
+          paged_kv_indptr_buffer_ptr,
+          paged_kv_indices_buffer_ptr,
+          paged_kv_last_page_len_buffer_ptr,
+          request_id,
+          qk_norm,
+          rope,
+          q_norm_weight_ptr,
+          k_norm_weight_ptr,
+          cos_ptr,
+          sin_ptr,
+          q_eps,
+          k_eps,
+          o_tmp_ptr,
+          lse_tmp_ptr);
+      break;
+
+      case 1024:
+      launch_multitoken_paged_attention<T,
+                                        NUM_QO_HEADS,
+                                        NUM_KV_HEADS,
+                                        KV_CACHE_STRIDE,
+                                        QKV_STRIDE,
+                                        O_STRIDE,
+                                        HEAD_DIM,
+                                        1024,
+                                        PAGE_SIZE,
+                                        MAX_TOKENS>(
+          qkv_ptr,
+          paged_k_cache_ptr,
+          paged_v_cache_ptr,
+          output_ptr,
+          qo_indptr_buffer_ptr,
+          paged_kv_indptr_buffer_ptr,
+          paged_kv_indices_buffer_ptr,
+          paged_kv_last_page_len_buffer_ptr,
+          request_id,
+          qk_norm,
+          rope,
+          q_norm_weight_ptr,
+          k_norm_weight_ptr,
+          cos_ptr,
+          sin_ptr,
+          q_eps,
+          k_eps,
+          o_tmp_ptr,
+          lse_tmp_ptr);
+      break;
+
+      case 2048:
+      launch_multitoken_paged_attention<T,
+                                        NUM_QO_HEADS,
+                                        NUM_KV_HEADS,
+                                        KV_CACHE_STRIDE,
+                                        QKV_STRIDE,
+                                        O_STRIDE,
+                                        HEAD_DIM,
+                                        2048,
+                                        PAGE_SIZE,
+                                        MAX_TOKENS>(
+          qkv_ptr,
+          paged_k_cache_ptr,
+          paged_v_cache_ptr,
+          output_ptr,
+          qo_indptr_buffer_ptr,
+          paged_kv_indptr_buffer_ptr,
+          paged_kv_indices_buffer_ptr,
+          paged_kv_last_page_len_buffer_ptr,
+          request_id,
+          qk_norm,
+          rope,
+          q_norm_weight_ptr,
+          k_norm_weight_ptr,
+          cos_ptr,
+          sin_ptr,
+          q_eps,
+          k_eps,
+          o_tmp_ptr,
+          lse_tmp_ptr);
+      break;
+
+      case 4096:
+      launch_multitoken_paged_attention<T,
+                                        NUM_QO_HEADS,
+                                        NUM_KV_HEADS,
+                                        KV_CACHE_STRIDE,
+                                        QKV_STRIDE,
+                                        O_STRIDE,
+                                        HEAD_DIM,
+                                        4096,
+                                        PAGE_SIZE,
+                                        MAX_TOKENS>(
+          qkv_ptr,
+          paged_k_cache_ptr,
+          paged_v_cache_ptr,
+          output_ptr,
+          qo_indptr_buffer_ptr,
+          paged_kv_indptr_buffer_ptr,
+          paged_kv_indices_buffer_ptr,
+          paged_kv_last_page_len_buffer_ptr,
+          request_id,
+          qk_norm,
+          rope,
+          q_norm_weight_ptr,
+          k_norm_weight_ptr,
+          cos_ptr,
+          sin_ptr,
+          q_eps,
+          k_eps,
+          o_tmp_ptr,
+          lse_tmp_ptr);
+      break;
+
+      case 8192:
+      launch_multitoken_paged_attention<T,
+                                        NUM_QO_HEADS,
+                                        NUM_KV_HEADS,
+                                        KV_CACHE_STRIDE,
+                                        QKV_STRIDE,
+                                        O_STRIDE,
+                                        HEAD_DIM,
+                                        8192,
+                                        PAGE_SIZE,
+                                        MAX_TOKENS>(
+          qkv_ptr,
+          paged_k_cache_ptr,
+          paged_v_cache_ptr,
+          output_ptr,
+          qo_indptr_buffer_ptr,
+          paged_kv_indptr_buffer_ptr,
+          paged_kv_indices_buffer_ptr,
+          paged_kv_last_page_len_buffer_ptr,
+          request_id,
+          qk_norm,
+          rope,
+          q_norm_weight_ptr,
+          k_norm_weight_ptr,
+          cos_ptr,
+          sin_ptr,
+          q_eps,
+          k_eps,
+          o_tmp_ptr,
+          lse_tmp_ptr);
+      break;
+
+    default:
+      TORCH_CHECK(false, "Unsupported seq_len = ", seq_len);
+  }
+}
+
 void multitoken_paged_attention(
     torch::Tensor qkv,
     torch::Tensor paged_k_cache,
@@ -424,7 +662,8 @@ void multitoken_paged_attention(
     torch::optional<torch::Tensor> cos = torch::nullopt,
     torch::optional<torch::Tensor> sin = torch::nullopt,
     float q_eps = 0.0f,
-    float k_eps = 0.0f) {
+    float k_eps = 0.0f,
+    int seq_len = 512) {
   void const *qkv_ptr = qkv.data_ptr();
   void *paged_k_cache_ptr = paged_k_cache.data_ptr();
   void *paged_v_cache_ptr = paged_v_cache.data_ptr();
@@ -457,16 +696,15 @@ void multitoken_paged_attention(
 
   int const max_tokens = 8;
 
-  launch_multitoken_paged_attention<bfloat16,
-                                    qo_heads,
-                                    kv_heads,
-                                    kv_stride,
-                                    qkv_stride,
-                                    o_stride,
-                                    head_dim,
-                                    max_seq_len,
-                                    page_size,
-                                    max_tokens>(
+  launch_multitoken_paged_attention_dispatch<bfloat16,
+                                             qo_heads,
+                                             kv_heads,
+                                             kv_stride,
+                                             qkv_stride,
+                                             o_stride,
+                                             head_dim,
+                                             page_size,
+                                             max_tokens>(
       qkv_ptr,
       paged_k_cache_ptr,
       paged_v_cache_ptr,
@@ -484,8 +722,9 @@ void multitoken_paged_attention(
       sin_ptr,
       q_eps,
       k_eps,
-    o_tmp_ptr,
-  lse_tmp_ptr);
+      o_tmp_ptr,
+      lse_tmp_ptr,
+    seq_len);
 
   cudaError_t err = cudaDeviceSynchronize();
   if (err != cudaSuccess) {

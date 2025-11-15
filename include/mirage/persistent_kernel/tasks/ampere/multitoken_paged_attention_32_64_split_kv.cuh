@@ -34,6 +34,7 @@ template <typename T,
           int QKV_STRIDE,
           int O_STRIDE,
           int HEAD_DIM,
+          int SEQ_LEN,
           int MAX_SEQ_LEN,
           int PAGE_SIZE,
           int MAX_TOKENS = 8,
@@ -85,7 +86,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
   //  the scale factor for normalization in softmax
   float const sm_scale = 1.0f / sqrtf(static_cast<float>(HEAD_DIM)) * log2e;
 
-  size_t KV_CACHE_OFFSET = kv_idx * MAX_SEQ_LEN;
+  size_t KV_CACHE_OFFSET = kv_idx * SEQ_LEN;
 
   int warp_idx = warp_id();
   int lane_idx = lane_id();
@@ -112,13 +113,14 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
   
   int const global_seq_len = seq_len;
   
-  seq_len = PARTITION_KV ? (((seq_len - kv_idx * MAX_SEQ_LEN) >= MAX_SEQ_LEN) ? MAX_SEQ_LEN : (seq_len - kv_idx * MAX_SEQ_LEN)) : seq_len;  
+  seq_len = PARTITION_KV ? (((seq_len - kv_idx * SEQ_LEN) >= SEQ_LEN) ? SEQ_LEN : (seq_len - kv_idx * SEQ_LEN)) : seq_len;  
   
 
-  if(threadIdx.x == 0){
-    printf("seq_len %d, global_seq_len %d\n", seq_len, global_seq_len);
-  }
-  int kv_cache_offset = PARTITION_KV ? kv_idx * MAX_SEQ_LEN : 0;
+  
+  int kv_cache_offset = PARTITION_KV ? kv_idx * SEQ_LEN : 0;
+  // if(threadIdx.x == 0){
+  //   printf("seq_len %d, global_seq_len %d, kv_cache_offset %d\n", seq_len, global_seq_len, kv_cache_offset);
+  // }
 
   // valid_lens = [seq_len - num_tokens + 1 + i for i in range(num_tokens)]
   // seq_len = 7 * 64 + 64 = 512
@@ -276,6 +278,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
   // so that we access a single page in one iteration
   static_assert(PAGE_SIZE % KV_TILE_SIZE == 0);
 
+
   //8 * 4 * 16(8 bytes per load)
 #pragma unroll
   for (int chunk_idx = threadIdx.x;
@@ -292,7 +295,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
     load_smem(q_smem(dst_row, dst_col), (q_dmem(src_row, src_col)));
   }
 
-  int page_idx_0 = page_indices[kv_cache_offset];
+  int page_idx_0 = page_indices[kv_cache_offset / PAGE_SIZE];
 #pragma unroll
   for (int chunk_idx = threadIdx.x;
        chunk_idx < curr_iter_len * HEAD_DIM_COPY_ITER;
@@ -316,6 +319,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
   }
   cp_async_fence();
   cp_finished_seq_len += curr_iter_len;
+
 
   float m_local[GLOBAL_ITERS_M][2]; // 2 * 128 threads = 256
 #pragma unroll
@@ -344,6 +348,8 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
                             : 0;
     if (next_iter_len > 0) {
       int page_idx = page_indices[(cp_finished_seq_len + kv_cache_offset) / PAGE_SIZE];
+
+
 #pragma unroll
       for (int chunk_idx = threadIdx.x;
            chunk_idx < curr_iter_len * HEAD_DIM_COPY_ITER;
@@ -354,13 +360,17 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
           // load from KV Cache
           // int page_idx =
           //    page_indices[(dst_row + cp_finished_seq_len) / PAGE_SIZE];
-          int page_offset = (dst_row + cp_finished_seq_len) % PAGE_SIZE;
+          int page_offset = (dst_row + cp_finished_seq_len + kv_cache_offset) % PAGE_SIZE;
           int src_row = page_idx * PAGE_SIZE + page_offset;
           load_smem(k_smem(dst_row, col), (paged_k_cache_dmem(src_row, col)));
           load_smem(v_smem(dst_row, col), (paged_v_cache_dmem(src_row, col)));
         } else {
           // load from QKV
+          
           int src_row = dst_row + cp_finished_seq_len - (seq_len - num_tokens);
+          // if(threadIdx.x == 0){
+            // printf("blockIdx.x %d, src_row %d, dst_row %d, col %d\n", blockIdx.x, src_row, dst_row, col);
+          // }
           load_smem(k_smem(dst_row, col), (k_dmem(src_row, col)));
           load_smem(v_smem(dst_row, col), (v_dmem(src_row, col)));
         }
@@ -371,6 +381,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
     } else {
       cp_async_wait<0>();
     }
+
 
     // rotate the buffers
     if ((iter & 0x1) == 0) {
@@ -451,6 +462,8 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
       }
     }
 
+
+
     __syncthreads();
 
     // update the KV Cache
@@ -521,21 +534,8 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
     }
     __syncthreads();
 
-    // update m_local: get partial max
-    // NOTE(Jinchen): each thread maintains MMA_ITERS_M * 2 partial max
-    // values. For a given m, the first value is the maximum of
-    // x_frag_f[m][0, 1, 4, 5], and the second value is the maximum of
-    // x_frag_f[m][2, 3, 6, 7]
 
-    // if(threadIdx.x == 0 && iter == 7){
 
-    //   for(int n = 0; n < NUM_ITER_QK_N; n++){
-    //     for (int frag_idx = 0; frag_idx < 8; frag_idx++) {
-    //       printf("result of qk is n %d, fragidx %d, value %f\n", n, frag_idx,
-    //       x_frag_f[0][n][frag_idx]);
-    //     }
-    //   }
-    // }
     float m_prev[GLOBAL_ITERS_M][2];
 #pragma unroll
     for (int m = 0; m < GLOBAL_ITERS_M; m++) {
@@ -559,8 +559,10 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
           // col <= token idx + 512 - 8
           bool is_valid =
               (row < num_tokens * NUM_QO_PER_KV) &&
-              (col + iter * KV_TILE_SIZE <= token_idx + seq_len - num_tokens);
-
+              ((col + iter * KV_TILE_SIZE + kv_cache_offset) <= (token_idx + global_seq_len - num_tokens));
+          //  if(threadIdx.x < 64){
+          //   printf("blockIdx.x %d, is valid %d, row %d, col%d, val %d, token_idx %d, global_seq_len %d, num_tokens %d, \n", blockIdx.x, is_valid, row, col, col + iter * KV_TILE_SIZE + kv_cache_offset, token_idx, global_seq_len, num_tokens);
+          // }
           x_frag_f[m][n][frag_idx] = is_valid ? x_frag_f[m][n][frag_idx] : -inf;
           m_local[m][(frag_idx & 0x3) >> 1] =
               max(m_local[m][(frag_idx & 0x3) >> 1], x_frag_f[m][n][frag_idx]);
@@ -598,7 +600,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
         for (int frag_idx = 0; frag_idx < 8; frag_idx++) {
           // x_frag_f[m][n][frag_idx] =
           //     x_frag_f[m][n][frag_idx] != -inf
-          //         ? expf(x_frag_f[m][n][frag_idx] * sm_scale -
+          //         ? ptx_exp2(x_frag_f[m][n][frag_idx] * sm_scale -
           //                m_local[m][(frag_idx & 0x3) >> 1] * sm_scale)
           //         : 0.f;
 
@@ -624,6 +626,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
       d[m][0] += d_partial[m][0];
       d[m][1] += d_partial[m][1];
     }
+
 
     // update o: rescale
 #pragma unroll
@@ -662,6 +665,18 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
     __syncthreads();
     curr_iter_len = next_iter_len;
   }
+
+  
+  //update m
+  if(PARTITION_KV){
+     #pragma unroll
+  for (int m = 0; m < GLOBAL_ITERS_M; m++) {
+    m_local[m][0] *= m_local[m][0] != -inf ? sm_scale : 1.f;
+    m_local[m][1] *= m_local[m][1] != -inf ? sm_scale : 1.f;
+  }
+
+  }
+ 
 
   // result: 64 * 128
 #pragma unroll
@@ -705,6 +720,8 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
     int src_col = elem_idx % HEAD_DIM;
     int dst_row = src_row / NUM_QO_PER_KV;
     int dst_col = src_col + (src_row % NUM_QO_PER_KV) * HEAD_DIM;
+
+    // printf("blockIdx.x %d, threadIdx.x %d, dst_row %d, dst_col %d, val %f\n",blockIdx.x,  threadIdx.x, dst_row, dst_col, (float)o_smem.at(src_row, src_col));
    o_dmem.at(dst_row, dst_col) = o_smem.at(src_row, src_col);
   }
 
@@ -716,17 +733,17 @@ if(PARTITION_KV){
   #pragma unroll
         for (uint32_t j = 0; j < 2; ++j) {
          int idx = m * 64 + warp_idx * 16 + j * 8 + lane_idx / 4;
-
          if(idx < (num_tokens * NUM_QO_HEADS)){
             reinterpret_cast<float *>(lse)[idx] = ptx_log2(d[m][j]) + m_local[m][j];
+
+            // if(blockIdx.x == 0 && j == 0 ){
+            //   printf("d %f, m %f\n", d[m][j], m_local[m][j]);
+            // }
          }
          
     }
-     
-
   }
-
-     
+  __syncthreads();
   }
 }
 } // namespace kernel
