@@ -65,9 +65,9 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64_split
     void *lse,
     int kv_idx) {
   if (threadIdx.x == 0){
-    // printf("blockIdx.x %d, NUM_QO_HEADS %d, start multitoken_paged_attention_32_64_split_kv, qkv_ptr %p, paged_k_cache_ptr %p, paged_v_cache_ptr %p, output_ptr %p\n", blockIdx.x, NUM_QO_HEADS, qkv_ptr, paged_k_cache_ptr, paged_v_cache_ptr, output_ptr);
+    printf("blockIdx.x %d, NUM_QO_HEADS %d, start multitoken_paged_attention_32_64_split_kv, qkv_ptr %p, paged_k_cache_ptr %p, paged_v_cache_ptr %p, output_ptr %p, lse %p, kv_idx %d\n", blockIdx.x, NUM_QO_HEADS, qkv_ptr, paged_k_cache_ptr, paged_v_cache_ptr, output_ptr, lse, kv_idx);
   }
-  return;
+
   if (threadIdx.x >= 128) return;
   constexpr int NUM_QO_PER_KV = NUM_QO_HEADS / NUM_KV_HEADS;
 

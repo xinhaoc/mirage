@@ -387,7 +387,7 @@ void register_mugraph(
             task.kv_idx = bid.z;
           }
           if (task_type == TASK_PAGED_ATTENTION_SPLIT_KV_MERGE_SM100) {
-            task.merge_task_offset = bid.y; // reuse kv_idx to indicate the task index
+            task.merge_task_offset = bid.y;
           }
           // Initialize input tensors to the task
           for (auto const &input : input_ops) {
@@ -845,7 +845,9 @@ TaskGraphResult print_task_graph(
              {"trigger_event", EVENT_INVALID_ID},
              {"dependent_event", EVENT_INVALID_ID},
              {"request_id", -1},
-             {"expert_offset", -1}});
+             {"expert_offset", -1},
+             {"kv_idx", -1},
+             {"merge_task_offset", -1}});
   }
   // generate task[1]
   {
@@ -859,7 +861,9 @@ TaskGraphResult print_task_graph(
               get_event_id(my_gpu_id, 1 /*event_pos*/, false /*is_nvshmem*/)},
              {"dependent_event", EVENT_INVALID_ID},
              {"request_id", -1},
-             {"expert_offset", -1}});
+             {"expert_offset", -1},
+             {"kv_idx", -1},
+             {"merge_task_offset", -1}});
   }
   // generate all other tasks
   size_t task_pos = 2;
@@ -921,7 +925,9 @@ TaskGraphResult print_task_graph(
                                 {"trigger_event", task_desc.trigger_event},
                                 {"dependent_event", task_desc.dependent_event},
                                 {"request_id", task_desc.request_id},
-                                {"expert_offset", task_desc.expert_offset}};
+                                {"expert_offset", task_desc.expert_offset},
+                                {"kv_idx", task_desc.kv_idx},
+                                {"merge_task_offset", task_desc.merge_task_offset}};
               off_t offset = 0;
               // Add input
               int3 input_map = input_ops[0]->input_map;
@@ -1079,7 +1085,15 @@ TaskGraphResult print_task_graph(
                    {"trigger_event", task_desc.trigger_event},
                    {"dependent_event", task_desc.dependent_event},
                    {"request_id", task_desc.request_id},
-                   {"expert_offset", task_desc.expert_offset}};
+                   {"expert_offset", task_desc.expert_offset},
+                   {"kv_idx", task_desc.kv_idx},
+                   {"merge_task_offset", task_desc.merge_task_offset}};
+      if (task_desc.task_type == TASK_PAGED_ATTENTION_SPLIT_KV_SM100) {
+        printf("in runtime.cc, task_desc.kv_idx: %d\n", task_desc.kv_idx);
+      }
+      if (task_desc.task_type == TASK_PAGED_ATTENTION_SPLIT_KV_MERGE_SM100) {
+        printf("in runtime.cc, task_desc.merge_task_offset: %d\n", task_desc.merge_task_offset);
+      }
       for (int i = 0; i < task_desc.num_inputs; i++) {
         if (input_ops[i]->dtensor == kernel::DTensor::EMPTY_TENSOR) {
           json json_dims = json::array();

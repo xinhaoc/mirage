@@ -157,7 +157,7 @@ struct FullTaskDesc {
   FullTaskDesc(TaskType t, int _variant_id)
       : task_type(t), variant_id(_variant_id), num_inputs(0), num_outputs(0),
         trigger_event(EVENT_INVALID_ID), dependent_event(EVENT_INVALID_ID),
-        request_id(-1), head_group(-1) {}
+        request_id(-1), head_group(-1), expert_offset(-1), kv_idx(-1), merge_task_offset(-1) {}
   FullTaskDesc() {}
   TaskType task_type;
   unsigned variant_id;
@@ -170,8 +170,8 @@ struct FullTaskDesc {
     struct {
       int request_id; // Used for paged attention
       int head_group; // Used for paged attention hopper
-      int kv_idx; // Used for paged attention split kv
       int expert_offset; // Used for MoE
+      int kv_idx; // Used for paged attention split kv
       int merge_task_offset; // Used for paged attention split kv merge
     };
   };
@@ -181,7 +181,7 @@ struct alignas(16) TaskDesc {
   TaskDesc(FullTaskDesc t)
       : task_type(t.task_type), variant_id(t.variant_id),
         trigger_event(t.trigger_event), dependent_event(t.dependent_event),
-        request_id(t.request_id), head_group(t.head_group) {
+        request_id(t.request_id), head_group(t.head_group), expert_offset(t.expert_offset), kv_idx(t.kv_idx), merge_task_offset(t.merge_task_offset) {
     for (int i = 0; i < t.num_inputs; i++) {
       input_ptrs[i] = t.inputs[i].base_ptr;
     }
