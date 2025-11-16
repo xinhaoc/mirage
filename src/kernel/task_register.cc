@@ -2718,10 +2718,10 @@ int TaskRegister::register_paged_attention_split_kv_sm100_task(
   assert(output_ops[1]->output_tensors[0].num_dims == 3); // output_tmp
 
   int qkv_stride = input_ops[0]->dtensor.dim[1];
-  int output_size = output_ops[1]->dtensor.dim[2];
   int num_q_heads = params[0];
   int num_kv_heads = params[1];
-  int head_dim = output_size / num_q_heads;
+  int head_dim = input_ops[1]->output_tensors[0].dim[3];
+  int output_size = head_dim * num_q_heads;
   int kv_stride = head_dim * num_kv_heads;
   int max_seq_len = params[4];
   int page_size = params[5];
@@ -2743,7 +2743,7 @@ int TaskRegister::register_paged_attention_split_kv_sm100_task(
         num_kv_heads,
         kv_stride,
         qkv_stride,
-        output_size,
+        output_size * num_kv_chunks, // o_stride should consider num_kv_chunks
         head_dim,
         SEQ_LEN_PER_BLOCK,
         max_seq_len,

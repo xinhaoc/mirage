@@ -383,10 +383,9 @@ void register_mugraph(
             task.expert_offset = bid.x;
           }
           // Set paged attention split kv task kv_idx
-          if (task_type == TASK_PAGED_ATTENTION_SPLIT_KV_SM100) {
+          if (task_type == TASK_PAGED_ATTENTION_SPLIT_KV_SM100
+             || task_type == TASK_PAGED_ATTENTION_SPLIT_KV_MERGE_SM100) {
             task.kv_idx = bid.z;
-          }
-          if (task_type == TASK_PAGED_ATTENTION_SPLIT_KV_MERGE_SM100) {
             task.merge_task_offset = bid.y;
           }
           // Initialize input tensors to the task
@@ -645,6 +644,8 @@ TaskGraphResult print_task_graph(
     code.e("            task.at(\"variant_id\"));");
     code.e("task_desc.request_id = task.at(\"request_id\").get<int>();");
     code.e("task_desc.expert_offset = task.at(\"expert_offset\").get<int>();");
+    code.e("task_desc.kv_idx = task.at(\"kv_idx\").get<int>();");
+    code.e("task_desc.merge_task_offset = task.at(\"merge_task_offset\").get<int>();");
     code.e("if (task.at(\"trigger_event\").is_number_integer()) {");
     code.e("task_desc.trigger_event = task.at(\"trigger_event\").get<unsigned "
            "long long int>();");
@@ -1088,12 +1089,6 @@ TaskGraphResult print_task_graph(
                    {"expert_offset", task_desc.expert_offset},
                    {"kv_idx", task_desc.kv_idx},
                    {"merge_task_offset", task_desc.merge_task_offset}};
-      if (task_desc.task_type == TASK_PAGED_ATTENTION_SPLIT_KV_SM100) {
-        printf("in runtime.cc, task_desc.kv_idx: %d\n", task_desc.kv_idx);
-      }
-      if (task_desc.task_type == TASK_PAGED_ATTENTION_SPLIT_KV_MERGE_SM100) {
-        printf("in runtime.cc, task_desc.merge_task_offset: %d\n", task_desc.merge_task_offset);
-      }
       for (int i = 0; i < task_desc.num_inputs; i++) {
         if (input_ops[i]->dtensor == kernel::DTensor::EMPTY_TENSOR) {
           json json_dims = json::array();

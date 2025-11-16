@@ -166,7 +166,7 @@ struct FullTaskDesc {
   EventId dependent_event;
   TensorDesc inputs[MAX_INPUTS_PER_TASK];
   TensorDesc outputs[MAX_OUTPUTS_PER_TASK];
-  union {
+  // union {
     struct {
       int request_id; // Used for paged attention
       int head_group; // Used for paged attention hopper
@@ -174,7 +174,7 @@ struct FullTaskDesc {
       int kv_idx; // Used for paged attention split kv
       int merge_task_offset; // Used for paged attention split kv merge
     };
-  };
+  // };
 };
 
 struct alignas(16) TaskDesc {
@@ -214,7 +214,7 @@ struct alignas(16) TaskDesc {
   void *output_tma_desc_ptrs[MAX_OUTPUTS_PER_TASK]
                             [mirage::config::MAX_TMA_DESC_PER_TENSOR];
 #endif
-  union {
+  // union {
     struct {
       int request_id; // Used for paged attention
       int head_group; // Used for paged attention hopper
@@ -223,7 +223,7 @@ struct alignas(16) TaskDesc {
       int merge_task_offset; // Used for paged attention split kv merge
     };
     size_t xfer_size_in_bytes; // Used for nvshmem
-  };
+  // };
 };
 
 struct RuntimeConfig {
