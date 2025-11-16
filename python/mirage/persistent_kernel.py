@@ -134,9 +134,9 @@ def get_compile_command(
         # "-O0",
         # "-g",
         # "-G",
-        # "--ptxas-options=-v",
-        # "-Xptxas=-v",
-        # "-lineinfo",
+        "--ptxas-options=-v",
+        "-Xptxas=-v",
+        "-lineinfo",
         f"-I{py_include_dir}",
         f"-I{mirage_inc_path}",
         f"-I{os.path.join(mirage_inc_path, 'mirage/persistent_kernel')}",
@@ -638,6 +638,7 @@ class PersistentKernel:
         num_kv_heads = k_cache.dim(2)
         num_q_heads = output.dim(2) // head_dim
         rotary_embed = 0
+        num_kv_chunks = output.dim(1)
         if cos_pos_embed is not None or sin_pos_embed is not None:
             assert cos_pos_embed.num_dims == 2  # (seq_len, head_dim)
             assert sin_pos_embed.num_dims == 2  # (seq_len, head_dim)
@@ -658,7 +659,8 @@ class PersistentKernel:
         # params[3]: rotary_embed
         # params[4]: max_seq_len
         # params[5]: page_size
-        params = [num_q_heads, num_kv_heads, qk_norm, rotary_embed, self.max_seq_length, self.page_size]
+        # params[6]: num_kv_chunks
+        params = [num_q_heads, num_kv_heads, qk_norm, rotary_embed, self.max_seq_length, self.page_size, num_kv_chunks]
 
         tb_graph = TBGraph(CyTBGraph(grid_dim, block_dim, 1, 64))
         assert grid_dim[0] == self.max_num_batched_requests
@@ -706,12 +708,13 @@ class PersistentKernel:
         num_q_heads = lse.dim(2)
         head_dim = output.dim(1) / num_q_heads
         num_qo_heads_per_kv = num_q_heads / grid_dim[1]
-
+        num_kv_heads = grid_dim[1]
         # params[0]: num_qo_heads_per_kv
         # params[1]: head_dim
         # params[2]: max_seq_len
         # params[3]: page_size
-        params = [num_qo_heads_per_kv, head_dim, self.max_seq_length, self.page_size]
+        # params[4]: num_kv_heads
+        params = [num_qo_heads_per_kv, head_dim, self.max_seq_length, self.page_size, num_kv_heads]
 
         tb_graph = TBGraph(CyTBGraph(grid_dim, block_dim, 1, 64))
         tb_graph.new_input(lse, (-1, 2, -1), -1, True)

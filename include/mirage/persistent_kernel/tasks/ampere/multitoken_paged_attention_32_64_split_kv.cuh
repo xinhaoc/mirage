@@ -33,6 +33,7 @@ namespace kernel {
 template <typename T,
           int NUM_QO_HEADS,
           int NUM_KV_HEADS,
+          int NUM_QO_GROUPS,
           int KV_CACHE_STRIDE,
           int QKV_STRIDE,
           int O_STRIDE,
@@ -773,7 +774,14 @@ if(PARTITION_KV){
         for (uint32_t j = 0; j < 2; ++j) {
          int idx = m * 64 + warp_idx * 16 + j * 8 + lane_idx / 4;
          if(idx < (num_tokens * NUM_QO_HEADS)){
-            reinterpret_cast<float *>(lse)[idx] = ptx_log2(d[m][j]) + m_local[m][j];
+
+            int token_idx = idx / NUM_QO_HEADS;
+            int head_idx = idx % NUM_QO_HEADS;
+
+            int offset = head_idx + token_idx * NUM_KV_CHUNKS * NUM_QO_HEADS * NUM_QO_GROUPS;
+            
+            reinterpret_cast<float *>(lse)[offset] = ptx_log2(d[m][j]) + m_local[m][j];
+            // reinterpret_cast<float *>(lse)[idx] = ptx_log2(d[m][j]) + m_local[m][j];
 
             // if(blockIdx.x == 0 && j == 0 ){
             //   printf("d %f, m %f\n", d[m][j], m_local[m][j]);

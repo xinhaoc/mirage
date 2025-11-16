@@ -386,6 +386,9 @@ void register_mugraph(
           if (task_type == TASK_PAGED_ATTENTION_SPLIT_KV_SM100) {
             task.kv_idx = bid.z;
           }
+          if (task_type == TASK_PAGED_ATTENTION_SPLIT_KV_MERGE_SM100) {
+            task.merge_task_offset = bid.y; // reuse kv_idx to indicate the task index
+          }
           // Initialize input tensors to the task
           for (auto const &input : input_ops) {
             TensorDesc desc;

@@ -172,6 +172,7 @@ struct FullTaskDesc {
       int head_group; // Used for paged attention hopper
       int kv_idx; // Used for paged attention split kv
       int expert_offset; // Used for MoE
+      int merge_task_offset; // Used for paged attention split kv merge
     };
   };
 };
@@ -219,6 +220,7 @@ struct alignas(16) TaskDesc {
       int head_group; // Used for paged attention hopper
       int kv_idx; // Used for paged attention split kv
       int expert_offset;         // Used for MoE
+      int merge_task_offset; // Used for paged attention split kv merge
     };
     size_t xfer_size_in_bytes; // Used for nvshmem
   };

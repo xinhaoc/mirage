@@ -466,7 +466,7 @@ if __name__ == "__main__":
             )
             k_cache = mpk.attach_input(
                 torch_tensor=model.model.kv_cache[0][i], name=f"layer_{i}_k_cache"
-            )
+            ) 
             v_cache = mpk.attach_input(
                 torch_tensor=model.model.kv_cache[1][i], name=f"layer_{i}_v_cache"
             )
