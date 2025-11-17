@@ -12,8 +12,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "multitoken_paged_attention_32_64.cuh"
-#include "multitoken_paged_attention_4_16.cuh"
+#include "multitoken_paged_attention_32_64_split_kv.cuh"
+#include "multitoken_paged_attention_4_16_split_kv.cuh"
 
 namespace kernel {
 template <typename T,

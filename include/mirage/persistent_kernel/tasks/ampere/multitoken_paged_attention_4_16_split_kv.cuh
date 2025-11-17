@@ -92,7 +92,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_4_16_split_
   // the scale factor for normalization in softmax
   float const sm_scale = 1.0f / sqrtf(static_cast<float>(HEAD_DIM)) * log2e;
 
-   size_t KV_CACHE_OFFSET = kv_idx * SEQ_LEN;
+  //  size_t KV_CACHE_OFFSET = kv_idx * SEQ_LEN;
 
   int warp_idx = warp_id();
   int lane_idx = lane_id();
@@ -716,7 +716,7 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_4_16_split_
 
   if(PARTITION_KV){
   #pragma unroll
-  for (int m = 0; m < GLOBAL_ITERS_M; m++) {
+  for (int m = 0; m < MMA_ITERS_M; m++) {
   #pragma unroll
         for (uint32_t j = 0; j < 2; ++j) {
          int idx = m * 16 + j * 8 + lane_idx / 4;
