@@ -63,7 +63,8 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
     float k_eps,
     void *qkv_ptr,
     void *output_ptr,
-    int kv_idx) {
+    void *lse = nullptr,
+    int kv_idx = 0) {
   constexpr int NUM_QO_PER_KV = NUM_QO_HEADS / NUM_KV_HEADS;
 
   constexpr int KV_TILE_SIZE = 64;
@@ -761,7 +762,7 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
 
   if constexpr (PARTITION_KV) {
     #pragma unroll
-        for (int m = 0; m < GLOBAL_ITERS_M; m++) {
+        for (int m = 0; m < MMA_ITERS_M; m++) {
     #pragma unroll
           for (uint32_t j = 0; j < 2; ++j) {
             int idx = m * 64 + warp_idx * 16 + j * 8 + lane_idx / 4;

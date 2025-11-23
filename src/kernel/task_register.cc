@@ -1064,7 +1064,8 @@ int TaskRegister::register_paged_attention_hopper_task(
   code.e("    1e-6f,");
   code.e("    task_desc->input_ptrs[0],");
   code.e("    task_desc->output_ptrs[0],");
-  code.e("    task_desc->task_metadata.kv_idx);");
+  code.e("    nullptr,"); // lse, not used for non-split KV tasks
+  code.e("    0);"); // kv_idx, not used for non-split KV tasks
 
   return register_task_variant(TASK_PAGED_ATTENTION_HOPPER, code.to_string());
 }
@@ -2892,10 +2893,8 @@ code.e("kernel::multitoken_paged_attention_hopper_impl<bfloat16, $, "
        max_tokens, /* MAX_TOKENS */
        "true", /* PARTITION_KV */
        num_kv_chunks); /* NUM_KV_CHUNKS */
-code.e("    task_desc->input_ptrs[0],");
 code.e("    task_desc->input_ptrs[1],");
 code.e("    task_desc->input_ptrs[2],");
-code.e("    task_desc->output_ptrs[1],");
 code.e("    runtime_config.qo_indptr_buffer,");
 code.e("    runtime_config.paged_kv_indptr_buffer,");
 code.e("    runtime_config.paged_kv_indices_buffer,");
@@ -2909,7 +2908,9 @@ code.e("    task_desc->input_ptrs[5],");
 code.e("    task_desc->input_ptrs[6],");
 code.e("    1e-6f,");
 code.e("    1e-6f,");
-code.e("    task_desc->output_ptrs[0],");
+code.e("    task_desc->input_ptrs[0],");
+code.e("    task_desc->output_ptrs[1],"); // output_tmp
+code.e("    task_desc->output_ptrs[0],"); // lse
 code.e("    task_desc->task_metadata.kv_idx);");
 return register_task_variant(TASK_PAGED_ATTENTION_SPLIT_KV_HOPPER, code.to_string());
 }
