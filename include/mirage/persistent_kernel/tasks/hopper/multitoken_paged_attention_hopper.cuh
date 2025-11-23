@@ -82,7 +82,7 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
   constexpr int MMA_ITERS_M = (MAX_TOKENS * NUM_QO_PER_KV + 63) / 64;
 
   // the scale factor for normalization in softmax
-  float const sm_scale = 1.0f / sqrtf(static_cast<float>(HEAD_DIM));
+  float const sm_scale = 1.0f / sqrtf(static_cast<float>(HEAD_DIM)) * log2e;
 
   int warp_idx = warp_id();
   int lane_idx = lane_id();
@@ -615,9 +615,9 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
 #pragma unroll
       for (int m = 0; m < MMA_ITERS_M; m++) {
         rescale[m][0] =
-            expf(m_prev[m][0] * sm_scale - m_local[m][0] * sm_scale);
+            ptx_exp2(m_prev[m][0] * sm_scale - m_local[m][0] * sm_scale);
         rescale[m][1] =
-            expf(m_prev[m][1] * sm_scale - m_local[m][1] * sm_scale);
+            ptx_exp2(m_prev[m][1] * sm_scale - m_local[m][1] * sm_scale);
       }
 
       // update d: get partial sum
@@ -630,7 +630,7 @@ __device__ __forceinline__ void multitoken_paged_attention_hopper_impl(
         for (int frag_idx = 0; frag_idx < 32; frag_idx++) {
           x_frag_f[m][frag_idx] =
               x_frag_f[m][frag_idx] != -inf
-                  ? expf(x_frag_f[m][frag_idx] * sm_scale -
+                  ? ptx_exp2(x_frag_f[m][frag_idx] * sm_scale -
                          m_local[m][(frag_idx & 0x3) >> 1] * sm_scale)
                   : 0.f;
           d_partial[m][(frag_idx & 0x3) >> 1] += x_frag_f[m][frag_idx];
