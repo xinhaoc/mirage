@@ -275,7 +275,7 @@ int TaskRegister::register_paged_attention_task(
          head_dim,
          max_seq_len,
          page_size,
-         max_tokens);
+         1);
   code.e("    task_desc->input_ptrs[0],");
   code.e("    task_desc->input_ptrs[1],");
   code.e("    task_desc->input_ptrs[2],");

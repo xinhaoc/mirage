@@ -37,7 +37,7 @@ template <typename T,
           int MAX_SEQ_LEN,
           int PAGE_SIZE,
           int MAX_TOKENS = 8>
-__device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64(
+__device__ __noinline__ void multitoken_paged_attention_task_impl_32_64(
     void const *qkv_ptr,
     void *paged_k_cache_ptr,
     void *paged_v_cache_ptr,
@@ -216,9 +216,9 @@ __device__ __forceinline__ void multitoken_paged_attention_task_impl_32_64(
 
   float *s_q_norm_sum = reinterpret_cast<float *>(smem + S_Q_NORM_SUM_OFFSET);
   float *s_k_norm_sum = reinterpret_cast<float *>(smem + S_K_NORM_SUM_OFFSET);
-  float *s_m_buffer = reinterpret_cast<float *>(smem + S_M_BUFFER_OFFSET);
-  float *s_d_buffer = reinterpret_cast<float *>(smem + S_D_BUFFER_OFFSET);
-  float *s_o_buffer = reinterpret_cast<float *>(smem + S_O_BUFFER_OFFSET);
+  // float *s_m_buffer = reinterpret_cast<float *>(smem + S_M_BUFFER_OFFSET);
+  // float *s_d_buffer = reinterpret_cast<float *>(smem + S_D_BUFFER_OFFSET);
+  // float *s_o_buffer = reinterpret_cast<float *>(smem + S_O_BUFFER_OFFSET);
 
   // STensors' layouts
   using ZeroBufferSmem = smem_row<T, 0, 0, 0, 1, 8, 8>;

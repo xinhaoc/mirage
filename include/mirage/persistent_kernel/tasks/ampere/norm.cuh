@@ -19,7 +19,7 @@
 
 namespace kernel {
 template <typename T, typename InputSmem, int NUM_HEAD, int HEAD_DIM>
-__device__ __forceinline__ void rms_norm(InputSmem smem_input,
+__device__ __noinline__ void rms_norm(InputSmem smem_input,
                                          T const *weight_ptr,
                                          float *reduce_smem,
                                          float eps,
@@ -43,7 +43,7 @@ __device__ __forceinline__ void rms_norm(InputSmem smem_input,
   // smem_input: NUM_HEADS * (WINDOW_SIZE or CHUNK_SIZE), HEAD_DIM
   // TODO(Wenqin): handle if speculative window of k span two chunks.
   int warp_idx = warp_id();
-#pragma unroll
+#pragma unroll 1
   for (int win_idx = 0; win_idx < window_size; ++win_idx) {
     // token_offset is the offset for first token in input SMEM (auto-agressive
     // decoding or speculative decoding window), for Q, token_offset is always

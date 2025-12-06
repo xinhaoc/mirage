@@ -1,0 +1,5 @@
+vllm bench latency --model Qwen/Qwen3-8B --input-len 1 --output-len 512 --batch-size 1 2 4 8 16
+
+python -m sglang.bench_one_batch --model-path Qwen/Qwen3-1.7B --batch 16 --input-len 1 --output-len 512
+
+ython /home/ubuntu/a100/mirage/demo/qwen3/demo.py --use-mirage --max-num-batched-requests 4  --model Qwen/Qwen3-1.7B

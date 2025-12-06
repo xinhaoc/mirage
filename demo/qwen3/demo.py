@@ -112,7 +112,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--prompt",
         type=str,
-        default="Give me a short introduction to large language model.",
+        default=".",
         help="Custom prompt text to generate from.",
     )
 
@@ -192,17 +192,26 @@ if __name__ == "__main__":
                 """
     #question = "Can you please change x axis to start from 0"
     #prompt = code_text + "\n" + question
-    messages = [
-        {
-            "role": "system",
-            "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
-        },
-        {"role": "user", "content": prompt},
-    ]
+    # messages = [
+    #     {
+    #         "role": "system",
+    #         "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+    #     },
+    #     {"role": "user", "content": prompt},
+    # ]
+    messages = prompt
     text = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
+
+    text = prompt
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+
+    # print(messages)
+    # print(text)
+    # print(model_inputs)
+
+    # assert(False)
     for r in range(total_num_requests):
         for i in range(model_inputs.input_ids.shape[-1]):
             tokens[r, i] = model_inputs.input_ids[0, i]
@@ -572,6 +581,13 @@ if __name__ == "__main__":
                 grid_dim=(hidden_size // 64, 1, 1),
                 block_dim=(128, 1, 1),
             )
+            # mpk.linear_layer(
+            #     input=attn_out,
+            #     weight=w,
+            #     output=attn_proj_out,
+            #     grid_dim=(hidden_size // 64, 1, 1),
+            #     block_dim=(128, 1, 1),
+            # )
             # reset residual input as x
             x = attn_proj_out
             # add allreduce if needed
@@ -642,6 +658,13 @@ if __name__ == "__main__":
                 grid_dim=(hidden_size // 64, 1, 1),
                 block_dim=(128, 1, 1),
             )
+            # mpk.linear_layer(
+            #     input=silu_mul_out,
+            #     weight=w,
+            #     output=mlp_out,
+            #     grid_dim=(hidden_size // 64, 1, 1),
+            #     block_dim=(128, 1, 1),
+            # )
             # reset residual input as x
             x = mlp_out
             if world_size > 1:
