@@ -162,9 +162,10 @@ def prepare_test_prompt():
 # ============================================================================
 
 def prepare_input_tensors(model, tokenizer, messages, args, use_mirage=True):
-    text = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
+    # text = tokenizer.apply_chat_template(
+    #     messages, tokenize=False, add_generation_prompt=True
+    # )
+    text = ""
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
     print("Model input id shape:", model_inputs.input_ids.shape)
     num_requests = args.max_num_batched_requests if use_mirage else 1
@@ -884,6 +885,7 @@ def run_generation_comparison(model, tokenizer, args, world_size, rank):
     
     # Prepare test data
     messages = prepare_test_prompt()
+    # messages = "."
     input_data = prepare_input_tensors(model, tokenizer, messages, args, args.use_mirage)
     
     if args.use_mirage:
