@@ -3018,7 +3018,7 @@ int TaskRegister::register_paged_attention_split_kv_hopper_task(
          SEQ_LEN_PER_BLOCK, /* SEQ_LEN */
          max_seq_len,       /* MAX_SEQ_LEN */
          page_size,         /* PAGE_SIZE */
-         max_tokens,        /* MAX_TOKENS */
+         1,        /* MAX_TOKENS */
          "true",            /* PARTITION_KV */
          num_kv_chunks);    /* NUM_KV_CHUNKS */
   code.e("    task_desc->input_ptrs[1],");

@@ -1,0 +1,16 @@
+model,BS,Impl,time
+Qwen3-30B-A3B,1,vllm,5.73
+Qwen3-30B-A3B,1,sglang,4.66
+Qwen3-30B-A3B,1,pytorch+mpk,4.31
+Qwen3-30B-A3B,2,vllm,6.15
+Qwen3-30B-A3B,2,sglang,5.46
+Qwen3-30B-A3B,2,pytorch+mpk,5.131
+Qwen3-30B-A3B,4,vllm,7.22
+Qwen3-30B-A3B,4,sglang,6.49
+Qwen3-30B-A3B,4,pytorch+mpk,5.91
+Qwen3-30B-A3B,8,vllm,9.14
+Qwen3-30B-A3B,8,sglang,8.59
+Qwen3-30B-A3B,8,pytorch+mpk,7.37
+Qwen3-30B-A3B,16,vllm,10.84
+Qwen3-30B-A3B,16,sglang,9.67
+Qwen3-30B-A3B,16,pytorch+mpk,9.249
