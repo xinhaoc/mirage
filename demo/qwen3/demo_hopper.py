@@ -173,6 +173,7 @@ if __name__ == "__main__":
     text = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
+    text = "1"
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
     for r in range(total_num_requests):
         for i in range(model_inputs.input_ids.shape[-1]):
@@ -726,10 +727,10 @@ if __name__ == "__main__":
         run_time = starter.elapsed_time(ender)
 
         print("tokens.shape = ", tokens.shape)
-        for r in range(total_num_requests):
-            generated_ids = tokens[r, : step[r] + 1]
-            response = tokenizer.decode(generated_ids, skip_special_tokens=True)
-            print(response)
+        # for r in range(total_num_requests):
+        #     generated_ids = tokens[r, : step[r] + 1]
+        #     response = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        #     print(response)
 
         print("Prompt length {}, generate length {}, per-token latency (both prefill and decode): {:.3f} ms".format(
               prompt_lengths[0], step.max().item() + 1 - prompt_lengths[0], run_time / (step.max().item() + 1)

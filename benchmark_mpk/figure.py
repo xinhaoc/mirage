@@ -19,12 +19,13 @@ c8 = (1, 152/255.0, 150/255.0)
 c9 = (148/255.0, 103/255.0, 189/255.0)
 c10 = (192/255.0, 176/255.0, 213/255.0)
 
-models = ['Qwen3-0.6B', 'Llama-3.2-1B-Instruct', 'Qwen3-1.7B', 'Qwen3-8B']
-models_display = ['Qwen3-0.6B', 'Llama-3.2-1B-Instruct', 'Qwen3-1.7B', 'Qwen3-8B']
-systems = ['vllm', 'sglang', 'pytorch+mpk']
+models = ['Qwen3-0.6B', 'Llama-3.2-1B-Instruct', 'Qwen3-1.7B', 'Qwen3-8B', 'Qwen3-30B-A3B']
+models_display_0 = ['Qwen3-0.6B', 'Llama-3.2-1B-Instruct', 'Qwen3-1.7B', 'Qwen3-8B']
+models_display = ['Qwen3-0.6B', 'Llama-3.2-1B-Instruct', 'Qwen3-1.7B', 'Qwen3-8B', 'Qwen3-30B-A3B']
+systems = ['pytorch', 'vllm', 'sglang', 'pytorch+mpk']
 
 results = dict()
-with open('A100.csv', 'r') as csvfile:
+with open('A100_new.csv', 'r') as csvfile:
     data = csv.DictReader(csvfile)
     for row in data:
         model = row['model']
@@ -33,7 +34,7 @@ with open('A100.csv', 'r') as csvfile:
         results[(model, batch_size, system)] = float(row['time'])
 
 results_hopper = dict()
-with open('H100.csv', 'r') as csvfile:
+with open('H100_new.csv', 'r') as csvfile:
     data = csv.DictReader(csvfile)
     for row in data:
         model = row['model']
@@ -42,7 +43,7 @@ with open('H100.csv', 'r') as csvfile:
         results_hopper[(model, batch_size, system)] = float(row['time'])
 
 results_blackwell = dict()
-with open('B200.csv', 'r') as csvfile:
+with open('B200_new.csv', 'r') as csvfile:
     data = csv.DictReader(csvfile)
     for row in data:
         model = row['model']
@@ -59,7 +60,7 @@ for system in systems:
     for idx, model in enumerate(models):
         model_data = []
         for batch_size in [1, 2, 4, 8, 16]:
-            model_data.append(results[(model, batch_size, system)])
+            model_data.append(results_blackwell[(model, batch_size, system)])
         system_data.append(model_data)
     for idx, model in enumerate(models):
         model_data = []
@@ -67,9 +68,11 @@ for system in systems:
             model_data.append(results_hopper[(model, batch_size, system)])
         system_data.append(model_data)
     for idx, model in enumerate(models):
+        if model == 'Qwen3-30B-A3B':
+            continue
         model_data = []
         for batch_size in [1, 2, 4, 8, 16]:
-            model_data.append(results_blackwell[(model, batch_size, system)])
+            model_data.append(results[(model, batch_size, system)])
         system_data.append(model_data)
     results[system] = system_data            
 
@@ -78,6 +81,7 @@ vllm = results['vllm']
 print("vllm:", vllm)
 sglang = results['sglang']
 mpk = results['pytorch+mpk']
+pytorch = results['pytorch']
 # triton = results['triton']
 # taso = results['taso']
 # miso = results['mirage']
@@ -91,11 +95,12 @@ def autolabel(ax, rects, num, color):
             i = i + 1
 width = 0.15
 x = [0, 1, 2, 3, 4]
-title = models_display + models_display + models_display
-systems = ['vLLM', 'SGLang', 'PyTorch + TGX']
+title =  models_display + models_display + models_display_0
+systems = ['PyTorch', 'vLLM', 'SGLang', 'PyTorch + TGX']
 
-fig, axes = plt.subplots(ncols = 4, nrows = 3, figsize=(15, 6), constrained_layout=True, squeeze=False)
+fig, axes = plt.subplots(ncols = 5, nrows = 3, figsize=(15, 6), constrained_layout=True, squeeze=False)
 # fig.tight_layout()
+print("vllm:", vllm)
 print("axes:", axes)
 idx = 0
 for i in range(len(axes)):
@@ -103,6 +108,12 @@ for i in range(len(axes)):
         ax = axes[i][j]
         # ax = axes[i]
         print("idx:", idx)
+        model = models[j]
+        if i == 2 and model == 'Qwen3-30B-A3B':
+            ax.set_axis_off()
+            # idx += 1
+            continue
+
         baseline = np.minimum(np.array(vllm[idx]), np.array(sglang[idx]))
         # baseline = np.minimum(baseline, np.array(sglang[idx]))
         # baseline = np.minimum(baseline, np.array(flashattn[idx]))
@@ -113,12 +124,12 @@ for i in range(len(axes)):
         print("sglang[idx]:", sglang[idx])
         print("mpk:", mpk[idx])
         # print("baseline:", baseline)
-        b0 = ax.bar(np.array(x)-1.5*width, opt / np.array(vllm[idx]), width, color = c8, edgecolor="white")
-        b1 = ax.bar(np.array(x)-0.5*width, opt / np.array(sglang[idx]), width, color = c6, edgecolor = "white")
-        # b2 = ax.bar(np.array(x)-0.5*width, opt / np.array(tensorrt[idx]), width, color = c2, edgecolor = "white")
+        b0 = ax.bar(np.array(x)-1.5*width, opt / np.array(pytorch[idx]), width, color = c1, edgecolor="white")
+        b1 = ax.bar(np.array(x)-0.5*width, opt / np.array(vllm[idx]), width, color = c6, edgecolor = "white")
+        b2 = ax.bar(np.array(x)+0.5*width, opt / np.array(sglang[idx]), width, color = c2, edgecolor = "white")
         # b3 = ax.bar(np.array(x)+0.5*width, opt / np.array(pytorch[idx]), width, color = c10, edgecolor="white")
         # b4 = ax.bar(np.array(x)+1.5*width, opt / np.array(triton[idx]), width, color = c4, edgecolor="white")
-        b5 = ax.bar(np.array(x)+0.5*width, opt / np.array(mpk[idx]), width, color = c3, edgecolor="white")
+        b5 = ax.bar(np.array(x)+1.5*width, opt / np.array(mpk[idx]), width, color = c3, edgecolor="white")
         #axes[i].axhline(y=metaflow[i], color = 'r', xmin = 3.5/7.5, xmax = 1, lw=2)
         ax.set_xlabel(title[idx], fontsize = 14)
         ax.set_xlim(-3*width, max(x) + 3*width)
@@ -136,20 +147,20 @@ for i in range(len(axes)):
 #axes[2].tick_params(axis='both', which='major', labelsize=12)
 #autolabel(axes[2], b5, np.array(ft[2]) / np.array(spec_infer[2]), c3)
 
-print(b0)
-print(b1)
-print(b5)
+# print(b0)
+# print(b1)
+# print(b5)
 
 #plt.xticks(np.array(x) + 1.5 * width, ('GCN', 'GIN', 'GAT'))
 plt.setp(axes, xticks=[0,1,2,3,4], xticklabels=['BS=1', 'BS=2', 'BS=4', 'BS=8','BS=16'])
 fig.text(-0.032, 0.5, 'Relative Performance', fontweight='bold', ha='left', va='center', rotation='vertical', fontsize=14)
-fig.text(-0.01, 0.85, 'A100', ha='left', va='center', rotation='vertical', fontsize=14)
+fig.text(-0.01, 0.85, 'B200', ha='left', va='center', rotation='vertical', fontsize=14)
 fig.text(-0.01, 0.51, 'H100', ha='left', va='center', rotation='vertical', fontsize=14)
-fig.text(-0.01, 0.18, 'B200', ha='left', va='center', rotation='vertical', fontsize=14)
+fig.text(-0.01, 0.18, 'A100', ha='left', va='center', rotation='vertical', fontsize=14)
 
 #fig.text(0.5, 0.02, 'Number of GPU devices', fontweight='bold', ha='center', va='bottom',  fontsize=18)
 # fig.legend([b0, b1, b2, b3, b4, b5], systems, loc = 'upper center', fontsize = 14, ncol = 6, bbox_to_anchor=(0.5,1.15))
-fig.legend([b0, b1, b5], systems, loc = 'upper center', fontsize = 14, ncol = 6, bbox_to_anchor=(0.5,1.15))
+fig.legend([b0, b1, b2, b5], systems, loc = 'upper center', fontsize = 14, ncol = 6, bbox_to_anchor=(0.5,1.15))
 
 #save to png
 plt.savefig('benchmark.pdf', bbox_inches='tight', dpi=100)

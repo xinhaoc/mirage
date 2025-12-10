@@ -112,7 +112,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--prompt",
         type=str,
-        default=".",
+       default=".",
         help="Custom prompt text to generate from.",
     )
 
@@ -190,21 +190,22 @@ if __name__ == "__main__":
                 plt.text(average_throughput*0.9, max(plt.ylim())*0.9, f'Average: {average_throughput:.2f}', color = 'red')
                 plt.show()
                 """
-    #question = "Can you please change x axis to start from 0"
-    #prompt = code_text + "\n" + question
-    # messages = [
-    #     {
-    #         "role": "system",
-    #         "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
-    #     },
-    #     {"role": "user", "content": prompt},
-    # ]
-    messages = prompt
-    text = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
+    question = "Can you please change x axis to start from 0"
+    # prompt = code_text + "\n" + question
+    messages = [
+        {
+            "role": "system",
+            "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+        },
+        {"role": "user", "content": prompt},
+    ]
+    # messages = prompt
+    # text = tokenizer.apply_chat_template(
+    #     messages, tokenize=False, add_generation_prompt=True
+    # )
 
-    text = prompt
+    # text = prompt
+    text = "."
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
 
     # print(messages)
@@ -495,6 +496,8 @@ if __name__ == "__main__":
                 grid_dim=(grid_for_rmsnorm_linear_layer(w_qkv.dim(0), args.use_cutlass_kernel), 1, 1),
                 block_dim=(128, 1, 1),
             )
+
+
             #mpk.rmsnorm_linear_layer(
             #    input=x,
             #    weight_norm=w_norm,
@@ -581,13 +584,6 @@ if __name__ == "__main__":
                 grid_dim=(hidden_size // 64, 1, 1),
                 block_dim=(128, 1, 1),
             )
-            # mpk.linear_layer(
-            #     input=attn_out,
-            #     weight=w,
-            #     output=attn_proj_out,
-            #     grid_dim=(hidden_size // 64, 1, 1),
-            #     block_dim=(128, 1, 1),
-            # )
             # reset residual input as x
             x = attn_proj_out
             # add allreduce if needed
@@ -658,13 +654,7 @@ if __name__ == "__main__":
                 grid_dim=(hidden_size // 64, 1, 1),
                 block_dim=(128, 1, 1),
             )
-            # mpk.linear_layer(
-            #     input=silu_mul_out,
-            #     weight=w,
-            #     output=mlp_out,
-            #     grid_dim=(hidden_size // 64, 1, 1),
-            #     block_dim=(128, 1, 1),
-            # )
+
             # reset residual input as x
             x = mlp_out
             if world_size > 1:

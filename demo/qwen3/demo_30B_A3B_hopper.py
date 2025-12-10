@@ -167,13 +167,14 @@ if __name__ == "__main__":
     messages = [
         {
             "role": "system",
-            "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+            "content": "Hi.",
         },
         {"role": "user", "content": prompt},
     ]
     text = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
+    text = "Hi"
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
     for r in range(total_num_requests):
         for i in range(model_inputs.input_ids.shape[-1]):
@@ -842,10 +843,10 @@ if __name__ == "__main__":
 
         print("tokens.shape = ", tokens.shape)
         print(tokens)
-        for r in range(total_num_requests):
-            generated_ids = tokens[r, : step[r] + 1]
-            response = tokenizer.decode(generated_ids, skip_special_tokens=True)
-            print(response)
+        # for r in range(total_num_requests):
+        #     generated_ids = tokens[r, : step[r] + 1]
+        #     response = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        #     print(response)
         
         if total_num_requests > 1:
             print(f"Output length of each batch is same: {(step.max() == step.min()).item()}")

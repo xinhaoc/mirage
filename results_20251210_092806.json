@@ -1,0 +1,133 @@
+[
+  {
+    "model": "Qwen/Qwen3-1.7B",
+    "batch_size": 16,
+    "num_gpus": 1,
+    "prompt_length": 1,
+    "target_decode_length": 512,
+    "actual_decode_length": 512,
+    "avg_total_latency_s": 11.058605373799855,
+    "per_token_latency_ms": 1.3499274137939277,
+    "per_iteration_latency_ms": 21.598838620702843,
+    "per_token_latency_s": 0.0013499274137939276,
+    "throughput_tokens_per_s": 740.7805707045626,
+    "gpus": [
+      "NVIDIA H100 80GB HBM3"
+    ],
+    "torch_compile": true,
+    "attention_backend": "flashinfer",
+    "all_latencies": [
+      11.04957136199937,
+      11.028209680000145,
+      11.187148838999747,
+      11.03508133700052,
+      11.018111457999112,
+      11.008429274000264,
+      11.108713713000725,
+      11.033870055999614,
+      11.019888991999323,
+      11.097029026999735
+    ]
+  },
+  {
+    "model": "Qwen/Qwen3-1.7B",
+    "batch_size": 16,
+    "num_gpus": 2,
+    "prompt_length": 1,
+    "target_decode_length": 512,
+    "actual_decode_length": 512,
+    "avg_total_latency_s": 14.106127135799943,
+    "per_token_latency_ms": 1.721939347631829,
+    "per_iteration_latency_ms": 27.551029562109264,
+    "per_token_latency_s": 0.001721939347631829,
+    "throughput_tokens_per_s": 580.7405477871755,
+    "gpus": [
+      "NVIDIA H100 80GB HBM3",
+      "NVIDIA H100 80GB HBM3"
+    ],
+    "torch_compile": true,
+    "attention_backend": "flashinfer",
+    "all_latencies": [
+      14.132278882000719,
+      14.118627171000298,
+      14.096533754999655,
+      14.097922113000095,
+      14.112387012,
+      14.106467220999548,
+      14.113073867999447,
+      14.103327159999935,
+      14.103577095999754,
+      14.077077079999981
+    ]
+  },
+  {
+    "model": "Qwen/Qwen3-1.7B",
+    "batch_size": 16,
+    "num_gpus": 4,
+    "prompt_length": 1,
+    "target_decode_length": 512,
+    "actual_decode_length": 512,
+    "avg_total_latency_s": 14.452659690100154,
+    "per_token_latency_ms": 1.764240684826679,
+    "per_iteration_latency_ms": 28.227850957226863,
+    "per_token_latency_s": 0.001764240684826679,
+    "throughput_tokens_per_s": 566.8160861499695,
+    "gpus": [
+      "NVIDIA H100 80GB HBM3",
+      "NVIDIA H100 80GB HBM3",
+      "NVIDIA H100 80GB HBM3",
+      "NVIDIA H100 80GB HBM3"
+    ],
+    "torch_compile": true,
+    "attention_backend": "flashinfer",
+    "all_latencies": [
+      14.478266387000076,
+      14.478160970000317,
+      14.432519988999957,
+      14.45292101800078,
+      14.451271156000075,
+      14.440111029000036,
+      14.470340657000634,
+      14.456440967000162,
+      14.429822119999699,
+      14.436742607999804
+    ]
+  },
+  {
+    "model": "Qwen/Qwen3-1.7B",
+    "batch_size": 16,
+    "num_gpus": 8,
+    "prompt_length": 1,
+    "target_decode_length": 512,
+    "actual_decode_length": 512,
+    "avg_total_latency_s": 11.173054487699938,
+    "per_token_latency_ms": 1.3638982528930588,
+    "per_iteration_latency_ms": 21.82237204628894,
+    "per_token_latency_s": 0.0013638982528930588,
+    "throughput_tokens_per_s": 733.1925221539296,
+    "gpus": [
+      "NVIDIA H100 80GB HBM3",
+      "NVIDIA H100 80GB HBM3",
+      "NVIDIA H100 80GB HBM3",
+      "NVIDIA H100 80GB HBM3",
+      "NVIDIA H100 80GB HBM3",
+      "NVIDIA H100 80GB HBM3",
+      "NVIDIA H100 80GB HBM3",
+      "NVIDIA H100 80GB HBM3"
+    ],
+    "torch_compile": true,
+    "attention_backend": "flashinfer",
+    "all_latencies": [
+      11.165702569000132,
+      11.145375235999381,
+      11.297858503000498,
+      11.100182850000238,
+      11.120003839000674,
+      11.17815231899931,
+      11.18277037900043,
+      11.16755642299995,
+      11.206380838999394,
+      11.166561919999367
+    ]
+  }
+]

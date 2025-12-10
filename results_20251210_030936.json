@@ -1,0 +1,28 @@
+[
+  {
+    "model": "Qwen/Qwen3-8B",
+    "batch_size": 1,
+    "prompt_length": 1,
+    "target_decode_length": 512,
+    "actual_decode_length": 512,
+    "avg_total_latency_s": 16.965242436299015,
+    "per_token_latency_ms": 33.13523913339651,
+    "per_token_latency_s": 0.03313523913339651,
+    "throughput_tokens_per_s": 30.179350629527068,
+    "gpu": "NVIDIA H100 80GB HBM3",
+    "torch_compile": true,
+    "attention_backend": "flashinfer",
+    "all_latencies": [
+      16.957982779000304,
+      16.952770756000973,
+      17.011446273998445,
+      16.899804393000522,
+      17.015574270997604,
+      16.939088529998116,
+      16.94555196899819,
+      16.977021152997622,
+      16.960812186000112,
+      16.992372051998245
+    ]
+  }
+]

@@ -1,0 +1,80 @@
+[
+  {
+    "model": "Qwen/Qwen3-8B",
+    "batch_size": 1,
+    "prompt_length": 1,
+    "target_decode_length": 512,
+    "actual_decode_length": 512,
+    "avg_total_latency_s": 16.745583983399776,
+    "per_token_latency_ms": 32.706218717577684,
+    "per_token_latency_s": 0.03270621871757769,
+    "throughput_tokens_per_s": 30.57522511651762,
+    "gpu": "NVIDIA H100 80GB HBM3",
+    "torch_compile": true,
+    "attention_backend": "flashinfer",
+    "all_latencies": [
+      16.703678639998543,
+      16.693264980000095,
+      16.75015319200247,
+      16.789511705999757,
+      16.88425573299901,
+      16.6770433879974,
+      16.689208443000098,
+      16.73688699700142,
+      16.73205496099763,
+      16.79978179400132
+    ]
+  },
+  {
+    "model": "Qwen/Qwen3-8B",
+    "batch_size": 2,
+    "prompt_length": 1,
+    "target_decode_length": 512,
+    "actual_decode_length": 512,
+    "avg_total_latency_s": 17.05058312399924,
+    "per_token_latency_ms": 16.650960082030508,
+    "per_token_latency_s": 0.016650960082030507,
+    "throughput_tokens_per_s": 60.05659704146349,
+    "gpu": "NVIDIA H100 80GB HBM3",
+    "torch_compile": true,
+    "attention_backend": "flashinfer",
+    "all_latencies": [
+      17.04221919599877,
+      17.030963655997766,
+      17.040822324997862,
+      16.905700035000336,
+      17.05715088800207,
+      17.022592627999984,
+      17.1476883289979,
+      17.102661840999644,
+      17.042763063000166,
+      17.113269278997905
+    ]
+  },
+  {
+    "model": "Qwen/Qwen3-8B",
+    "batch_size": 4,
+    "prompt_length": 1,
+    "target_decode_length": 512,
+    "actual_decode_length": 512,
+    "avg_total_latency_s": 16.79759091539963,
+    "per_token_latency_ms": 8.201948689159977,
+    "per_token_latency_s": 0.008201948689159976,
+    "throughput_tokens_per_s": 121.9222452978327,
+    "gpu": "NVIDIA H100 80GB HBM3",
+    "torch_compile": true,
+    "attention_backend": "flashinfer",
+    "all_latencies": [
+      16.748459632999584,
+      16.917898454998067,
+      16.771564616999967,
+      16.735969205998117,
+      16.94738575500014,
+      16.710342475998914,
+      16.748114349997195,
+      16.78405650500281,
+      16.780804476999037,
+      16.831313680002495
+    ]
+  }
+]
