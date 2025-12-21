@@ -1,0 +1,10 @@
+Qwen3-30B-A3B,1,mpk+no,2.127
+Qwen3-30B-A3B,1,mpk_wo,1.995
+Qwen3-30B-A3B,2,mpk+no,2.122
+Qwen3-30B-A3B,2,mpk_wo,2.004
+Qwen3-30B-A3B,4,mpk+no,2.128
+Qwen3-30B-A3B,4,mpk_wo,2.014
+Qwen3-30B-A3B,8,mpk+no,2.148
+Qwen3-30B-A3B,8,mpk_wo,2.026
+Qwen3-30B-A3B,16,mpk+no,2.287
+Qwen3-30B-A3B,16,mpk_wo,2.218
