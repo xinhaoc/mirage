@@ -26,30 +26,6 @@
 
 namespace kernel {
 
-// Helper: construct UMMA SmemDescriptor for UTCCP source (K-major, no swizzle)
-// Formats a 512-byte smem buffer (32 DPs x 16 bytes) into a descriptor.
-__device__ inline uint64_t make_utccp_smem_desc(void const *smem_ptr) {
-  cute::UMMA::SmemDescriptor desc;
-  desc.desc_ = 0;
-  desc.version_ = 1; // Blackwell
-  uint32_t smem_addr = cute::cast_smem_ptr_to_uint(smem_ptr);
-  desc.start_address_ = static_cast<uint16_t>(smem_addr >> 4);
-  desc.layout_type_ = uint8_t(cute::UMMA::LayoutType::SWIZZLE_NONE);
-  // K-major INTERLEAVE: ((8,m),(T=16,2)):((1*T=16, SBO),(1, LBO))
-  // For uint8: T=16, m=4 (32 DPs / 8), SBO = 8*16 = 128 bytes
-  desc.stride_byte_offset_ = static_cast<uint16_t>(128 >> 4); // = 8
-  desc.leading_byte_offset_ = 0;
-  return desc.desc_;
-}
-
-// Helper: issue raw UTCCP from smem to TMEM
-__device__ inline void utccp_smem_to_tmem(uint32_t tmem_addr,
-                                           uint64_t smem_desc) {
-  asm volatile(
-      "tcgen05.cp.cta_group::1.32x128b.warpx4 [%0], %1;\n" ::"r"(tmem_addr),
-      "l"(smem_desc));
-}
-
 // FP8 block-scaled GEMM for SM100 (Blackwell).
 // Adapted from linear_sm100_mpk_task_impl for FP8 E4M3 with E8M0 block scaling.
 //
@@ -81,7 +57,6 @@ __device__ __noinline__ void
   int warp_idx = cutlass::canonical_warp_idx_sync();
 
   using OutType = cute::bfloat16_t;
-  using SFType = uint8_t; // float_ue8m0_t stored as uint8
 
   // ---------------------------------------------------------------
   // MMA Setup: Block-scaled FP8 MMA (SM100_MMA_MXF8F6F4_SS)
@@ -108,9 +83,9 @@ __device__ __noinline__ void
   auto mma_tiler = cute::make_shape(bM, bN, bK);
 
   // TMEM: accumulator + SF columns
-  // UTCCP writes 128 bits (4 uint32 columns) per call, so reserve 4+4
+  // tcgen05.st writes 1 uint32 column per call, so reserve 1+1
   constexpr int num_acc_columns = MMA_N * NUM_ACC_STAGE;
-  constexpr int num_sf_columns = 8; // 4 for SFA + 4 for SFB (UTCCP width)
+  constexpr int num_sf_columns = 2; // 1 for SFA + 1 for SFB
   constexpr int num_tmem_columns = num_acc_columns + num_sf_columns;
 
   // ---------------------------------------------------------------
@@ -175,22 +150,16 @@ __device__ __noinline__ void
                                      sC_layout_fake.offset(),
                                      cute::make_layout(sC_shape, sC_stride));
 
-  // SF smem: 512 bytes per stage per SF (UTCCP source format)
-  // 32 data paths x 16 bytes per DP = 512 bytes
-  constexpr int SF_SMEM_PER_STAGE = 512;
-
+  // No SF smem needed: SF is loaded via global memory + tcgen05.st to TMEM
   using SharedStorage =
-      FP8PipedSharedStorage<FP8Type_,
-                            FP8Type_,
-                            OutType,
-                            SFType,
-                            decltype(sA_layout),
-                            decltype(sB_layout),
-                            decltype(sC_layout),
-                            SF_SMEM_PER_STAGE,
-                            SF_SMEM_PER_STAGE,
-                            NUM_AB_STAGE,
-                            NUM_ACC_STAGE>;
+      PipedSharedStorage<FP8Type_,
+                         FP8Type_,
+                         OutType,
+                         decltype(sA_layout),
+                         decltype(sB_layout),
+                         decltype(sC_layout),
+                         NUM_AB_STAGE,
+                         NUM_ACC_STAGE>;
 
   extern __shared__ char shared_memory[];
   uintptr_t aligned_smem =
@@ -208,9 +177,6 @@ __device__ __noinline__ void
     cutlass::arch::detail::initialize_barrier_array_aligned<
         cutlass::arch::ClusterBarrier,
         NUM_AB_STAGE>(shared_storage.ab_empty_mbar_ptr, 1);
-    cutlass::arch::detail::initialize_barrier_array_aligned<
-        cutlass::arch::ClusterTransactionBarrier,
-        NUM_AB_STAGE>(shared_storage.sf_full_mbar_ptr, 1);
     cutlass::arch::detail::initialize_barrier_array_aligned<
         cutlass::arch::ClusterBarrier,
         NUM_ACC_STAGE>(shared_storage.acc_full_mbar_ptr, 1);
@@ -290,7 +256,7 @@ __device__ __noinline__ void
   __syncthreads();
 
   // ===============================================================
-  // Warp 5: TMA Loader — loads A(FP8), B(FP8), SFA, SFB
+  // Warp 5: TMA Loader — loads A(FP8), B(FP8)
   // ===============================================================
   if (warp_idx == 5) {
     int total_k_tile_count = 0;
@@ -345,40 +311,6 @@ __device__ __noinline__ void
                                input_smem.base_ptr, tma_coords_B);
           }
 
-          // Load scale factors into UTCCP-formatted smem buffer.
-          // SF layout: row-major [ceil(M_or_N / 128), ceil(K / 128)], uint8
-          // For one tile: 1 SF byte. Broadcast to 32 DPs × 16-byte slots.
-          {
-            constexpr int sfa_k_dim = (REDUCTION_SIZE + 127) / 128;
-            constexpr int sfb_k_dim = (REDUCTION_SIZE + 127) / 128;
-            int lane = threadIdx.x % 32;
-            SFType sfa_byte = 0, sfb_byte = 0;
-            if (lane == 0) {
-              // SFA: indexed by [m_group, k_tile], row-major
-              sfa_byte = sfa_ptr[m_tile * sfa_k_dim + k_tile];
-              // SFB: indexed by [n_group, k_tile], row-major
-              sfb_byte = sfb_ptr[n_tile * sfb_k_dim + k_tile];
-            }
-            // Broadcast from lane 0 to all 32 lanes
-            sfa_byte = __shfl_sync(0xFFFFFFFF, sfa_byte, 0);
-            sfb_byte = __shfl_sync(0xFFFFFFFF, sfb_byte, 0);
-
-            // Write to UTCCP-formatted smem buffer:
-            // 32 DPs × 16 bytes each = 512 bytes per stage
-            SFType *sfa_buf =
-                shared_storage.SFA + smem_wr_buffer * SF_SMEM_PER_STAGE;
-            SFType *sfb_buf =
-                shared_storage.SFB + smem_wr_buffer * SF_SMEM_PER_STAGE;
-            sfa_buf[lane * 16] = sfa_byte;
-            sfb_buf[lane * 16] = sfb_byte;
-          }
-
-          // Signal SF buffer is ready
-          if (cute::elect_one_sync()) {
-            cute::arrive_barrier(
-                shared_storage.sf_full_mbar_ptr[smem_wr_buffer]);
-          }
-
           if (tma_wr_k_tile_next < k_tile_count) {
             peek_ab_empty_status = kernel::try_wait_barrier(
                 shared_storage.ab_empty_mbar_ptr[smem_wr_buffer_next],
@@ -394,16 +326,16 @@ __device__ __noinline__ void
 
   }
   // ===============================================================
-  // Warp 4: MMA — UTCCP scale factors + block-scaled UMMA
+  // Warp 4: MMA — load SF via tcgen05.st + block-scaled UMMA
   // ===============================================================
   else if (warp_idx == 4) {
     tmem_allocation_result_barrier.arrive_and_wait();
     tCtAcc.data() = shared_storage.tmem_base_ptr;
 
-    // SF TMEM addresses
+    // SF TMEM addresses (1 column each, after accumulator)
     uint32_t tmem_sfa_addr = shared_storage.tmem_base_ptr + num_acc_columns;
     uint32_t tmem_sfb_addr =
-        shared_storage.tmem_base_ptr + num_acc_columns + 4;
+        shared_storage.tmem_base_ptr + num_acc_columns + 1;
 
     // Create minimal TMEM tensors for .with() API
     auto sfa_tmem_ptr =
@@ -414,6 +346,9 @@ __device__ __noinline__ void
         cute::make_tensor(sfa_tmem_ptr, cute::make_layout(cute::Int<1>{}));
     auto tCtSFB =
         cute::make_tensor(sfb_tmem_ptr, cute::make_layout(cute::Int<1>{}));
+
+    constexpr int sfa_k_dim = (REDUCTION_SIZE + 127) / 128;
+    constexpr int sfb_k_dim = (REDUCTION_SIZE + 127) / 128;
 
     int total_k_tile_count = 0;
     int num_tiles_executed = 0;
@@ -459,22 +394,20 @@ __device__ __noinline__ void
                 mma_rd_ab_full_phase);
           }
 
-          // Wait for SF data (separate barrier)
-          // SF uses same pipeline phase as AB
-          cute::wait_barrier(
-              shared_storage.sf_full_mbar_ptr[smem_rd_buffer],
-              mma_rd_ab_full_phase);
-
-          // UTCCP: copy scale factors from smem to TMEM
-          if (cute::elect_one_sync()) {
-            SFType *sfa_buf = shared_storage.SFA +
-                              smem_rd_buffer * SF_SMEM_PER_STAGE;
-            SFType *sfb_buf = shared_storage.SFB +
-                              smem_rd_buffer * SF_SMEM_PER_STAGE;
-            uint64_t sfa_desc = make_utccp_smem_desc(sfa_buf);
-            uint64_t sfb_desc = make_utccp_smem_desc(sfb_buf);
-            utccp_smem_to_tmem(tmem_sfa_addr, sfa_desc);
-            utccp_smem_to_tmem(tmem_sfb_addr, sfb_desc);
+          // Write scale factors from global memory to TMEM via tcgen05.st
+          // All 32 threads read the same SF byte, then cooperatively write
+          // to TMEM with .x4 replication to all 4 subpartitions.
+          {
+            uint32_t sfa_val = static_cast<uint32_t>(
+                sfa_ptr[m_tile * sfa_k_dim + k_tile]);
+            uint32_t sfb_val = static_cast<uint32_t>(
+                sfb_ptr[n_tile * sfb_k_dim + k_tile]);
+            asm volatile(
+                "tcgen05.st.sync.aligned.32x32b.x4.b32 [%0], {%1};"
+                ::"r"(tmem_sfa_addr), "r"(sfa_val));
+            asm volatile(
+                "tcgen05.st.sync.aligned.32x32b.x4.b32 [%0], {%1};"
+                ::"r"(tmem_sfb_addr), "r"(sfb_val));
           }
 
           // Issue 4 MMA k_blocks with same SF (granularity 128 = bK)
