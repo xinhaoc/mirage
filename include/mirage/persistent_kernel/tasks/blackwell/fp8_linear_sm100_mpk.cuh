@@ -56,6 +56,11 @@ __device__ __noinline__ void
                                     const uint8_t *sfb_ptr) {
   int warp_idx = cutlass::canonical_warp_idx_sync();
 
+  // Debug: verify fresh build
+  if (threadIdx.x == 0) {
+    printf("[FP8 kernel v3] 4-DP-group tcgen05.st fix\n");
+  }
+
   using OutType = cute::bfloat16_t;
 
   // ---------------------------------------------------------------
@@ -394,20 +399,35 @@ __device__ __noinline__ void
                 mma_rd_ab_full_phase);
           }
 
-          // Write scale factors from global memory to TMEM via tcgen05.st
-          // All 32 threads read the same SF byte, then cooperatively write
-          // to TMEM with .x4 replication to all 4 subpartitions.
+          // Write scale factors from global memory to TMEM via tcgen05.st.
+          // TMEM has 128 data paths (4 groups of 32). tcgen05.st.32x32b
+          // writes to 32 DPs at the DP offset encoded in the address.
+          // We issue 4 calls with DP offsets 0, 32, 64, 96 to fill all 128 DPs.
           {
             uint32_t sfa_val = static_cast<uint32_t>(
                 sfa_ptr[m_tile * sfa_k_dim + k_tile]);
             uint32_t sfb_val = static_cast<uint32_t>(
                 sfb_ptr[n_tile * sfb_k_dim + k_tile]);
-            asm volatile(
-                "tcgen05.st.sync.aligned.32x32b.x4.b32 [%0], {%1};"
-                ::"r"(tmem_sfa_addr), "r"(sfa_val));
-            asm volatile(
-                "tcgen05.st.sync.aligned.32x32b.x4.b32 [%0], {%1};"
-                ::"r"(tmem_sfb_addr), "r"(sfb_val));
+
+            // Debug: print SF values on first iteration
+            if (k_tile == 0 && m_tile == 0 && n_tile == 0 &&
+                threadIdx.x % 32 == 0) {
+              printf("[MMA warp] sfa_val=%u sfb_val=%u tmem_sfa=0x%x "
+                     "tmem_sfb=0x%x\n",
+                     sfa_val, sfb_val, tmem_sfa_addr, tmem_sfb_addr);
+            }
+
+            // Write SF to all 4 DP groups (0-31, 32-63, 64-95, 96-127)
+            for (uint32_t dp_start = 0; dp_start < 128; dp_start += 32) {
+              uint32_t addr_sfa = tmem_sfa_addr | (dp_start << 16);
+              uint32_t addr_sfb = tmem_sfb_addr | (dp_start << 16);
+              asm volatile(
+                  "tcgen05.st.sync.aligned.32x32b.x1.b32 [%0], {%1};"
+                  ::"r"(addr_sfa), "r"(sfa_val));
+              asm volatile(
+                  "tcgen05.st.sync.aligned.32x32b.x1.b32 [%0], {%1};"
+                  ::"r"(addr_sfb), "r"(sfb_val));
+            }
           }
 
           // Issue 4 MMA k_blocks with same SF (granularity 128 = bK)
