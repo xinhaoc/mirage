@@ -58,7 +58,7 @@ __device__ __noinline__ void
 
   // Debug: verify fresh build
   if (threadIdx.x == 0) {
-    printf("[FP8 kernel v3] 4-DP-group tcgen05.st fix\n");
+    printf("[FP8 kernel v4] UTCCP-based SF loading\n");
   }
 
   using OutType = cute::bfloat16_t;
@@ -88,9 +88,10 @@ __device__ __noinline__ void
   auto mma_tiler = cute::make_shape(bM, bN, bK);
 
   // TMEM: accumulator + SF columns
-  // tcgen05.st writes 1 uint32 column per call, so reserve 1+1
+  // UTCCP 32x128b writes 128 bits per DP = 4 TMEM columns per operation.
+  // We need 4 columns for SFA + 4 columns for SFB.
   constexpr int num_acc_columns = MMA_N * NUM_ACC_STAGE;
-  constexpr int num_sf_columns = 2; // 1 for SFA + 1 for SFB
+  constexpr int num_sf_columns = 8; // 4 for SFA + 4 for SFB
   constexpr int num_tmem_columns = num_acc_columns + num_sf_columns;
 
   // ---------------------------------------------------------------
@@ -155,7 +156,6 @@ __device__ __noinline__ void
                                      sC_layout_fake.offset(),
                                      cute::make_layout(sC_shape, sC_stride));
 
-  // No SF smem needed: SF is loaded via global memory + tcgen05.st to TMEM
   using SharedStorage =
       PipedSharedStorage<FP8Type_,
                          FP8Type_,
@@ -171,6 +171,13 @@ __device__ __noinline__ void
       (reinterpret_cast<uintptr_t>(shared_memory) + 127) / 128 * 128;
   SharedStorage &shared_storage =
       *reinterpret_cast<SharedStorage *>(aligned_smem);
+
+  // SF staging buffers for UTCCP (512 bytes each, 16-byte aligned).
+  // UTCCP 32x128b reads 32 DPs × 16 bytes = 512 bytes from SMEM.
+  uintptr_t sf_smem_base = aligned_smem + sizeof(SharedStorage);
+  sf_smem_base = (sf_smem_base + 15) & ~(uintptr_t)15;
+  uint8_t *sf_smem_sfa = reinterpret_cast<uint8_t *>(sf_smem_base);
+  uint8_t *sf_smem_sfb = sf_smem_sfa + 512;
 
   // ---------------------------------------------------------------
   // Initialize Barriers
@@ -331,16 +338,17 @@ __device__ __noinline__ void
 
   }
   // ===============================================================
-  // Warp 4: MMA — load SF via tcgen05.st + block-scaled UMMA
+  // Warp 4: MMA — load SF via UTCCP + block-scaled UMMA
   // ===============================================================
   else if (warp_idx == 4) {
     tmem_allocation_result_barrier.arrive_and_wait();
     tCtAcc.data() = shared_storage.tmem_base_ptr;
 
-    // SF TMEM addresses (1 column each, after accumulator)
+    // SF TMEM addresses (after accumulator columns).
+    // UTCCP writes 4 columns per op, so SFA starts at +0 and SFB at +4.
     uint32_t tmem_sfa_addr = shared_storage.tmem_base_ptr + num_acc_columns;
     uint32_t tmem_sfb_addr =
-        shared_storage.tmem_base_ptr + num_acc_columns + 1;
+        shared_storage.tmem_base_ptr + num_acc_columns + 4;
 
     // Create minimal TMEM tensors for .with() API
     auto sfa_tmem_ptr =
@@ -399,34 +407,56 @@ __device__ __noinline__ void
                 mma_rd_ab_full_phase);
           }
 
-          // Write scale factors from global memory to TMEM via tcgen05.st.
-          // TMEM has 128 data paths (4 groups of 32). tcgen05.st.32x32b
-          // writes to 32 DPs at the DP offset encoded in the address.
-          // We issue 4 calls with DP offsets 0, 32, 64, 96 to fill all 128 DPs.
+          // Write scale factors from global → SMEM → TMEM via UTCCP.
+          // tcgen05.st only writes to 1 subpartition (the executing warp's).
+          // UTCCP (tcgen05.cp.32x128b.warpx4) broadcasts to all 4 subpartitions.
           {
             uint32_t sfa_val = static_cast<uint32_t>(
                 sfa_ptr[m_tile * sfa_k_dim + k_tile]);
             uint32_t sfb_val = static_cast<uint32_t>(
                 sfb_ptr[n_tile * sfb_k_dim + k_tile]);
 
-            // Debug: print SF values on first iteration
-            if (k_tile == 0 && m_tile == 0 && n_tile == 0 &&
-                threadIdx.x % 32 == 0) {
-              printf("[MMA warp] sfa_val=%u sfb_val=%u tmem_sfa=0x%x "
-                     "tmem_sfb=0x%x\n",
-                     sfa_val, sfb_val, tmem_sfa_addr, tmem_sfb_addr);
-            }
+            uint32_t lane_id = threadIdx.x % 32;
 
-            // Write SF to all 4 DP groups (0-31, 32-63, 64-95, 96-127)
-            for (uint32_t dp_start = 0; dp_start < 128; dp_start += 32) {
-              uint32_t addr_sfa = tmem_sfa_addr | (dp_start << 16);
-              uint32_t addr_sfb = tmem_sfb_addr | (dp_start << 16);
+            // Fill SFA SMEM buffer: replicate the SF byte across all 512 bytes
+            uint32_t sfa_fill = sfa_val | (sfa_val << 8) |
+                                (sfa_val << 16) | (sfa_val << 24);
+            uint4 sfa_vec = {sfa_fill, sfa_fill, sfa_fill, sfa_fill};
+            reinterpret_cast<uint4 *>(sf_smem_sfa)[lane_id] = sfa_vec;
+
+            // Fill SFB SMEM buffer
+            uint32_t sfb_fill = sfb_val | (sfb_val << 8) |
+                                (sfb_val << 16) | (sfb_val << 24);
+            uint4 sfb_vec = {sfb_fill, sfb_fill, sfb_fill, sfb_fill};
+            reinterpret_cast<uint4 *>(sf_smem_sfb)[lane_id] = sfb_vec;
+
+            __syncwarp();
+
+            // Issue UTCCP: SMEM → TMEM with broadcast to all 4 subpartitions
+            if (lane_id == 0) {
+              // Construct SmemDescriptor for SFA buffer
+              uint32_t sfa_smem_addr = static_cast<uint32_t>(
+                  __cvta_generic_to_shared(sf_smem_sfa));
+              uint64_t sfa_desc = 0;
+              sfa_desc |= (uint64_t)((sfa_smem_addr >> 4) & 0x3FFF); // start_address [0:14)
+              sfa_desc |= (uint64_t)(8) << 32;  // stride_byte_offset=8 [32:46)
+              sfa_desc |= (uint64_t)(1) << 46;  // version=1 [46:48)
+
               asm volatile(
-                  "tcgen05.st.sync.aligned.32x32b.x1.b32 [%0], {%1};"
-                  ::"r"(addr_sfa), "r"(sfa_val));
+                  "tcgen05.cp.cta_group::1.32x128b.warpx4 [%0], %1;"
+                  :: "r"(tmem_sfa_addr), "l"(sfa_desc));
+
+              // Construct SmemDescriptor for SFB buffer
+              uint32_t sfb_smem_addr = static_cast<uint32_t>(
+                  __cvta_generic_to_shared(sf_smem_sfb));
+              uint64_t sfb_desc = 0;
+              sfb_desc |= (uint64_t)((sfb_smem_addr >> 4) & 0x3FFF);
+              sfb_desc |= (uint64_t)(8) << 32;
+              sfb_desc |= (uint64_t)(1) << 46;
+
               asm volatile(
-                  "tcgen05.st.sync.aligned.32x32b.x1.b32 [%0], {%1};"
-                  ::"r"(addr_sfb), "r"(sfb_val));
+                  "tcgen05.cp.cta_group::1.32x128b.warpx4 [%0], %1;"
+                  :: "r"(tmem_sfb_addr), "l"(sfb_desc));
             }
           }
 
