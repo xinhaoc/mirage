@@ -254,9 +254,11 @@ private:
     constexpr uint32_t tma_dim = 5;
     void *global_addr = src;
 
-    constexpr CUtensorMapDataType tma_format = CU_TENSOR_MAP_DATA_TYPE_BFLOAT16;
-    //  (std::is_same_v<T, type::bfloat16_t> ? CU_TENSOR_MAP_DATA_TYPE_BFLOAT16
-    //                                       : CUtensorMapDataType(-1));
+    constexpr CUtensorMapDataType tma_format =
+        std::is_same_v<T, cute::bfloat16_t> ? CU_TENSOR_MAP_DATA_TYPE_BFLOAT16 :
+        std::is_same_v<T, cute::half_t>     ? CU_TENSOR_MAP_DATA_TYPE_FLOAT16 :
+        (sizeof(T) == 1)                    ? CU_TENSOR_MAP_DATA_TYPE_UINT8 :
+                                              CU_TENSOR_MAP_DATA_TYPE_BFLOAT16;
     constexpr CUtensorMapInterleave tma_interleave =
         CU_TENSOR_MAP_INTERLEAVE_NONE;
     constexpr CUtensorMapL2promotion tma_l2Promotion =

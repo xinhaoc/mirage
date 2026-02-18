@@ -1224,6 +1224,7 @@ TaskGraphResult print_task_graph(
   task_type_to_name[TASK_LINEAR_WITH_RESIDUAL_SM100] =
       "TASK_LINEAR_WITH_RESIDUAL_SM100";
   task_type_to_name[TASK_SPLITK_LINEAR_SM100] = "TASK_SPLITK_LINEAR_SM100";
+  task_type_to_name[TASK_FP8_LINEAR_SM100] = "TASK_FP8_LINEAR_SM100";
   task_type_to_name[TASK_ATTN_SM100] = "TASK_ATTN_SM100";
   task_type_to_name[TASK_ARGMAX_PARTIAL_SM100] = "TASK_ARGMAX_PARTIAL_SM100";
   task_type_to_name[TASK_ARGMAX_REDUCE_SM100] = "TASK_ARGMAX_REDUCE_SM100";

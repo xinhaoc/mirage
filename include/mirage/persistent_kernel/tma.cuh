@@ -35,9 +35,11 @@ __host__ static inline void fill_tma_desc(CUtensorMap *tma_desc,
   constexpr uint32_t tma_dim = 5;
   void *global_addr = src;
 
-  constexpr CUtensorMapDataType tma_format = CU_TENSOR_MAP_DATA_TYPE_BFLOAT16;
-  //  (std::is_same_v<T, type::bfloat16_t> ? CU_TENSOR_MAP_DATA_TYPE_BFLOAT16
-  //                                       : CUtensorMapDataType(-1));
+  constexpr CUtensorMapDataType tma_format =
+      std::is_same_v<T, type::bfloat16_t> ? CU_TENSOR_MAP_DATA_TYPE_BFLOAT16 :
+      std::is_same_v<T, cute::half_t>     ? CU_TENSOR_MAP_DATA_TYPE_FLOAT16 :
+      (sizeof(T) == 1)                    ? CU_TENSOR_MAP_DATA_TYPE_UINT8 :
+                                            CU_TENSOR_MAP_DATA_TYPE_BFLOAT16;
   constexpr CUtensorMapInterleave tma_interleave =
       CU_TENSOR_MAP_INTERLEAVE_NONE;
   constexpr CUtensorMapL2promotion tma_l2Promotion =
@@ -758,6 +760,75 @@ __host__ inline void fill_tma_desc_by_task(CUtensorMap *tma_desc,
       }
       break;
     }
+    case TASK_FP8_LINEAR_SM100: {
+      // FP8 GEMM: A(FP8), B(FP8) via TMA; SFA/SFB via raw pointers (no TMA)
+      int const cp_async_size = 128; // 128 FP8 elements = 128 bytes
+      const size_t smem_repeat_row = 1;
+      constexpr int B = 3;
+      constexpr int M = 3;
+      constexpr int S = 3;
+      constexpr int MMA_M = 128;
+      constexpr int MMA_N = 16;
+      constexpr int TILE_SIZE = 128; // bK for FP8
+
+      if (param_id == 0) {
+        // TMA_B: input [BATCH_SIZE, REDUCTION_SIZE] in FP8
+        int const batch_size = tensor_desc.dim[0];
+        int const reduction_size = tensor_desc.dim[1];
+        uint64_t gmem_shape[2] = {static_cast<uint64_t>(batch_size),
+                                  static_cast<uint64_t>(reduction_size)};
+        uint64_t gmem_stride[2] = {1, static_cast<uint64_t>(reduction_size)};
+        uint32_t smem_shape[2] = {static_cast<uint32_t>(MMA_N),
+                                  static_cast<uint32_t>(cp_async_size)};
+        size_t smem_repeat_col =
+            (TILE_SIZE + cp_async_size - 1) / cp_async_size;
+        fill_tma_desc<uint8_t, B, M, S, 2>(tma_desc,
+                                            tensor_desc.base_ptr,
+                                            gmem_shape,
+                                            gmem_stride,
+                                            smem_shape,
+                                            smem_repeat_row,
+                                            smem_repeat_col);
+      } else if (param_id == 1) {
+        // TMA_A: weight [OUTPUT_SIZE, REDUCTION_SIZE] in FP8
+        int const output_size = tensor_desc.dim[0];
+        int const reduction_size = tensor_desc.dim[1];
+        uint64_t gmem_shape[2] = {static_cast<uint64_t>(output_size),
+                                  static_cast<uint64_t>(reduction_size)};
+        uint64_t gmem_stride[2] = {1, static_cast<uint64_t>(reduction_size)};
+        uint32_t smem_shape[2] = {static_cast<uint32_t>(MMA_M),
+                                  static_cast<uint32_t>(cp_async_size)};
+        size_t smem_repeat_col =
+            (TILE_SIZE + cp_async_size - 1) / cp_async_size;
+        fill_tma_desc<uint8_t, B, M, S, 2>(tma_desc,
+                                            tensor_desc.base_ptr,
+                                            gmem_shape,
+                                            gmem_stride,
+                                            smem_shape,
+                                            smem_repeat_row,
+                                            smem_repeat_col);
+      } else if (param_id == 4) {
+        // TMA_OUT: output [BATCH_SIZE, OUTPUT_SIZE] in BF16
+        int const batch_size = tensor_desc.dim[0];
+        int const output_size = tensor_desc.dim[1];
+        int const output_stride = (tensor_desc.stride[0]);
+        uint64_t gmem_shape[2] = {static_cast<uint64_t>(batch_size),
+                                  static_cast<uint64_t>(output_size)};
+        uint64_t gmem_stride[2] = {1, static_cast<uint64_t>(output_stride)};
+        uint32_t smem_shape[2] = {static_cast<uint32_t>(MMA_N),
+                                  static_cast<uint32_t>(MMA_M)};
+        size_t smem_repeat_col = 1;
+        fill_tma_desc<bfloat16, 0, M, S, 2>(tma_desc,
+                                             tensor_desc.base_ptr,
+                                             gmem_shape,
+                                             gmem_stride,
+                                             smem_shape,
+                                             smem_repeat_row,
+                                             smem_repeat_col);
+      }
+      // param_id 2,3 (SFA/SFB) use raw pointers — no TMA needed
+      break;
+    }
     case TASK_SPLITK_LINEAR_SM100: {
       int const cp_async_size = 64;
       const size_t smem_repeat_row = 1;
@@ -944,6 +1015,18 @@ __host__ inline void create_tma_desc_by_task(FullTaskDesc &task_desc) {
                 : task_desc.outputs[param_id - task_desc.num_inputs];
         create_tma_desc_for_tensor(task_desc, tensor_desc, param_id, 0);
       }
+      break;
+    }
+    case TASK_FP8_LINEAR_SM100: {
+      // TMA for: param 0 (input B), param 1 (weight A), param 4 (output)
+      // Params 2,3 (SFA/SFB) use raw pointers — skip TMA creation
+      for (size_t param_id : {size_t(0), size_t(1)}) {
+        create_tma_desc_for_tensor(
+            task_desc, task_desc.inputs[param_id], param_id, 0);
+      }
+      // Output: param_id = num_inputs (4) in fill_tma_desc_by_task
+      create_tma_desc_for_tensor(
+          task_desc, task_desc.outputs[0], task_desc.num_inputs, 0);
       break;
     }
     case TASK_PAGED_ATTENTION_HOPPER: {

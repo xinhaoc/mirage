@@ -54,6 +54,49 @@ struct PipedSharedStorage {
   }
 };
 
+// FP8 Linear task storage. Same as PipedSharedStorage but with additional
+// scale factor buffers (SFA, SFB) and a barrier for UTCCP synchronization.
+template <class TypeA, // Tensor A data type (FP8)
+          class TypeB, // Tensor B data type (FP8)
+          class TypeC, // Tensor C data type (BF16)
+          class TypeSF, // Scale factor data type (uint8_t for float_ue8m0_t)
+          class ASmemLayout,
+          class BSmemLayout,
+          class CSmemLayout,
+          int SFA_Size, // number of uint8 scale factor elements for A per stage
+          int SFB_Size, // number of uint8 scale factor elements for B per stage
+          int Num_AB_Stage,
+          int Num_ACC_Stage>
+struct FP8PipedSharedStorage {
+  alignas(128) cute::ArrayEngine<TypeA, cute::cosize_v<ASmemLayout>> A;
+  alignas(128) cute::ArrayEngine<TypeB, cute::cosize_v<BSmemLayout>> B;
+  alignas(128) cute::ArrayEngine<TypeC, cute::cosize_v<CSmemLayout>> C;
+
+  // Scale factor buffers in shared memory (one per AB stage)
+  alignas(128) TypeSF SFA[Num_AB_Stage * SFA_Size];
+  alignas(128) TypeSF SFB[Num_AB_Stage * SFB_Size];
+
+  alignas(16) cute::uint64_t ab_full_mbar_ptr[Num_AB_Stage];
+  alignas(16) cute::uint64_t ab_empty_mbar_ptr[Num_AB_Stage];
+  // Separate barrier for scale factor TMA loads (tracked independently)
+  alignas(16) cute::uint64_t sf_full_mbar_ptr[Num_AB_Stage];
+
+  alignas(16) cute::uint64_t acc_full_mbar_ptr[Num_ACC_Stage];
+  alignas(16) cute::uint64_t acc_empty_mbar_ptr[Num_ACC_Stage];
+
+  alignas(16) cute::uint32_t tmem_base_ptr; // Base pointer for TMEM allocation
+
+  CUTE_DEVICE constexpr auto tensor_sA() {
+    return cute::make_tensor(cute::make_smem_ptr(A.begin()), ASmemLayout{});
+  }
+  CUTE_DEVICE constexpr auto tensor_sB() {
+    return cute::make_tensor(cute::make_smem_ptr(B.begin()), BSmemLayout{});
+  }
+  CUTE_DEVICE constexpr auto tensor_sC() {
+    return cute::make_tensor(cute::make_smem_ptr(C.begin()), CSmemLayout{});
+  }
+};
+
 // Gated Topk storage. The shared memory buffers for A, B, and C matrices.
 template <class TypeA,   // Tensor A data type
           class TypeB,   // Tensor B data type

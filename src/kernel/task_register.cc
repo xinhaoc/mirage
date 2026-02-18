@@ -1755,6 +1755,147 @@ int TaskRegister::register_linear_sm100_task(threadblock::Graph const &bgraph,
   }
 }
 
+int TaskRegister::register_fp8_linear_sm100_task(
+    threadblock::Graph const &bgraph,
+    std::vector<int> const &params) {
+  assert(params.size() == 0);
+  int batch_size = 0, output_size = 0, reduction_size = 0, output_stride = 0;
+  std::vector<tb::TBInputOp *> input_ops;
+  std::vector<tb::TBInputOp *> output_ops;
+  int num_inputs = 4; // B (input FP8), A (weight FP8), SFA, SFB
+  int num_outputs = 1;
+
+  assert(bgraph.operators.size() == (size_t)num_inputs + num_outputs);
+  for (auto const &op : bgraph.operators) {
+    assert(op->op_type == mirage::type::TB_INPUT_OP);
+    if (input_ops.size() < (size_t)num_inputs) {
+      input_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    } else {
+      output_ops.push_back(static_cast<tb::TBInputOp *>(op));
+    }
+  }
+  assert(output_ops[0]->output_tensors[0].num_dims == 2);
+  batch_size = output_ops[0]->output_tensors[0].dim[0];
+  output_size = output_ops[0]->output_tensors[0].dim[1];
+  assert(input_ops[0]->dtensor.num_dims == 2);
+  reduction_size = input_ops[0]->dtensor.dim[1];
+  assert(output_ops[0]->dtensor.owner_op->op_type == type::KN_INPUT_OP);
+  kn::KNInputOp *kn_input_op =
+      static_cast<kn::KNInputOp *>(output_ops[0]->dtensor.owner_op);
+  output_stride = static_cast<int>(kn_input_op->input_strides[0]);
+
+  mirage::transpiler::CodeKeeper code;
+  code.inc_indent();
+  // FP8 MMA: K=32 per MMA, bK = 4*32 = 128
+  constexpr int MMA_M = 128;
+  constexpr int MMA_N = 16;
+  constexpr int bK = 128;
+  constexpr int num_ab_stages = 8;
+  constexpr int num_acc_stages = 2;
+  constexpr int num_c_stages = 4;
+  // TMEM: accumulator + 8 SF columns (4 SFA + 4 SFB for UTCCP width)
+  constexpr int num_tmem_columns = MMA_N * num_acc_stages + 8;
+  assert(num_tmem_columns <= 512);
+  // TMA parameters
+  constexpr int B = 3;
+  constexpr int M = 3;
+  constexpr int S = 3;
+  constexpr int TMA_CP_ASYNC_SIZE = 128; // 128 FP8 elements = 128 bytes
+  constexpr int TILE_SIZE = 128;         // bK for FP8
+  int const output_tma_cp_size = 128;
+  int const output_atom_size = 128;
+
+  // TMA_A: weight [OUTPUT_SIZE, REDUCTION_SIZE] in FP8
+  code.e("using TMA_A = kernel::tma::tma_2d<cute::float_e4m3_t, $, $, $, $, $, "
+         "$, $, $, "
+         "$, $, $, $, true>;",
+         B,
+         M,
+         S,
+         output_size,       /*GMEM_ROW_*/
+         reduction_size,    /*GMEM_COL_*/
+         MMA_M,             /*SMEM_ROW_*/
+         TMA_CP_ASYNC_SIZE, /*SMEM_COL_*/
+         reduction_size,    /*GMEM_STRIDE_ROW_*/
+         1,                 /*GMEM_STRIDE_COL_*/
+         1,                 /*SMEM_REPEAT_ROW_*/
+         (TILE_SIZE + TMA_CP_ASYNC_SIZE - 1) /
+             TMA_CP_ASYNC_SIZE,    /*SMEM_REPEAT_COL_*/
+         MMA_M * TMA_CP_ASYNC_SIZE /*SMEM_STRIDE_*/
+  );
+
+  // TMA_B: input [BATCH_SIZE, REDUCTION_SIZE] in FP8
+  code.e("using TMA_B = kernel::tma::tma_2d<cute::float_e4m3_t, $, $, $, $, $, "
+         "$, $, $, "
+         "$, $, $, $, true>;",
+         B,
+         M,
+         S,
+         batch_size,        /*GMEM_ROW_*/
+         reduction_size,    /*GMEM_COL_*/
+         MMA_N,             /*SMEM_ROW_*/
+         TMA_CP_ASYNC_SIZE, /*SMEM_COL_*/
+         reduction_size,    /*GMEM_STRIDE_ROW_*/
+         1,                 /*GMEM_STRIDE_COL_*/
+         1,                 /*SMEM_REPEAT_ROW_*/
+         (TILE_SIZE + TMA_CP_ASYNC_SIZE - 1) /
+             TMA_CP_ASYNC_SIZE,    /*SMEM_REPEAT_COL_*/
+         MMA_N * TMA_CP_ASYNC_SIZE /*SMEM_STRIDE_*/
+  );
+
+  // TMA_OUT: output [BATCH_SIZE, OUTPUT_SIZE] in BF16
+  code.e("using TMA_OUT = kernel::tma::tma_2d<cute::bfloat16_t, $, $, $, $, $, "
+         "$, $, "
+         "$, $, $, $, $, true>;",
+         0,
+         M,
+         S,
+         batch_size,    /*GMEM_ROW_*/
+         output_size,   /*GMEM_COL_*/
+         MMA_N,         /*SMEM_ROW_*/
+         MMA_M,         /*SMEM_COL_*/
+         output_stride, /*GMEM_STRIDE_ROW_*/
+         1,             /*GMEM_STRIDE_COL_*/
+         1,             /*SMEM_REPEAT_ROW_*/
+         (output_atom_size + output_tma_cp_size - 1) /
+             output_tma_cp_size, /*SMEM_REPEAT_COL_*/
+         MMA_N * MMA_M           /*SMEM_STRIDE_*/
+  );
+  code.inc_indent();
+  code.e("TMA_A "
+         "tma_a(static_cast<CUtensorMap*>(task_desc->input_tma_desc_ptrs[1][0])"
+         ");");
+  code.e("TMA_B "
+         "tma_b(static_cast<CUtensorMap*>(task_desc->input_tma_desc_ptrs[0][0])"
+         ");");
+  code.e("TMA_OUT "
+         "tma_out(static_cast<CUtensorMap*>(task_desc->output_tma_desc_ptrs[0]["
+         "0]));");
+  // Scale factor pointers (raw global memory)
+  code.e("const uint8_t* sfa_ptr = "
+         "static_cast<const uint8_t*>(task_desc->input_ptrs[2]);");
+  code.e("const uint8_t* sfb_ptr = "
+         "static_cast<const uint8_t*>(task_desc->input_ptrs[3]);");
+  code.e("kernel::fp8_linear_sm100_mpk_task_impl<cute::float_e4m3_t, TMA_A, "
+         "TMA_B, TMA_OUT, "
+         "$, $, $, $, $, $, $, $>(",
+         MMA_M,
+         MMA_N,
+         batch_size,
+         output_size,
+         reduction_size,
+         num_ab_stages,
+         num_acc_stages,
+         num_c_stages);
+  code.e("    tma_a,");
+  code.e("    tma_b,");
+  code.e("    tma_out,");
+  code.e("    sfa_ptr,");
+  code.e("    sfb_ptr);");
+
+  return register_task_variant(TASK_FP8_LINEAR_SM100, code.to_string());
+}
+
 int TaskRegister::register_splitk_linear_sm100_task(
     threadblock::Graph const &bgraph,
     std::vector<int> const &params,

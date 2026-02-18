@@ -95,6 +95,8 @@ public:
   int register_linear_sm100_task(threadblock::Graph const &bgraph,
                                  std::vector<int> const &params,
                                  bool with_residual);
+  int register_fp8_linear_sm100_task(threadblock::Graph const &bgraph,
+                                     std::vector<int> const &params);
   int register_paged_attention_sm100_task(threadblock::Graph const &bgraph,
                                           std::vector<int> const &params);
   int register_argmax_partial_sm100_task(threadblock::Graph const &bgraph,
