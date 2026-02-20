@@ -442,6 +442,16 @@ __device__ __noinline__ void
               sfa_desc |= (uint64_t)(8) << 32;  // stride_byte_offset=8 [32:46)
               sfa_desc |= (uint64_t)(1) << 46;  // version=1 [46:48)
 
+              // Debug: print descriptor info on first iteration
+              if (k_tile == 0 && m_tile == 0 && n_tile == 0) {
+                printf("[UTCCP] sfa_smem=0x%x sfb_smem=0x%x sfa_desc=0x%llx "
+                       "tmem_sfa=%u tmem_sfb=%u sfa_val=%u sfb_val=%u\n",
+                       sfa_smem_addr,
+                       (uint32_t)__cvta_generic_to_shared(sf_smem_sfb),
+                       (unsigned long long)sfa_desc,
+                       tmem_sfa_addr, tmem_sfb_addr, sfa_val, sfb_val);
+              }
+
               asm volatile(
                   "tcgen05.cp.cta_group::1.32x128b.warpx4 [%0], %1;"
                   :: "r"(tmem_sfa_addr), "l"(sfa_desc));
@@ -457,6 +467,27 @@ __device__ __noinline__ void
               asm volatile(
                   "tcgen05.cp.cta_group::1.32x128b.warpx4 [%0], %1;"
                   :: "r"(tmem_sfb_addr), "l"(sfb_desc));
+            }
+
+            // Sync warp after UTCCP before TMEM readback
+            __syncwarp();
+
+            // Debug: read back from TMEM to verify UTCCP wrote correctly
+            if (k_tile == 0 && m_tile == 0 && n_tile == 0) {
+              uint32_t rb_sfa;
+              asm volatile(
+                  "tcgen05.ld.sync.aligned.32x32b.x1.b32 {%0}, [%1];"
+                  : "=r"(rb_sfa) : "r"(tmem_sfa_addr));
+              uint32_t rb_sfb;
+              asm volatile(
+                  "tcgen05.ld.sync.aligned.32x32b.x1.b32 {%0}, [%1];"
+                  : "=r"(rb_sfb) : "r"(tmem_sfb_addr));
+              if (lane_id == 0 || lane_id == 1) {
+                printf("[TMEM readback] lane=%u sfa=0x%08x (byte0=%u) "
+                       "sfb=0x%08x (byte0=%u)\n",
+                       lane_id, rb_sfa, rb_sfa & 0xFF,
+                       rb_sfb, rb_sfb & 0xFF);
+              }
             }
           }
 
